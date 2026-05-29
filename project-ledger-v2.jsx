@@ -489,7 +489,6 @@ const buildClientInvoiceHTML = (proj, payments, invoiceRef, invoiceDate, descrip
   </div>
 </div>`;
 };
-};
 
 const genSerial = () => {
   const yr=new Date().getFullYear();
