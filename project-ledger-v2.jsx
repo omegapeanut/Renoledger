@@ -3097,7 +3097,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
               <label style={{fontSize:12,fontWeight:500,color:T.muted,display:'block',marginBottom:6}}>
                 File No. <span style={{fontSize:10,color:T.dim}}>(auto-assigned, editable)</span>
               </label>
-              <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
                 <div style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:10,
                   padding:'11px 14px',fontFamily:'monospace',fontSize:15,fontWeight:700,
                   color:form.projectNumber?T.accent:T.dim,minWidth:80,textAlign:'center',flexShrink:0}}>
@@ -3105,14 +3105,18 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                     ? `${String(form.projectYear||new Date().getFullYear()).slice(-2)}-${String(form.projectNumber).padStart(2,'0')}`
                     : '—'}
                 </div>
-                <input type="number" min="1" max="999"
-                  value={form.projectNumber||''}
-                  onChange={e=>ff('projectNumber')(parseInt(e.target.value)||null)}
-                  placeholder="Auto"
-                  style={{...iStyle,width:90,flexShrink:0}}/>
-                <span style={{fontSize:11,color:T.dim,lineHeight:1.4}}>
-                  Resets each year
-                </span>
+                <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                  <input type="number" min="2020" max="2099"
+                    value={form.projectYear||new Date().getFullYear()}
+                    onChange={e=>ff('projectYear')(parseInt(e.target.value)||new Date().getFullYear())}
+                    style={{...iStyle,width:80,flexShrink:0}}/>
+                  <span style={{fontSize:13,color:T.dim,fontWeight:600}}>-</span>
+                  <input type="number" min="1" max="999"
+                    value={form.projectNumber||''}
+                    onChange={e=>ff('projectNumber')(parseInt(e.target.value)||null)}
+                    placeholder="No."
+                    style={{...iStyle,width:70,flexShrink:0}}/>
+                </div>
               </div>
             </div>
             <Field label="Quotation / Ref No." value={form.refNo||''} onChange={ff('refNo')} placeholder="e.g. Q2604-NS-01"/>
