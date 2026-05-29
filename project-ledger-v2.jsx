@@ -2727,7 +2727,9 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                 {/* Edit / delete icons only */}
                 <div style={{display:'flex',gap:4,alignItems:'center',flexShrink:0,marginLeft:8}}>
                   {!p.archived&&(
-                    <button onClick={()=>{setForm({...p,contractAmount:String(p.contractAmount),variationOrders:String(p.variationOrders??0),designerRate:String(p.designerRate??0),pmRate:String(p.pmRate??0)});setModal('edit');}}
+                    <button onClick={()=>{
+                      const inferredYear=p.projectYear||(p.startDate?new Date(p.startDate).getFullYear():p.createdAt?new Date(p.createdAt).getFullYear():new Date().getFullYear());
+                      setForm({...p,contractAmount:String(p.contractAmount),variationOrders:String(p.variationOrders??0),designerRate:String(p.designerRate??0),pmRate:String(p.pmRate??0),projectYear:inferredYear});setModal('edit');}}
                       style={{background:'none',border:'none',cursor:'pointer',color:T.dim,display:'flex',padding:4,borderRadius:6}}>
                       <Edit3 size={13}/>
                     </button>
