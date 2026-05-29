@@ -29,7 +29,7 @@ const _sa = {
   role:'superadmin',
   tabs:['dashboard','projects','invoices','payments','contacts','reports',
         'commissions','warranty','workers','checkin','accounts','trash','admin','system'],
-  widgets:['stats','budget','catbreak','recent'],
+  widgets:['stats','budget','catbreak','cashflow','aging','margin','gantt','collection','suppliers','attendance','recent'],
   active:true,
   assignedProjects:[],
 };
@@ -85,10 +85,17 @@ const ROLE_DEFAULT_TABS = {
 };
 
 const DASH_WIDGETS = [
-  {id:'stats',   label:'Summary Stats (Revenue/Expenses/Profit)'},
-  {id:'budget',  label:'Budget Utilization by Project'},
-  {id:'catbreak',label:'Expense Category Breakdown'},
-  {id:'recent',  label:'Recent Invoices Table'},
+  {id:'stats',      label:'Summary Stats (Revenue/Expenses/Profit)'},
+  {id:'budget',     label:'Revenue Overview Chart'},
+  {id:'catbreak',   label:'Project Status & Category Breakdown'},
+  {id:'cashflow',   label:'Monthly Net Cash Flow'},
+  {id:'aging',      label:'Invoice Aging Buckets'},
+  {id:'margin',     label:'Profit Margin by Project'},
+  {id:'gantt',      label:'Project Timeline (Gantt)'},
+  {id:'collection', label:'Collection Rate by Project'},
+  {id:'suppliers',  label:'Top Suppliers by Spend'},
+  {id:'attendance', label:'Worker Attendance Heatmap'},
+  {id:'recent',     label:'Recent Invoices Table'},
 ];
 
 const SEED_USERS = [
@@ -152,8 +159,13 @@ const loadS = async (key, def) => {
 };
 
 const saveS = async (key, val) => {
+  const payload = JSON.stringify(val);
+  // Firestore has a 1MB document limit. Warn if we're approaching it.
+  if(payload.length > 900000){
+    console.warn(`saveS: payload for "${key}" is ${Math.round(payload.length/1024)}KB — approaching Firestore 1MB limit`);
+  }
   const url = `${FS_BASE}/${encodeURIComponent(key)}?updateMask.fieldPaths=value&key=${FIREBASE.apiKey}`;
-  const body = JSON.stringify({fields: {value: {stringValue: JSON.stringify(val)}}});
+  const body = JSON.stringify({fields: {value: {stringValue: payload}}});
   const opts = {
     method: 'PATCH',
     headers: {'Content-Type': 'application/json'},
@@ -169,7 +181,7 @@ const saveS = async (key, val) => {
         console.warn('Firebase save failed:', key, res.status, err?.error?.message||'');
         if(attempt === 3) return false;
       } else {
-        return true; // saved successfully
+        return true;
       }
     }catch(e){
       if(attempt === 3){ console.error('saveS failed after 3 attempts:', key, e.message); return false; }
@@ -360,26 +372,83 @@ const tracked = async (label, fn) => {
   return ok;
 };
 
-// Save projects — strips PDF/image files >100KB before sending to Firebase
-// All financial data (name, client, amounts, scope) always syncs
+// Save projects — always strips quotation/VO files from the main record.
+// Files are stored in separate Firestore keys (proj_file_{id}) to avoid the 1MB document limit.
+// All financial data (name, client, amounts, scope items) always syncs regardless of file size.
 const saveProjects = (arr) => tracked('projects', async () => {
   const clean = arr.map(proj => {
     let p = {...proj};
-    if(p.quotationFile && p.quotationFile.length > MAX_IMAGE_B64)
-      p = {...p, quotationFile: null, _quotationStripped: true};
-    if(p.voList)
-      p.voList = p.voList.map(vo =>
-        vo.file && vo.file.length > MAX_IMAGE_B64 ? {...vo, file: null, _fileStripped: true} : vo
-      );
+    // Always strip files from main record — they're saved separately below
+    if(p.quotationFile) p = {...p, quotationFile: null, quotationFilename: p.quotationFilename, _hasQuotationFile: true};
+    if(p.voList) p.voList = p.voList.map(vo => vo.file ? {...vo, file: null, _hasFile: true} : vo);
     return p;
   });
-  return await saveS('projects', clean);
+
+  // Check main payload won't exceed Firestore limit
+  const mainPayload = JSON.stringify(clean);
+  if(mainPayload.length > 900000){
+    console.error('saveProjects: even stripped payload too large:', Math.round(mainPayload.length/1024)+'KB');
+    return false;
+  }
+
+  // Save main projects record (no files)
+  const ok = await saveS('projects', clean);
+  if(!ok) return false;
+
+  // Save each project's files separately — non-blocking, best-effort
+  arr.forEach(proj => {
+    const fileData = {};
+    if(proj.quotationFile) fileData.quotationFile = proj.quotationFile;
+    if(proj.quotationFilename) fileData.quotationFilename = proj.quotationFilename;
+    if(proj.voList){
+      proj.voList.forEach(vo => {
+        if(vo.file) fileData[`vo_${vo.id}`] = vo.file;
+      });
+    }
+    if(Object.keys(fileData).length > 0){
+      const filePayload = JSON.stringify(fileData);
+      if(filePayload.length < 900000){
+        saveS(`proj_file_${proj.id}`, fileData).then(ok=>{
+          if(!ok) console.warn('saveProjects: file save failed for', proj.id, '—', Math.round(filePayload.length/1024)+'KB');
+        });
+      } else {
+        console.warn('saveProjects: file for project', proj.id, 'too large even compressed (', Math.round(filePayload.length/1024)+'KB). Skipping file sync.');
+      }
+    }
+  });
+
+  return true;
 });
 
 const saveInvoices = (arr) => tracked('invoices', async () => {
-  const clean = arr.map(stripLargeImages);
-  return await saveS('invoices', clean);
+  // Strip ALL proof images from main document — aggregate size would bust Firestore 1MB limit.
+  // Each invoice's images are saved separately as inv_file_{id}, mirroring proj_file_{id}.
+  const clean = arr.map(inv => {
+    let i = {...inv, proofImage: null};
+    if(i.paymentRecords)
+      i.paymentRecords = i.paymentRecords.map(r => r.proofImage ? {...r, proofImage: null} : r);
+    return i;
+  });
+  const ok = await saveS('invoices', clean);
+  if(!ok) return false;
+  // Save each invoice's images in a dedicated document — non-blocking, best-effort
+  arr.forEach(inv => {
+    const fd = {};
+    if(inv.proofImage) fd.proofImage = inv.proofImage;
+    (inv.paymentRecords||[]).forEach(r => { if(r.proofImage) fd[`pay_${r.id}`] = r.proofImage; });
+    if(!Object.keys(fd).length) return;
+    const payload = JSON.stringify(fd);
+    if(payload.length < 900000)
+      saveS(`inv_file_${inv.id}`, fd).then(ok2 => {
+        if(!ok2) console.warn('saveInvoices: file save failed for', inv.id, Math.round(payload.length/1024)+'KB');
+      });
+    else
+      console.warn('saveInvoices: images for', inv.id, 'too large (', Math.round(payload.length/1024)+'KB). Skipping.');
+  });
+  return true;
 });
+
+const saveNotices = (arr) => tracked('notices', () => saveS('notices', arr));
 
 const saveUsers = (arr) => tracked('users', async () => {
   const clean = arr.map(u =>
@@ -497,7 +566,357 @@ const genSerial = () => {
   return `WC-${yr}-${rand}`;
 };
 
-const printDoc = (html, title='Document') => {
+const buildCoverPageHTML = (proj, projInvoices, projPayments, co, printedBy) => {
+  var fmtD = function(d){ return d ? new Date(d).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}) : '\u2014'; };
+  var yr = proj.projectYear || new Date().getFullYear();
+  var num = proj.projectNumber ? String(proj.projectNumber).padStart(2,'0') : null;
+  var scopeEntries = Object.keys((proj.scopeItems||[]).reduce(function(g,s){ g[s.category]=1; return g; },{}));
+  var printDate = fmtD(new Date());
+
+  var html = '';
+  html += '<div style="width:100%;min-height:100vh;display:flex;flex-direction:column;padding:52px 56px 44px;box-sizing:border-box;background:#fff;">';
+
+  // ── GIANT FILE NUMBER ──
+  html += '<div style="flex:0 0 auto;">';
+  if(num){
+    html += '<div style="font-size:160px;font-weight:900;color:#1A1A1A;line-height:0.85;letter-spacing:-6px;font-family:\'DM Sans\',Arial,sans-serif;margin-bottom:0;">'+num+'</div>';
+  } else {
+    html += '<div style="font-size:120px;font-weight:900;color:#EEEBE6;line-height:0.85;letter-spacing:-4px;font-family:\'DM Sans\',Arial,sans-serif;">NO#</div>';
+    html += '<div style="font-size:11px;color:#C4A882;margin-top:4px;">Assign a file number in project settings</div>';
+  }
+  html += '</div>';
+
+  // ── FIRST DIVIDER ──
+  html += '<div style="border-top:3px solid #1A1A1A;margin:28px 0 24px;flex:0 0 auto;"></div>';
+
+  // ── PROJECT NAME + CLIENT ──
+  html += '<div style="flex:0 0 auto;margin-bottom:18px;">';
+  html += '<div style="font-size:36px;font-weight:900;color:#1A1A1A;line-height:1.1;letter-spacing:-1px;font-family:\'DM Sans\',Arial,sans-serif;text-transform:uppercase;word-break:break-word;">'+proj.name+'</div>';
+  html += '<div style="font-size:24px;font-weight:400;color:#1A1A1A;line-height:1.3;letter-spacing:-0.3px;font-family:\'DM Sans\',Arial,sans-serif;margin-top:6px;">'+(proj.client||'')+'</div>';
+  html += '</div>';
+
+  // ── SECOND DIVIDER ──
+  html += '<div style="border-top:1.5px solid #1A1A1A;margin:0 0 24px;flex:0 0 auto;"></div>';
+
+  // ── SITE ADDRESS ──
+  html += '<div style="flex:0 0 auto;margin-bottom:28px;">';
+  html += '<div style="font-size:10px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.18em;margin-bottom:7px;">Site Address</div>';
+  html += '<div style="font-size:22px;font-weight:500;color:#1A1A1A;line-height:1.4;font-family:\'DM Sans\',Arial,sans-serif;word-break:break-word;">'+(proj.clientAddress||'\u2014')+'</div>';
+  html += '</div>';
+
+  // ── DETAILS GRID ──
+  html += '<div style="flex:0 0 auto;display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-bottom:24px;">';
+  var yr2d = String(yr).slice(-2);
+  var fileLabel = num ? (yr2d+'-'+num) : '\u2014';
+  var details = [
+    {l:'File Number', v:fileLabel},
+    {l:'Year',        v:String(yr)},
+    {l:'Project Type',v:proj.projectType||'\u2014'},
+    {l:'Start Date',  v:fmtD(proj.startDate)},
+    {l:'End Date',    v:fmtD(proj.endDate)},
+    {l:'Status',      v:proj.status},
+  ];
+  if(proj.refNo) details.push({l:'Quotation Ref', v:proj.refNo});
+  if(proj.clientPhone) details.push({l:'Client Phone', v:proj.clientPhone});
+  details.forEach(function(d){
+    html += '<div>';
+    html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:4px;">'+d.l+'</div>';
+    html += '<div style="font-size:13px;font-weight:600;color:#1A1A1A;word-break:break-word;">'+d.v+'</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  // ── SCOPE TAGS ──
+  if(scopeEntries.length>0){
+    html += '<div style="flex:0 0 auto;margin-bottom:24px;">';
+    html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Scope of Works</div>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:7px;">';
+    scopeEntries.forEach(function(cat){
+      html += '<span style="border:2px solid #1A1A1A;border-radius:3px;padding:4px 14px;font-size:11px;font-weight:800;color:#1A1A1A;text-transform:uppercase;letter-spacing:0.07em;font-family:\'DM Sans\',Arial,sans-serif;">'+cat+'</span>';
+    });
+    html += '</div></div>';
+  }
+
+  // ── SPACER ──
+  html += '<div style="flex:1;"></div>';
+
+  // ── BOTTOM DIVIDER ──
+  html += '<div style="border-top:1.5px solid #E8E4DC;margin-bottom:18px;flex:0 0 auto;"></div>';
+
+  // ── COMPANY FOOTER ──
+  html += '<div style="flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-end;">';
+  html += '<div>';
+  html += '<div style="font-size:15px;font-weight:700;color:#1A1A1A;font-family:\'DM Serif Display\',Georgia,serif;letter-spacing:-0.2px;">'+co.name+'</div>';
+  html += '<div style="font-size:10px;color:#B8B2A8;margin-top:3px;">UEN: '+(co.uen||'\u2014')+(co.phone?' \xb7 '+co.phone:'')+'</div>';
+  if(co.address) html += '<div style="font-size:10px;color:#B8B2A8;margin-top:1px;">'+co.address+'</div>';
+  html += '</div>';
+  html += '<div style="text-align:right;">';
+  html += '<div style="font-size:10px;color:#B8B2A8;">Printed '+printDate+(printedBy?' \xb7 '+printedBy:'')+'</div>';
+  if(num) html += '<div style="font-size:10px;color:#B8B2A8;margin-top:2px;">File '+yr2d+'-'+num+'</div>';
+  html += '</div>';
+  html += '</div>';
+
+  html += '</div>';
+  return html;
+};
+
+const buildHandoverHTML = (proj, projInvoices, finalPayment, handoverData, co, printedBy) => {
+  var fmtD = function(d){ return d ? new Date(d).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}) : '\u2014'; };
+  var fmtM = function(n){ return 'S$'+Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:2}); };
+  var yr = proj.projectYear || new Date().getFullYear();
+  var num = proj.projectNumber ? String(proj.projectNumber).padStart(2,'0') : null;
+  var fileCode = num ? (String(yr).slice(-2)+'-'+num) : null;
+  var handoverDate = handoverData.handoverDate || new Date().toISOString().slice(0,10);
+  var warrantyExpiry = new Date(handoverDate); warrantyExpiry.setFullYear(warrantyExpiry.getFullYear()+1);
+  var scopeItems = proj.scopeItems || [];
+  var scopeGroups = {};
+  scopeItems.forEach(function(s){ if(!scopeGroups[s.category]) scopeGroups[s.category]=[]; scopeGroups[s.category].push(s.description||s.category); });
+  var totalExpenses = projInvoices.reduce(function(s,i){return s+i.total;},0);
+  var contractVal = (proj.contractAmount||0)+(proj.variationOrders||0);
+
+  var html = '';
+
+  // ═══════════════════════════════════════════════════════════
+  // PAGE 1 — HANDOVER CERTIFICATE (client copy)
+  // ═══════════════════════════════════════════════════════════
+  html += '<div style="width:100%;min-height:100vh;display:flex;flex-direction:column;padding:44px 52px 40px;box-sizing:border-box;background:#fff;page-break-after:always;">';
+
+  // Header
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0;flex:0 0 auto;">';
+  html += '<div>';
+  html += '<div style="font-size:10px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.18em;margin-bottom:5px;">Certificate of Handover</div>';
+  html += '<div style="font-family:\'DM Serif Display\',Georgia,serif;font-size:16px;color:#1A1A1A;">'+co.name+'</div>';
+  html += '<div style="font-size:10px;color:#B8B2A8;margin-top:2px;">UEN: '+(co.uen||'\u2014')+(co.phone?' \xb7 '+co.phone:'')+'</div>';
+  html += '</div>';
+  html += '<div style="text-align:right;">';
+  if(fileCode) html += '<div style="font-size:64px;font-weight:900;color:#1A1A1A;line-height:0.9;letter-spacing:-2px;font-family:\'DM Sans\',Arial,sans-serif;">'+fileCode+'</div>';
+  html += '<div style="font-size:10px;color:#B8B2A8;margin-top:4px;">Handover Date: <strong style="color:#1A1A1A;">'+fmtD(handoverDate)+'</strong></div>';
+  html += '</div></div>';
+
+  html += '<div style="border-top:2.5px solid #1A1A1A;margin:16px 0 18px;flex:0 0 auto;"></div>';
+
+  // Project + client
+  html += '<div style="flex:0 0 auto;display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px;">';
+  html += '<div>';
+  html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:5px;">Project</div>';
+  html += '<div style="font-size:16px;font-weight:800;color:#1A1A1A;text-transform:uppercase;letter-spacing:-0.3px;">'+proj.name+'</div>';
+  if(proj.refNo) html += '<div style="font-size:10px;color:#B8B2A8;font-family:monospace;margin-top:2px;">Ref: '+proj.refNo+'</div>';
+  html += '</div>';
+  html += '<div>';
+  html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:5px;">Client</div>';
+  html += '<div style="font-size:16px;font-weight:700;color:#1A1A1A;">'+(proj.client||'\u2014')+'</div>';
+  if(proj.clientPhone) html += '<div style="font-size:11px;color:#7A7468;margin-top:2px;">'+(proj.clientPhone)+'</div>';
+  html += '</div></div>';
+
+  // Site address
+  html += '<div style="flex:0 0 auto;background:#F8F6F2;border-left:4px solid #1A1A1A;padding:10px 14px;margin-bottom:18px;border-radius:0 6px 6px 0;">';
+  html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:3px;">Site Address</div>';
+  html += '<div style="font-size:15px;font-weight:600;color:#1A1A1A;">'+(proj.clientAddress||'\u2014')+'</div>';
+  html += '</div>';
+
+  // Works completed
+  html += '<div style="flex:0 0 auto;margin-bottom:16px;">';
+  html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Works Completed (\u2713 confirmed at handover)</div>';
+  if(Object.keys(scopeGroups).length>0){
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">';
+    Object.keys(scopeGroups).forEach(function(cat){
+      html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 10px;border:1px solid #E8E4DC;border-radius:6px;background:#FDFCFA;">';
+      html += '<div style="width:14px;height:14px;border:2px solid #C4A882;border-radius:3px;flex-shrink:0;margin-top:1px;background:#fff;"></div>';
+      html += '<div><div style="font-size:11px;font-weight:700;color:#1A1A1A;">'+cat+'</div>';
+      var descs = scopeGroups[cat].filter(function(d){return d&&d!==cat;});
+      if(descs.length>0) html += '<div style="font-size:9px;color:#7A7468;margin-top:1px;line-height:1.4;">'+descs.slice(0,2).join(', ')+'</div>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+  } else {
+    // Generic checklist if no scope items
+    var generic = ['All agreed renovation works','Cleaning of premises','Removal of renovation debris','Touch-up painting works'];
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">';
+    generic.forEach(function(item){
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid #E8E4DC;border-radius:6px;">';
+      html += '<div style="width:14px;height:14px;border:2px solid #C4A882;border-radius:3px;flex-shrink:0;background:#fff;"></div>';
+      html += '<div style="font-size:11px;font-weight:600;color:#1A1A1A;">'+item+'</div></div>';
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // Keys + meters in one row
+  html += '<div style="flex:0 0 auto;display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">';
+
+  // Keys handover
+  html += '<div>';
+  html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Keys / Access Handed Over</div>';
+  html += '<table style="width:100%;border-collapse:collapse;">';
+  html += '<thead><tr style="background:#F8F6F2;"><th style="padding:5px 8px;font-size:9px;color:#B8B2A8;text-align:left;font-weight:700;text-transform:uppercase;">Item</th><th style="padding:5px 8px;font-size:9px;color:#B8B2A8;text-align:center;font-weight:700;text-transform:uppercase;">Qty</th><th style="padding:5px 8px;font-size:9px;color:#B8B2A8;text-align:center;font-weight:700;text-transform:uppercase;">\u2713</th></tr></thead>';
+  html += '<tbody>';
+  ['Main Door Key','Gate / Grille Key','Mailbox Key','Car Park Access','Others'].forEach(function(item){
+    html += '<tr style="border-top:1px solid #EDE9E1;"><td style="padding:5px 8px;font-size:10px;color:#1A1A1A;">'+item+'</td>';
+    html += '<td style="padding:5px 8px;"><div style="border-bottom:1px solid #1A1A1A;height:16px;width:32px;margin:0 auto;"></div></td>';
+    html += '<td style="padding:5px 8px;text-align:center;"><div style="width:13px;height:13px;border:2px solid #C4A882;border-radius:2px;display:inline-block;"></div></td></tr>';
+  });
+  html += '</tbody></table></div>';
+
+  // Meter readings
+  html += '<div>';
+  html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Meter Readings at Handover</div>';
+  html += '<table style="width:100%;border-collapse:collapse;">';
+  html += '<thead><tr style="background:#F8F6F2;"><th style="padding:5px 8px;font-size:9px;color:#B8B2A8;text-align:left;font-weight:700;text-transform:uppercase;">Meter</th><th style="padding:5px 8px;font-size:9px;color:#B8B2A8;text-align:left;font-weight:700;text-transform:uppercase;">Reading</th></tr></thead>';
+  html += '<tbody>';
+  ['Electricity (kWh)','Water (m\xb3)','Gas (m\xb3)'].forEach(function(item){
+    html += '<tr style="border-top:1px solid #EDE9E1;"><td style="padding:5px 8px;font-size:10px;color:#1A1A1A;">'+item+'</td>';
+    html += '<td style="padding:5px 8px;"><div style="border-bottom:1px solid #1A1A1A;height:16px;width:80px;"></div></td></tr>';
+  });
+  html += '</tbody></table></div>';
+  html += '</div>';
+
+  // Defects noted
+  html += '<div style="flex:0 0 auto;margin-bottom:14px;">';
+  html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:6px;">Defects / Remarks Noted at Handover</div>';
+  if(handoverData.defects){
+    html += '<div style="border:1px solid #E8E4DC;border-radius:6px;padding:8px 12px;font-size:11px;color:#1A1A1A;min-height:36px;background:#FDFCFA;">'+handoverData.defects+'</div>';
+  } else {
+    html += '<div style="border:1px solid #E8E4DC;border-radius:6px;padding:6px 12px;font-size:11px;color:#B8B2A8;min-height:36px;background:#FDFCFA;display:flex;align-items:center;">Nil / State defects here:</div>';
+    html += '<div style="border-bottom:1px solid #D0CDC8;margin:8px 0;height:0;"></div>';
+    html += '<div style="border-bottom:1px solid #D0CDC8;margin:8px 0;height:0;"></div>';
+  }
+  html += '</div>';
+
+  // Outstanding works
+  if(handoverData.outstanding){
+    html += '<div style="flex:0 0 auto;margin-bottom:14px;background:#FEF9F0;border:1px solid #F5D9A0;border-radius:6px;padding:10px 14px;">';
+    html += '<div style="font-size:9px;font-weight:700;color:#9A6A00;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:5px;">\u26a0 Outstanding Works (to be completed by agreed date)</div>';
+    html += '<div style="font-size:11px;color:#1A1A1A;">'+handoverData.outstanding+'</div>';
+    html += '</div>';
+  }
+
+  // Warranty
+  html += '<div style="flex:0 0 auto;background:#F0F7F3;border:1px solid #A8D5B8;border-radius:6px;padding:10px 14px;margin-bottom:14px;">';
+  html += '<div style="font-size:9px;font-weight:700;color:#2D7A4F;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:4px;">Warranty Period</div>';
+  html += '<div style="font-size:12px;color:#1A1A1A;">Workmanship warranty commences on <strong>'+fmtD(handoverDate)+'</strong> and expires on <strong>'+fmtD(warrantyExpiry)+'</strong> (12 months).</div>';
+  html += '<div style="font-size:10px;color:#7A7468;margin-top:3px;">Subject to warranty terms. Excludes normal wear and tear, misuse, and third-party modifications.</div>';
+  html += '</div>';
+
+  // Final payment
+  if(finalPayment && finalPayment.amount){
+    html += '<div style="flex:0 0 auto;background:#F8F6F2;border:1.5px solid #1A1A1A;border-radius:6px;padding:10px 14px;margin-bottom:14px;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+    html += '<div>';
+    html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:3px;">Final Payment Received</div>';
+    html += '<div style="font-size:20px;font-weight:900;color:#1A1A1A;font-family:\'DM Sans\',Arial,sans-serif;">'+fmtM(finalPayment.amount)+'</div>';
+    html += '</div>';
+    html += '<div style="text-align:right;">';
+    if(finalPayment.method) html += '<div style="font-size:11px;color:#7A7468;">'+finalPayment.method+'</div>';
+    if(finalPayment.receiptNo) html += '<div style="font-size:10px;color:#B8B2A8;font-family:monospace;">Rcpt: '+finalPayment.receiptNo+'</div>';
+    html += '</div></div></div>';
+  }
+
+  // Spacer
+  html += '<div style="flex:1;min-height:12px;"></div>';
+
+  // Declaration
+  html += '<div style="flex:0 0 auto;border-top:1px solid #E8E4DC;padding-top:12px;margin-bottom:16px;">';
+  html += '<div style="font-size:9px;color:#7A7468;line-height:1.6;text-align:center;">';
+  html += 'By signing below, the client acknowledges that all renovation works have been completed to satisfaction, keys have been received, and accepts the premises in the condition described above. ';
+  html += 'This document serves as the official handover record between <strong style="color:#1A1A1A;">'+co.name+'</strong> and the client.';
+  html += '</div></div>';
+
+  // Signature blocks
+  html += '<div style="flex:0 0 auto;display:grid;grid-template-columns:1fr 1fr;gap:28px;">';
+  ['Client', 'Contractor / '+co.name].forEach(function(party){
+    html += '<div>';
+    html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:20px;">Signed by — '+party+'</div>';
+    html += '<div style="border-bottom:1.5px solid #1A1A1A;height:36px;margin-bottom:5px;"></div>';
+    html += '<div style="font-size:9px;color:#B8B2A8;">Signature &amp; Date</div>';
+    if(party.startsWith('Client')){
+      html += '<div style="margin-top:10px;border-bottom:1.5px solid #1A1A1A;height:24px;margin-bottom:5px;"></div>';
+      html += '<div style="font-size:9px;color:#B8B2A8;">Full Name &amp; NRIC / FIN</div>';
+    } else {
+      html += '<div style="margin-top:10px;font-size:10px;color:#1A1A1A;font-weight:600;">'+printedBy+'</div>';
+      html += '<div style="font-size:9px;color:#B8B2A8;">Authorised Representative</div>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  html += '</div>'; // end page 1
+
+  // ═══════════════════════════════════════════════════════════
+  // PAGE 2 — DEFECTS LIABILITY RECORD (company copy)
+  // ═══════════════════════════════════════════════════════════
+  html += '<div style="width:100%;min-height:100vh;display:flex;flex-direction:column;padding:44px 52px 40px;box-sizing:border-box;background:#fff;">';
+
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex:0 0 auto;margin-bottom:0;">';
+  html += '<div>';
+  html += '<div style="font-size:10px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.18em;margin-bottom:4px;">Defects Liability Record — Company Copy</div>';
+  html += '<div style="font-family:\'DM Serif Display\',Georgia,serif;font-size:15px;color:#1A1A1A;">'+co.name+'</div>';
+  html += '</div>';
+  if(fileCode) html += '<div style="font-size:48px;font-weight:900;color:#1A1A1A;line-height:0.9;letter-spacing:-2px;font-family:\'DM Sans\',Arial,sans-serif;">'+fileCode+'</div>';
+  html += '</div>';
+
+  html += '<div style="border-top:2.5px solid #1A1A1A;margin:14px 0 16px;flex:0 0 auto;"></div>';
+
+  // Project info strip
+  html += '<div style="flex:0 0 auto;display:grid;grid-template-columns:2fr 1fr 1fr;gap:14px;margin-bottom:16px;padding:10px 14px;background:#F8F6F2;border-radius:6px;">';
+  html += '<div><div style="font-size:9px;color:#B8B2A8;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:3px;">Project / Client</div>';
+  html += '<div style="font-size:13px;font-weight:700;color:#1A1A1A;">'+proj.name+'</div>';
+  html += '<div style="font-size:11px;color:#7A7468;">'+proj.client+(proj.clientAddress?' \xb7 '+proj.clientAddress:'')+'</div></div>';
+  html += '<div><div style="font-size:9px;color:#B8B2A8;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:3px;">Handover Date</div>';
+  html += '<div style="font-size:12px;font-weight:600;color:#1A1A1A;">'+fmtD(handoverDate)+'</div></div>';
+  html += '<div><div style="font-size:9px;color:#B8B2A8;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:3px;">Warranty Expires</div>';
+  html += '<div style="font-size:12px;font-weight:600;color:#C0392B;">'+fmtD(warrantyExpiry)+'</div></div>';
+  html += '</div>';
+
+  // Defects log table
+  html += '<div style="flex:0 0 auto;margin-bottom:16px;">';
+  html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Defects / Snagging Log</div>';
+  html += '<table style="width:100%;border-collapse:collapse;">';
+  html += '<thead><tr style="background:#1A1A1A;"><th style="padding:7px 8px;font-size:9px;font-weight:700;color:#F8F6F2;text-align:center;width:28px;">#</th><th style="padding:7px 8px;font-size:9px;font-weight:700;color:#F8F6F2;text-align:left;">Description of Defect / Issue</th><th style="padding:7px 8px;font-size:9px;font-weight:700;color:#F8F6F2;text-align:center;width:80px;">Date Reported</th><th style="padding:7px 8px;font-size:9px;font-weight:700;color:#F8F6F2;text-align:center;width:80px;">Date Resolved</th><th style="padding:7px 8px;font-size:9px;font-weight:700;color:#F8F6F2;text-align:center;width:36px;">\u2713</th></tr></thead>';
+  html += '<tbody>';
+  for(var ri=1;ri<=12;ri++){
+    html += '<tr style="border-bottom:1px solid #EDE9E1;"><td style="padding:6px 8px;text-align:center;font-size:10px;color:#B8B2A8;">'+ri+'</td>';
+    html += '<td style="padding:6px 8px;"></td>';
+    html += '<td style="padding:6px 8px;border-left:1px solid #EDE9E1;"></td>';
+    html += '<td style="padding:6px 8px;border-left:1px solid #EDE9E1;"></td>';
+    html += '<td style="padding:6px 8px;border-left:1px solid #EDE9E1;text-align:center;"><div style="width:13px;height:13px;border:1.5px solid #C4A882;border-radius:2px;display:inline-block;"></div></td></tr>';
+  }
+  html += '</tbody></table></div>';
+
+  // Photo area
+  html += '<div style="flex:0 0 auto;margin-bottom:16px;">';
+  html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Photo Evidence (attach photos below)</div>';
+  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">';
+  for(var pi=0;pi<4;pi++){
+    html += '<div style="border:1.5px dashed #D0CDC8;border-radius:6px;height:70px;display:flex;align-items:center;justify-content:center;">';
+    html += '<span style="font-size:9px;color:#D0CDC8;font-weight:600;">Photo '+(pi+1)+'</span>';
+    html += '</div>';
+  }
+  html += '</div></div>';
+
+  // Notes
+  html += '<div style="flex:0 0 auto;margin-bottom:14px;">';
+  html += '<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:6px;">Follow-up Notes &amp; Actions</div>';
+  for(var li=0;li<5;li++){
+    html += '<div style="border-bottom:1px solid #E8E4DC;height:22px;margin-bottom:2px;"></div>';
+  }
+  html += '</div>';
+
+  html += '<div style="flex:1;"></div>';
+
+  // Footer p2
+  html += '<div style="border-top:1px solid #E8E4DC;padding-top:10px;flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;">';
+  html += '<div style="font-size:9px;color:#B8B2A8;">'+co.name+(fileCode?' \xb7 File '+fileCode:'')+' \xb7 Defects Record</div>';
+  html += '<div style="font-size:9px;color:#B8B2A8;">Page 2 of 2 \xb7 Company Copy — Not for Client</div>';
+  html += '</div>';
+  html += '</div>'; // end page 2
+
+  return html;
+};
+
+
+
+
+
+const printDoc = (html, title='Document', fullPage=false) => {
   const fullHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -505,30 +924,27 @@ const printDoc = (html, title='Document') => {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>${title}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800;900&family=DM+Serif+Display&display=swap" rel="stylesheet">
   <style>
     *{margin:0;padding:0;box-sizing:border-box;}
-    body{font-family:"DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;color:#1A1A1A;background:#F8F6F2;padding:36px;}
+    html,body{height:100%;}
+    body{font-family:"DM Sans",-apple-system,sans-serif;font-size:13px;color:#1A1A1A;background:${fullPage?'#fff':'#F8F6F2'};${fullPage?'':'padding:36px;'}}
     @media print{
-      body{padding:0;background:#fff;}
-      @page{margin:12mm;size:A4;}
+      html,body{height:100%;margin:0;padding:0;background:#fff;}
+      @page{margin:${fullPage?'0':'12mm'};size:A4;}
       .no-print{display:none!important;}
     }
   </style>
 </head>
 <body>
-  <div style="max-width:760px;margin:0 auto;">
-    ${html}
-  </div>
-  <div class="no-print" style="margin-top:28px;text-align:center;">
-    <button onclick="window.print()" style="background:#1A1A1A;color:#F8F6F2;border:none;padding:11px 32px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;letter-spacing:0.01em;">
+  ${fullPage?html:`<div style="max-width:760px;margin:0 auto;">${html}</div>`}
+  <div class="no-print" style="text-align:center;padding:20px;">
+    <button onclick="window.print()" style="background:#1A1A1A;color:#F8F6F2;border:none;padding:11px 32px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">
       Print / Save as PDF
     </button>
-    <p style="margin-top:10px;font-size:11px;color:#B8B2A8;">
-      Choose "Save as PDF" as your printer in the print dialog.
-    </p>
+    <p style="margin-top:10px;font-size:11px;color:#B8B2A8;">Set paper to A4, margins to None for cover pages.</p>
   </div>
-  <script>window.onload=function(){setTimeout(function(){window.print();},350);};</script>
+  <script>window.onload=function(){setTimeout(function(){window.print();},350);};<\/script>
 </body>
 </html>`;
   const blob = new Blob([fullHTML], {type:'text/html;charset=utf-8'});
@@ -745,47 +1161,49 @@ const buildWarrantyHTML = (proj, serial, co) => {
 </div>`;
 };
 
-const T = {
-  bg:'#F8F6F2',
-  surface:'#FFFFFF',
-  card:'#FFFFFF',
-  sidebar:'#FFFFFF',
-  border:'#E8E4DC',
-  borderLight:'#EDE9E1',
-  accent:'#1A1A1A',
-  accentHover:'#333333',
-  accentLight:'rgba(26,26,26,0.06)',
-  success:'#2D7A4F',
-  successLight:'rgba(45,122,79,0.08)',
-  danger:'#C0392B',
-  dangerLight:'rgba(192,57,43,0.08)',
-  warning:'#9A6A00',
-  warningLight:'rgba(154,106,0,0.08)',
-  info:'#1A5FA8',
-  infoLight:'rgba(26,95,168,0.08)',
-  text:'#1A1A1A',
-  secondary:'#3D3D3D',
-  muted:'#7A7468',
-  dim:'#B8B2A8',
-  tan:'#C4A882',
-  tanLight:'rgba(196,168,130,0.15)',
-  shadow:'0 1px 4px rgba(0,0,0,0.06), 0 2px 12px rgba(0,0,0,0.04)',
-  shadowMd:'0 4px 20px rgba(0,0,0,0.08)',
-  shadowLg:'0 8px 40px rgba(0,0,0,0.10)',
+const THEMES = {
+  light: {
+    bg:'#F8F6F2', surface:'#FFFFFF', card:'#FFFFFF', sidebar:'#FFFFFF',
+    border:'#E8E4DC', borderLight:'#EDE9E1',
+    accent:'#1A1A1A', accentHover:'#333333', accentLight:'rgba(26,26,26,0.06)',
+    success:'#2D7A4F', successLight:'rgba(45,122,79,0.08)',
+    danger:'#C0392B', dangerLight:'rgba(192,57,43,0.08)',
+    warning:'#9A6A00', warningLight:'rgba(154,106,0,0.08)',
+    info:'#1A5FA8', infoLight:'rgba(26,95,168,0.08)',
+    text:'#1A1A1A', secondary:'#3D3D3D', muted:'#7A7468', dim:'#B8B2A8',
+    tan:'#C4A882', tanLight:'rgba(196,168,130,0.15)',
+    shadow:'0 1px 4px rgba(0,0,0,0.06), 0 2px 12px rgba(0,0,0,0.04)',
+    shadowMd:'0 4px 20px rgba(0,0,0,0.08)',
+    shadowLg:'0 8px 40px rgba(0,0,0,0.10)',
+  },
+  dark: {
+    bg:'#141412', surface:'#1E1D1B', card:'#1E1D1B', sidebar:'#1A1917',
+    border:'#2E2C28', borderLight:'#252320',
+    accent:'#F8F6F2', accentHover:'#E8E4DC', accentLight:'rgba(248,246,242,0.07)',
+    success:'#3DAA6A', successLight:'rgba(61,170,106,0.12)',
+    danger:'#E05A4A', dangerLight:'rgba(224,90,74,0.12)',
+    warning:'#D4A030', warningLight:'rgba(212,160,48,0.12)',
+    info:'#4D8FD6', infoLight:'rgba(77,143,214,0.12)',
+    text:'#F0EDE8', secondary:'#C8C4BE', muted:'#7A7468', dim:'#4A4844',
+    tan:'#C4A882', tanLight:'rgba(196,168,130,0.12)',
+    shadow:'0 1px 4px rgba(0,0,0,0.3), 0 2px 12px rgba(0,0,0,0.2)',
+    shadowMd:'0 4px 20px rgba(0,0,0,0.35)',
+    shadowLg:'0 8px 40px rgba(0,0,0,0.4)',
+  },
 };
 
-const iStyle = {
-  background:'#FFFFFF',
+// T is set at runtime by App — starts with light theme
+let T = THEMES.light;
+
+// iStyle is also set at runtime (needs T)
+let iStyle = {};
+const makeIStyle = () => ({
+  background: T.card,
   border:`1px solid ${T.borderLight}`,
-  borderRadius:10,
-  padding:'11px 14px',
-  fontSize:16,
-  color:T.text,
-  outline:'none',
-  width:'100%',
-  fontFamily:'inherit',
-  transition:'border-color 0.15s, box-shadow 0.15s',
-};
+  borderRadius:10, padding:'11px 14px', fontSize:16,
+  color:T.text, outline:'none', width:'100%',
+  fontFamily:'inherit', transition:'border-color 0.15s, box-shadow 0.15s',
+});
 
 // ── Mobile-responsive helpers ──────────────────────────────────────────────
 // Hook: returns true when viewport ≤ 600px (iPhone-sized)
@@ -1349,7 +1767,7 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
   );
 }
 
-function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId,notices=[],setNotices,isAdmin,activeUser}){
+function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId,notices=[],setNotices,isAdmin}){
   const totRev = useMemo(()=>projects.reduce((s,p)=>s+p.contractAmount+(p.variationOrders||0),0),[projects]);
   const totExp = useMemo(()=>invoices.reduce((s,i)=>s+i.total,0),[invoices]);
   const totRecv = useMemo(()=>payments.filter(p=>p.status==='Received').reduce((s,p)=>s+p.amount,0),[payments]);
@@ -1365,130 +1783,130 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
 
   const recent = [...invoices].sort((a,b)=>new Date(b.invoiceDate)-new Date(a.invoiceDate)).slice(0,8);
 
-  const [noticeModal,setNoticeModal]=useState(null); // null | {id?,title,body,priority}
+  const [noticeForm,setNoticeForm]=useState(null); // null=closed, {}=new, {id,...}=editing
+  const [noticeText,setNoticeText]=useState('');
+  const [noticePriority,setNoticePriority]=useState('normal');
+  const [noticePinned,setNoticePinned]=useState(false);
 
-  const NOTICE_PRIORITIES=[
-    {id:'urgent', label:'Urgent', color:'#dc2626', bg:'#FEF2F2', border:'#FCA5A5'},
-    {id:'info',   label:'Info',   color:'#2563eb', bg:'#EFF6FF', border:'#93C5FD'},
-    {id:'normal', label:'Normal', color:'#15803d', bg:'#F0FDF4', border:'#86EFAC'},
-  ];
-  const nPri=p=>NOTICE_PRIORITIES.find(x=>x.id===p)||NOTICE_PRIORITIES[2];
+  const PRIO_CLR={urgent:T.danger,high:T.warning,normal:T.info};
+  const PRIO_BG={urgent:T.dangerLight,high:T.warningLight,normal:T.infoLight};
+  const PRIO_LABEL={urgent:'Urgent',high:'High',normal:'Normal'};
 
+  const sortedNotices=[...notices].sort((a,b)=>{
+    if(a.pinned!==b.pinned) return a.pinned?-1:1;
+    const po={urgent:0,high:1,normal:2};
+    if((po[a.priority]||2)!==(po[b.priority]||2)) return (po[a.priority]||2)-(po[b.priority]||2);
+    return new Date(b.postedAt)-new Date(a.postedAt);
+  });
+
+  const openNew=()=>{setNoticeText('');setNoticePriority('normal');setNoticePinned(false);setNoticeForm({});};
+  const openEdit=(n)=>{setNoticeText(n.text);setNoticePriority(n.priority||'normal');setNoticePinned(!!n.pinned);setNoticeForm(n);};
   const saveNotice=()=>{
-    if(!(noticeModal?.title||'').trim())return;
-    const now=new Date().toISOString();
-    let upd;
-    if(noticeModal.id){
-      upd=notices.map(n=>n.id===noticeModal.id?{...n,title:noticeModal.title,body:noticeModal.body,priority:noticeModal.priority,editedAt:now}:n);
-    }else{
-      const n={id:Date.now().toString(),title:noticeModal.title,body:noticeModal.body,priority:noticeModal.priority,postedBy:activeUser?.name||'Admin',postedAt:now};
-      upd=[n,...notices];
+    if(!noticeText.trim()) return;
+    let updated;
+    if(noticeForm.id){
+      updated=notices.map(n=>n.id===noticeForm.id?{...n,text:noticeText.trim(),priority:noticePriority,pinned:noticePinned,editedAt:new Date().toISOString()}:n);
+    } else {
+      updated=[{id:uid(),text:noticeText.trim(),priority:noticePriority,pinned:noticePinned,postedAt:new Date().toISOString()}, ...notices];
     }
-    setNotices(upd);saveS('notices',upd);setNoticeModal(null);
+    setNotices(updated);
+    setNoticeForm(null);
   };
-  const deleteNotice=(id)=>{
-    const upd=notices.filter(n=>n.id!==id);
-    setNotices(upd);saveS('notices',upd);
-  };
+  const deleteNotice=(id)=>setNotices(notices.filter(n=>n.id!==id));
+  const togglePin=(id)=>setNotices(notices.map(n=>n.id===id?{...n,pinned:!n.pinned}:n));
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:20}}>
-
-      {/* Notice Board */}
-      {(notices.length>0||isAdmin)&&(
-        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:'16px 20px',boxShadow:T.shadow}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:notices.length>0?14:0}}>
-            <div style={{display:'flex',alignItems:'center',gap:8}}>
-              <Bell size={15} style={{color:T.accent}}/>
-              <span style={{fontSize:13,fontWeight:700,color:T.text}}>Notice Board</span>
-              {notices.length>0&&<span style={{fontSize:11,color:T.muted,background:T.bg,borderRadius:10,padding:'1px 8px',border:`1px solid ${T.borderLight}`}}>{notices.length}</span>}
+      {/* ── Notice Board ── */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <div style={{width:32,height:32,borderRadius:10,background:T.tanLight,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              <Bell size={15} style={{color:T.tan}}/>
             </div>
-            {isAdmin&&(
-              <button onClick={()=>setNoticeModal({title:'',body:'',priority:'normal'})}
-                style={{display:'flex',alignItems:'center',gap:5,background:T.accent,border:'none',cursor:'pointer',
-                  color:'#fff',borderRadius:8,padding:'5px 12px',fontSize:12,fontWeight:600,fontFamily:'inherit'}}>
-                <Plus size={13}/> Post Notice
-              </button>
-            )}
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:T.text}}>Notice Board</div>
+              <div style={{fontSize:11,color:T.muted}}>{notices.length===0?'No notices posted':`${notices.length} notice${notices.length!==1?'s':''}`}</div>
+            </div>
           </div>
-          {notices.length===0&&isAdmin&&(
-            <div style={{color:T.dim,fontSize:12,paddingTop:6}}>No notices posted yet. Click "Post Notice" to share something with your team.</div>
+          {isAdmin&&(
+            <button onClick={openNew} style={{display:'flex',alignItems:'center',gap:6,background:T.text,color:T.card,border:'none',borderRadius:10,padding:'7px 14px',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+              <Plus size={13}/>Post Notice
+            </button>
           )}
-          <div style={{display:'flex',flexDirection:'column',gap:10}}>
-            {[...notices].sort((a,b)=>new Date(b.postedAt)-new Date(a.postedAt)).map(n=>{
-              const pri=nPri(n.priority);
-              return(
-                <div key={n.id} style={{background:pri.bg,border:`1px solid ${pri.border}`,borderRadius:10,padding:'12px 14px',position:'relative'}}>
-                  <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:8}}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:n.body?6:0}}>
-                        <span style={{fontSize:10,fontWeight:700,color:pri.color,background:'#fff',border:`1px solid ${pri.border}`,borderRadius:6,padding:'1px 7px',textTransform:'uppercase',letterSpacing:'0.04em'}}>{pri.label}</span>
-                        <span style={{fontSize:13,fontWeight:700,color:T.text}}>{n.title}</span>
-                      </div>
-                      {n.body&&<p style={{fontSize:13,color:T.text,margin:0,whiteSpace:'pre-wrap',lineHeight:1.55}}>{n.body}</p>}
-                      <div style={{fontSize:11,color:T.muted,marginTop:6}}>
-                        {n.postedBy} · {new Date(n.postedAt).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'})}
-                        {n.editedAt&&<span style={{marginLeft:6}}>(edited)</span>}
-                      </div>
-                    </div>
-                    {isAdmin&&(
-                      <div style={{display:'flex',gap:6,flexShrink:0}}>
-                        <button onClick={()=>setNoticeModal({id:n.id,title:n.title,body:n.body||'',priority:n.priority||'normal'})}
-                          style={{background:'#fff8',border:`1px solid ${pri.border}`,cursor:'pointer',borderRadius:6,padding:'3px 8px',fontSize:11,color:T.text,fontFamily:'inherit'}}>Edit</button>
-                        <button onClick={()=>deleteNotice(n.id)}
-                          style={{background:'#fff8',border:`1px solid ${T.danger}40`,cursor:'pointer',borderRadius:6,padding:'3px 8px',fontSize:11,color:T.danger,fontFamily:'inherit'}}>Delete</button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
-      )}
 
-      {/* Notice compose/edit modal */}
-      {noticeModal&&(
-        <div style={{position:'fixed',inset:0,background:'#0008',zIndex:3000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
-          <div style={{background:T.card,borderRadius:16,padding:24,width:'100%',maxWidth:480,boxShadow:'0 20px 60px #0004'}}>
-            <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:18}}>{noticeModal.id?'Edit Notice':'Post Notice'}</div>
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:12,fontWeight:600,color:T.muted,marginBottom:5}}>Priority</div>
-              <div style={{display:'flex',gap:8}}>
-                {NOTICE_PRIORITIES.map(p=>(
-                  <button key={p.id} onClick={()=>setNoticeModal(m=>({...m,priority:p.id}))}
-                    style={{flex:1,padding:'7px 0',borderRadius:8,border:`2px solid ${noticeModal.priority===p.id?p.color:T.borderLight}`,
-                      background:noticeModal.priority===p.id?p.bg:'transparent',
-                      color:noticeModal.priority===p.id?p.color:T.muted,
-                      fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit',transition:'all .15s'}}>
-                    {p.label}
-                  </button>
-                ))}
+        {/* Post / edit form */}
+        {noticeForm!==null&&(
+          <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.borderLight}`,background:T.bg}}>
+            <textarea
+              value={noticeText}
+              onChange={e=>setNoticeText(e.target.value)}
+              placeholder="Write your notice here…"
+              rows={3}
+              style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 13px',fontSize:13,color:T.text,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.55,marginBottom:12}}
+            />
+            <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              <select value={noticePriority} onChange={e=>setNoticePriority(e.target.value)}
+                style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 10px',fontSize:12,color:T.text,fontFamily:'inherit',cursor:'pointer'}}>
+                <option value="normal">Normal</option>
+                <option value="high">High Priority</option>
+                <option value="urgent">Urgent</option>
+              </select>
+              <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:T.muted,cursor:'pointer'}}>
+                <input type="checkbox" checked={noticePinned} onChange={e=>setNoticePinned(e.target.checked)} style={{accentColor:T.tan}}/>
+                Pin to top
+              </label>
+              <div style={{marginLeft:'auto',display:'flex',gap:8}}>
+                <button onClick={()=>setNoticeForm(null)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 14px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+                <button onClick={saveNotice} disabled={!noticeText.trim()} style={{background:T.text,color:T.card,border:'none',borderRadius:8,padding:'6px 16px',fontSize:12,fontWeight:600,cursor:noticeText.trim()?'pointer':'not-allowed',opacity:noticeText.trim()?1:0.45,fontFamily:'inherit'}}>
+                  {noticeForm.id?'Save Changes':'Post'}
+                </button>
               </div>
             </div>
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:12,fontWeight:600,color:T.muted,marginBottom:5}}>Title <span style={{color:T.danger}}>*</span></div>
-              <input value={noticeModal.title} onChange={e=>setNoticeModal(m=>({...m,title:e.target.value}))}
-                placeholder="Notice title…"
-                style={{width:'100%',padding:'9px 12px',borderRadius:8,border:`1px solid ${T.border}`,background:T.bg,color:T.text,fontSize:13,fontFamily:'inherit',outline:'none'}}/>
-            </div>
-            <div style={{marginBottom:20}}>
-              <div style={{fontSize:12,fontWeight:600,color:T.muted,marginBottom:5}}>Message <span style={{color:T.dim,fontWeight:400}}>(optional)</span></div>
-              <textarea value={noticeModal.body} onChange={e=>setNoticeModal(m=>({...m,body:e.target.value}))}
-                placeholder="Additional details…" rows={4}
-                style={{width:'100%',padding:'9px 12px',borderRadius:8,border:`1px solid ${T.border}`,background:T.bg,color:T.text,fontSize:13,fontFamily:'inherit',outline:'none',resize:'vertical'}}/>
-            </div>
-            <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
-              <button onClick={()=>setNoticeModal(null)}
-                style={{padding:'8px 18px',borderRadius:8,border:`1px solid ${T.border}`,background:'transparent',color:T.text,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
-              <button onClick={saveNotice} disabled={!(noticeModal.title||'').trim()}
-                style={{padding:'8px 18px',borderRadius:8,border:'none',background:T.accent,color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit',opacity:(noticeModal.title||'').trim()?1:0.5}}>
-                {noticeModal.id?'Save Changes':'Post'}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Notices list */}
+        {sortedNotices.length===0?(
+          <div style={{padding:'28px 20px',textAlign:'center',color:T.dim,fontSize:13}}>No notices yet{isAdmin?' — post one above':''}</div>
+        ):(
+          <div style={{display:'flex',flexDirection:'column'}}>
+            {sortedNotices.map((n,idx)=>(
+              <div key={n.id} style={{display:'flex',gap:12,padding:'13px 20px',borderBottom:idx<sortedNotices.length-1?`1px solid ${T.borderLight}`:'none',alignItems:'flex-start'}}>
+                <div style={{width:4,flexShrink:0,borderRadius:4,alignSelf:'stretch',background:PRIO_CLR[n.priority||'normal'],minHeight:36}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
+                    <Badge color={PRIO_CLR[n.priority||'normal']} sm>{PRIO_LABEL[n.priority||'normal']}</Badge>
+                    {n.pinned&&<Badge color={T.tan} sm>Pinned</Badge>}
+                    <span style={{fontSize:11,color:T.dim,marginLeft:'auto'}}>
+                      {n.editedAt?`Edited ${fmtDate(n.editedAt)}`:`${fmtDate(n.postedAt)}`}
+                    </span>
+                  </div>
+                  <div style={{fontSize:13,color:T.text,lineHeight:1.6,whiteSpace:'pre-wrap'}}>{n.text}</div>
+                </div>
+                {isAdmin&&(
+                  <div style={{display:'flex',gap:4,flexShrink:0}}>
+                    <button title={n.pinned?'Unpin':'Pin'} onClick={()=>togglePin(n.id)}
+                      style={{background:'transparent',border:'none',cursor:'pointer',color:n.pinned?T.tan:T.dim,padding:4,borderRadius:6,display:'flex'}}>
+                      <Star size={13} fill={n.pinned?T.tan:'none'}/>
+                    </button>
+                    <button title="Edit" onClick={()=>openEdit(n)}
+                      style={{background:'transparent',border:'none',cursor:'pointer',color:T.muted,padding:4,borderRadius:6,display:'flex'}}>
+                      <Edit3 size={13}/>
+                    </button>
+                    <button title="Delete" onClick={()=>deleteNotice(n.id)}
+                      style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex'}}>
+                      <Trash2 size={13}/>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Worker document expiry alerts */}
       {(()=>{
         const alerts=[];
@@ -1603,13 +2021,14 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
         </div>
       )}
 
+      {/* ── Section header helper ───────────────────────────────── */}
       {widgets.includes('stats')&&(
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(175px,1fr))',gap:12}}>
         {[
-          {label:'Total Revenue',value:fmtSGD(totRev),sub:`${projects.length} projects`,delta:null,Icon:TrendingUp,color:T.success},
-          {label:'Total Expenses',value:fmtSGD(totExp),sub:`${invoices.length} invoices`,delta:null,Icon:Receipt,color:T.danger},
-          {label:'Gross Profit',value:fmtSGD(grossP),sub:`${margin.toFixed(1)}% margin`,delta:null,Icon:DollarSign,color:'#8A6A3A'},
-          {label:'Payments Collected',value:fmtSGD(totRecv),sub:`${fmtSGD(pendAmt)} outstanding`,delta:null,Icon:CreditCard,color:T.info},
+          {label:'Total Revenue',value:fmtSGD(totRev),sub:`${projects.length} projects`,Icon:TrendingUp,color:T.success},
+          {label:'Total Expenses',value:fmtSGD(totExp),sub:`${invoices.length} invoices`,Icon:Receipt,color:T.danger},
+          {label:'Gross Profit',value:fmtSGD(grossP),sub:`${margin.toFixed(1)}% margin`,Icon:DollarSign,color:'#8A6A3A'},
+          {label:'Payments Collected',value:fmtSGD(totRecv),sub:`${fmtSGD(pendAmt)} outstanding`,Icon:CreditCard,color:T.info},
         ].map(({label,value,sub,Icon,color})=>(
           <div key={label} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:'18px 20px',boxShadow:T.shadow}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
@@ -1625,7 +2044,15 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
       </div>
       )}
 
-      {/* Revenue vs Expenses chart + Project status donut */}
+      {/* ══ FINANCIAL OVERVIEW ══════════════════════════════════════ */}
+      {(widgets.includes('budget')||widgets.includes('catbreak'))&&(
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:-8}}>
+          <div style={{width:3,height:14,background:T.tan,borderRadius:2}}/>
+          <span style={{fontSize:11,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.12em'}}>Financial Overview</span>
+          <div style={{flex:1,height:1,background:T.borderLight}}/>
+        </div>
+      )}
+
       {(widgets.includes('budget')||widgets.includes('catbreak'))&&(()=>{
         const [chartRange,setChartRange]=useState('12m');
         const now=new Date();
@@ -1640,7 +2067,7 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
           months.push({label,rev,exp});
         }
         const maxVal=Math.max(...months.map(m=>Math.max(m.rev,m.exp)),1);
-        const niceMax=(v)=>{const e=Math.pow(10,Math.floor(Math.log10(v||1)));const f=v/e;return (f<=1?1:f<=2?2:f<=5?5:10)*e;};
+        const niceMax=(v)=>{const e=Math.pow(10,Math.floor(Math.log10(v||1)));const f=v/e;return(f<=1?1:f<=2?2:f<=5?5:10)*e;};
         const yMax=niceMax(maxVal);
         const yTicks=[0.25,0.5,0.75,1].map(f=>Math.round(yMax*f));
         const fmtY=(v)=>v>=1000?`$${(v/1000).toFixed(v>=10000?0:1)}k`:`$${v}`;
@@ -1679,8 +2106,7 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
                   {[{id:'6m',label:'6M'},{id:'12m',label:'12M'},{id:'24m',label:'2Y'}].map(o=>(
                     <button key={o.id} onClick={()=>setChartRange(o.id)}
                       style={{padding:'4px 10px',borderRadius:7,border:`1px solid ${T.borderLight}`,
-                        background:chartRange===o.id?T.text:'transparent',
-                        color:chartRange===o.id?'#F8F6F2':T.muted,
+                        background:chartRange===o.id?T.text:'transparent',color:chartRange===o.id?'#F8F6F2':T.muted,
                         fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit',transition:'all .12s'}}>
                       {o.label}
                     </button>
@@ -1700,23 +2126,11 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
                   <linearGradient id="rg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.text} stopOpacity="0.10"/><stop offset="100%" stopColor={T.text} stopOpacity="0"/></linearGradient>
                   <linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.tan} stopOpacity="0.22"/><stop offset="100%" stopColor={T.tan} stopOpacity="0"/></linearGradient>
                 </defs>
-                {yTicks.map(v=>(
-                  <g key={v}>
-                    <line x1={PAD_L} y1={py(v)} x2={W-PAD_R} y2={py(v)} stroke={T.borderLight} strokeWidth="1"/>
-                    <text x={PAD_L-4} y={py(v)+3} textAnchor="end" fontSize="8" fill={T.dim}>{fmtY(v)}</text>
-                  </g>
-                ))}
-                <path d={expArea} fill="url(#eg)"/>
-                <path d={revArea} fill="url(#rg)"/>
+                {yTicks.map(v=>(<g key={v}><line x1={PAD_L} y1={py(v)} x2={W-PAD_R} y2={py(v)} stroke={T.borderLight} strokeWidth="1"/><text x={PAD_L-4} y={py(v)+3} textAnchor="end" fontSize="8" fill={T.dim}>{fmtY(v)}</text></g>))}
+                <path d={expArea} fill="url(#eg)"/><path d={revArea} fill="url(#rg)"/>
                 <path d={expPath} fill="none" stroke={T.tan} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
                 <path d={revPath} fill="none" stroke={T.text} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                {months.map((m,i)=>(
-                  <g key={i}>
-                    {i%labelStep===0&&<text x={px(i)} y={H-6} textAnchor="middle" fontSize="8" fill={T.dim}>{m.label}</text>}
-                    <circle cx={px(i)} cy={py(m.rev)} r="2.5" fill={T.card} stroke={T.text} strokeWidth="1.5"/>
-                    <circle cx={px(i)} cy={py(m.exp)} r="2.5" fill={T.card} stroke={T.tan} strokeWidth="1.5"/>
-                  </g>
-                ))}
+                {months.map((m,i)=>(<g key={i}>{i%labelStep===0&&<text x={px(i)} y={H-6} textAnchor="middle" fontSize="8" fill={T.dim}>{m.label}</text>}<circle cx={px(i)} cy={py(m.rev)} r="2.5" fill={T.card} stroke={T.text} strokeWidth="1.5"/><circle cx={px(i)} cy={py(m.exp)} r="2.5" fill={T.card} stroke={T.tan} strokeWidth="1.5"/></g>))}
               </svg>
               <div style={{marginTop:14,borderTop:`1px solid ${T.borderLight}`,paddingTop:12,display:'flex',flexDirection:'column',gap:7}}>
                 <div style={{fontSize:11,fontWeight:600,color:T.muted,marginBottom:2}}>Budget utilization by project</div>
@@ -1725,17 +2139,7 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
                   const rev=p.contractAmount+(p.variationOrders||0);
                   const pct=rev>0?Math.min(exp/rev*100,100):0;
                   const over=pct>85&&p.status!=='Completed';
-                  return (
-                    <div key={p.id}>
-                      <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:2}}>
-                        <span style={{color:T.text,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'60%'}}>{p.name}</span>
-                        <span style={{color:over?T.danger:T.muted,fontWeight:600,flexShrink:0}}>{pct.toFixed(0)}%</span>
-                      </div>
-                      <div style={{height:3,background:T.bg,borderRadius:2,overflow:'hidden'}}>
-                        <div style={{height:'100%',width:`${pct}%`,background:over?T.danger:T.tan,borderRadius:2,transition:'width .6s ease'}}/>
-                      </div>
-                    </div>
-                  );
+                  return (<div key={p.id}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:2}}><span style={{color:T.text,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'60%'}}>{p.name}</span><span style={{color:over?T.danger:T.muted,fontWeight:600,flexShrink:0}}>{pct.toFixed(0)}%</span></div><div style={{height:3,background:T.bg,borderRadius:2,overflow:'hidden'}}><div style={{height:'100%',width:`${pct}%`,background:over?T.danger:T.tan,borderRadius:2,transition:'width .6s ease'}}/></div></div>);
                 })}
                 {projects.length===0&&<div style={{color:T.dim,fontSize:11,textAlign:'center',padding:'6px 0'}}>No projects yet</div>}
               </div>
@@ -1748,39 +2152,17 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
               <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:16}}>
                 <svg viewBox="0 0 100 100" width="80" height="80" style={{flexShrink:0}}>
                   {donutSegs.length>0?donutSegs.map((d,i)=><path key={i} d={d.path} fill={DONUT_COLORS[d.name]||T.dim}/>):<circle cx="50" cy="50" r="38" fill={T.borderLight}/>}
-                  <circle cx="50" cy="50" r="24" fill={T.card}/>
-                  <text x="50" y="54" textAnchor="middle" fontSize="14" fontWeight="700" fill={T.text}>{projects.length}</text>
+                  <circle cx="50" cy="50" r="24" fill={T.card}/><text x="50" y="54" textAnchor="middle" fontSize="14" fontWeight="700" fill={T.text}>{projects.length}</text>
                 </svg>
                 <div style={{display:'flex',flexDirection:'column',gap:5,flex:1}}>
-                  {donutSegs.map(d=>(
-                    <div key={d.name} style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                      <div style={{display:'flex',alignItems:'center',gap:6}}>
-                        <div style={{width:7,height:7,borderRadius:2,background:DONUT_COLORS[d.name]||T.dim,flexShrink:0}}/>
-                        <span style={{fontSize:11,color:T.muted}}>{d.name}</span>
-                      </div>
-                      <span style={{fontSize:11,fontWeight:600,color:T.text}}>{d.value}</span>
-                    </div>
-                  ))}
+                  {donutSegs.map(d=>(<div key={d.name} style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}><div style={{display:'flex',alignItems:'center',gap:6}}><div style={{width:7,height:7,borderRadius:2,background:DONUT_COLORS[d.name]||T.dim,flexShrink:0}}/><span style={{fontSize:11,color:T.muted}}>{d.name}</span></div><span style={{fontSize:11,fontWeight:600,color:T.text}}>{d.value}</span></div>))}
                 </div>
               </div>
               <div style={{borderTop:`1px solid ${T.borderLight}`,paddingTop:12}}>
                 <div style={{fontSize:11,fontWeight:600,color:T.muted,marginBottom:8}}>Expenses by category</div>
                 {catBreak.slice(0,5).map(([cat,amt])=>{
                   const pct=totExp>0?amt/totExp*100:0;
-                  return (
-                    <div key={cat} style={{marginBottom:7}}>
-                      <div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}>
-                        <span style={{color:T.muted,display:'flex',alignItems:'center',gap:4}}>
-                          <span style={{width:5,height:5,borderRadius:'50%',background:CAT_CLR[cat]||T.tan,display:'inline-block'}}/>
-                          {cat}
-                        </span>
-                        <span style={{color:T.text,fontWeight:600}}>{fmtSGD(amt)}</span>
-                      </div>
-                      <div style={{height:3,background:T.bg,borderRadius:2,overflow:'hidden'}}>
-                        <div style={{height:'100%',width:`${pct}%`,background:CAT_CLR[cat]||T.tan,borderRadius:2}}/>
-                      </div>
-                    </div>
-                  );
+                  return (<div key={cat} style={{marginBottom:7}}><div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}><span style={{color:T.muted,display:'flex',alignItems:'center',gap:4}}><span style={{width:5,height:5,borderRadius:'50%',background:CAT_CLR[cat]||T.tan,display:'inline-block'}}/>{cat}</span><span style={{color:T.text,fontWeight:600}}>{fmtSGD(amt)}</span></div><div style={{height:3,background:T.bg,borderRadius:2,overflow:'hidden'}}><div style={{height:'100%',width:`${pct}%`,background:CAT_CLR[cat]||T.tan,borderRadius:2}}/></div></div>);
                 })}
                 {catBreak.length===0&&<div style={{color:T.dim,fontSize:11,textAlign:'center',padding:'6px 0'}}>No expenses yet</div>}
               </div>
@@ -1790,16 +2172,205 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
         );
       })()}
 
+
+      {/* ══ PROJECT HEALTH ══════════════════════════════════════════ */}
+      {(widgets.includes('aging')||widgets.includes('margin')||widgets.includes('gantt')||widgets.includes('collection'))&&(
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:-8}}>
+          <div style={{width:3,height:14,background:'#1A5FA8',borderRadius:2}}/>
+          <span style={{fontSize:11,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.12em'}}>Project Health</span>
+          <div style={{flex:1,height:1,background:T.borderLight}}/>
+        </div>
+      )}
+
+      {(widgets.includes('aging')||widgets.includes('margin'))&&(
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:14}}>
+        {widgets.includes('aging')&&(()=>{
+          const now=Date.now();
+          const unpaid=invoices.filter(i=>i.status==='Pending'||i.status==='Overdue');
+          const buckets=[
+            {label:'0–30 days',min:0,max:30,color:'#2D7A4F'},
+            {label:'31–60 days',min:31,max:60,color:T.tan},
+            {label:'61–90 days',min:61,max:90,color:T.warning},
+            {label:'90+ days',min:91,max:Infinity,color:T.danger},
+          ];
+          const aged=buckets.map(b=>{
+            const items=unpaid.filter(i=>{const ageDays=Math.floor((now-new Date(i.invoiceDate))/864e5);return ageDays>=b.min&&ageDays<=b.max;});
+            return {...b,count:items.length,total:items.reduce((s,i)=>s+i.total,0)};
+          });
+          const grandTotal=aged.reduce((s,b)=>s+b.total,0)||1;
+          return (
+            <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:'22px 24px',boxShadow:T.shadow}}>
+              <div style={{fontSize:14,fontWeight:600,color:T.text,marginBottom:4}}>Invoice Aging</div>
+              <div style={{fontSize:11,color:T.muted,marginBottom:16}}>{fmtSGD(grandTotal)} unpaid — by age</div>
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {aged.map(b=>(<div key={b.label}><div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}><span style={{color:T.text,fontWeight:500,display:'flex',alignItems:'center',gap:6}}><span style={{width:8,height:8,borderRadius:2,background:b.color,display:'inline-block'}}/>{b.label}{b.count>0&&<span style={{fontSize:10,color:T.dim}}>({b.count})</span>}</span><span style={{fontWeight:700,color:b.total>0?b.color:T.dim}}>{b.total>0?fmtSGD(b.total):'—'}</span></div><div style={{height:6,background:T.bg,borderRadius:3,overflow:'hidden'}}><div style={{height:'100%',width:`${(b.total/grandTotal)*100}%`,background:b.color,borderRadius:3}}/></div></div>))}
+              </div>
+              {unpaid.length===0&&<div style={{textAlign:'center',color:T.success,fontSize:13,fontWeight:600,marginTop:8}}>✓ No outstanding invoices</div>}
+            </div>
+          );
+        })()}
+        {widgets.includes('margin')&&(()=>{
+          const projData=projects.filter(p=>p.status!=='Cancelled').map(p=>{
+            const rev=(p.contractAmount||0)+(p.variationOrders||0);
+            const cost=invoices.filter(i=>i.projectId===p.id).reduce((s,i)=>s+i.total,0);
+            const margin=rev>0?((rev-cost)/rev)*100:0;
+            return {name:p.name,margin,rev,cost};
+          }).sort((a,b)=>b.margin-a.margin).slice(0,8);
+          const maxM=Math.max(...projData.map(p=>Math.abs(p.margin)),1);
+          return (
+            <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:'22px 24px',boxShadow:T.shadow}}>
+              <div style={{fontSize:14,fontWeight:600,color:T.text,marginBottom:4}}>Profit Margin by Project</div>
+              <div style={{fontSize:11,color:T.muted,marginBottom:16}}>Revenue minus cost ÷ revenue</div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {projData.map(p=>{
+                  const pct=Math.abs(p.margin);
+                  const color=p.margin>=20?'#2D7A4F':p.margin>=0?T.tan:T.danger;
+                  return (<div key={p.name}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:T.text,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'65%'}}>{p.name}</span><span style={{fontWeight:700,color,flexShrink:0}}>{p.margin>=0?'+':''}{p.margin.toFixed(1)}%</span></div><div style={{height:5,background:T.bg,borderRadius:3,overflow:'hidden'}}><div style={{height:'100%',width:`${(pct/maxM)*100}%`,background:color,borderRadius:3}}/></div></div>);
+                })}
+                {projData.length===0&&<div style={{textAlign:'center',color:T.dim,fontSize:12,padding:'12px 0'}}>No project data yet</div>}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+      )}
+
+      {widgets.includes('gantt')&&(()=>{
+        const active=projects.filter(p=>p.status!=='Cancelled'&&(p.startDate||p.endDate)).slice(0,10);
+        if(!active.length) return null;
+        const now=new Date();
+        const allDates=[...active.flatMap(p=>[p.startDate,p.endDate].filter(Boolean)).map(d=>new Date(d))];
+        const minD=new Date(Math.min(...allDates.map(d=>d.getTime()),now.getTime()));minD.setDate(1);
+        const maxD=new Date(Math.max(...allDates.map(d=>d.getTime()),now.getTime()));maxD.setMonth(maxD.getMonth()+1,1);
+        const span=maxD-minD||1;
+        const toX=(d)=>((new Date(d)-minD)/span)*100;
+        const nowX=((now-minD)/span)*100;
+        const ST_C={Active:'#1A1A1A','In Progress':'#8A6A3A',Planning:T.tan,Completed:'#2D7A4F'};
+        const marks=[];
+        const md=new Date(minD);
+        while(md<=maxD){marks.push({x:toX(md),label:md.toLocaleString('en-SG',{month:'short',year:'2-digit'})});md.setMonth(md.getMonth()+1);}
+        return (
+          <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:'22px 24px',boxShadow:T.shadow,overflowX:'auto'}}>
+            <div style={{fontSize:14,fontWeight:600,color:T.text,marginBottom:4}}>Project Timeline</div>
+            <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Start to end — red line is today</div>
+            <div style={{minWidth:360}}>
+              <div style={{display:'flex',marginLeft:120,position:'relative',height:18,marginBottom:6}}>
+                {marks.map((m,i)=><div key={i} style={{position:'absolute',left:`${m.x}%`,fontSize:9,color:T.dim,transform:'translateX(-50%)',whiteSpace:'nowrap'}}>{m.label}</div>)}
+              </div>
+              {active.map(p=>{
+                const s=p.startDate?toX(p.startDate):0;
+                const e=p.endDate?toX(p.endDate):nowX;
+                const w=Math.max(1,e-s);
+                const color=ST_C[p.status]||T.dim;
+                return (
+                  <div key={p.id} style={{display:'flex',alignItems:'center',gap:8,marginBottom:7}}>
+                    <div style={{width:114,flexShrink:0,fontSize:11,fontWeight:500,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',textAlign:'right',paddingRight:6}}>{p.name}</div>
+                    <div style={{flex:1,position:'relative',height:18,background:T.bg,borderRadius:4,overflow:'hidden'}}>
+                      <div style={{position:'absolute',left:`${Math.min(s,99)}%`,width:`${Math.min(w,100-Math.min(s,99))}%`,height:'100%',background:color,borderRadius:4,opacity:0.85,minWidth:4}}/>
+                      <div style={{position:'absolute',left:`${Math.min(Math.max(nowX,0),100)}%`,top:0,bottom:0,width:2,background:T.danger,opacity:0.9}}/>
+                    </div>
+                    <Badge color={color} sm>{p.status}</Badge>
+                  </div>
+                );
+              })}
+              <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8,marginLeft:120}}>
+                <div style={{width:12,height:2,background:T.danger,opacity:0.9,borderRadius:1}}/>
+                <span style={{fontSize:10,color:T.dim}}>Today</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {widgets.includes('collection')&&(()=>{
+        const projData=projects.filter(p=>p.status!=='Cancelled'&&p.contractAmount>0).map(p=>{
+          const rev=(p.contractAmount||0)+(p.variationOrders||0);
+          const collected=payments.filter(py=>py.projectId===p.id&&py.status==='Received').reduce((s,py)=>s+py.amount,0);
+          const pct=Math.min(100,(collected/rev)*100);
+          return {name:p.name,pct,collected,rev};
+        }).sort((a,b)=>b.pct-a.pct).slice(0,8);
+        return (
+          <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:'22px 24px',boxShadow:T.shadow}}>
+            <div style={{fontSize:14,fontWeight:600,color:T.text,marginBottom:4}}>Collection Rate by Project</div>
+            <div style={{fontSize:11,color:T.muted,marginBottom:16}}>% of contract value collected</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:8}}>
+              {projData.map(p=>{
+                const color=p.pct>=100?'#2D7A4F':p.pct>=50?T.tan:T.danger;
+                return (<div key={p.name}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:T.text,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'65%'}}>{p.name}</span><span style={{fontWeight:700,color,flexShrink:0}}>{p.pct.toFixed(0)}%</span></div><div style={{height:5,background:T.bg,borderRadius:3,overflow:'hidden',marginBottom:2}}><div style={{height:'100%',width:`${p.pct}%`,background:color,borderRadius:3}}/></div><div style={{fontSize:9,color:T.dim}}>{fmtSGD(p.collected)} of {fmtSGD(p.rev)}</div></div>);
+              })}
+              {projData.length===0&&<div style={{textAlign:'center',color:T.dim,fontSize:12,padding:'12px 0'}}>No project data yet</div>}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ══ OPERATIONS ══════════════════════════════════════════════ */}
+      {(widgets.includes('suppliers')||widgets.includes('attendance'))&&(
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:-8}}>
+          <div style={{width:3,height:14,background:'#7c3aed',borderRadius:2}}/>
+          <span style={{fontSize:11,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.12em'}}>Operations</span>
+          <div style={{flex:1,height:1,background:T.borderLight}}/>
+        </div>
+      )}
+
+      {widgets.includes('suppliers')&&(()=>{
+        const supMap={};
+        invoices.forEach(i=>{supMap[i.supplier]=(supMap[i.supplier]||0)+i.total;});
+        const top=Object.entries(supMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
+        const maxSpend=top[0]?.[1]||1;
+        const COLORS=['#1A1A1A','#C4A882','#2D7A4F','#8A6A3A','#9A6A00','#1A5FA8','#7c3aed','#B8B2A8'];
+        return (
+          <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:'22px 24px',boxShadow:T.shadow}}>
+            <div style={{fontSize:14,fontWeight:600,color:T.text,marginBottom:4}}>Top Suppliers by Spend</div>
+            <div style={{fontSize:11,color:T.muted,marginBottom:16}}>Total invoiced amount per supplier</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:10}}>
+              {top.map(([sup,amt],i)=>(<div key={sup}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:T.text,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'65%',display:'flex',alignItems:'center',gap:6}}><span style={{width:8,height:8,borderRadius:2,background:COLORS[i]||T.dim,display:'inline-block',flexShrink:0}}/>{sup}</span><span style={{fontWeight:700,color:T.text,flexShrink:0}}>{fmtSGD(amt)}</span></div><div style={{height:5,background:T.bg,borderRadius:3,overflow:'hidden'}}><div style={{height:'100%',width:`${(amt/maxSpend)*100}%`,background:COLORS[i]||T.dim,borderRadius:3}}/></div></div>))}
+              {top.length===0&&<div style={{textAlign:'center',color:T.dim,fontSize:12,padding:'12px 0'}}>No invoice data yet</div>}
+            </div>
+          </div>
+        );
+      })()}
+
+      {widgets.includes('attendance')&&(()=>{
+        if(!siteWorkers.length) return null;
+        const today=new Date();
+        const days=[];
+        for(let d=29;d>=0;d--){const dt=new Date(today);dt.setDate(today.getDate()-d);days.push(dt.toISOString().slice(0,10));}
+        const dayLabels=days.map(d=>{const dt=new Date(d);return dt.getDate()===1||d===days[0]?dt.toLocaleString('en-SG',{day:'numeric',month:'short'}):dt.getDate()%5===0?String(dt.getDate()):'';});
+        const active=siteWorkers.filter(w=>w.status==='Active').slice(0,8);
+        const getStatus=(worker,day)=>{const rec=attendance.filter(a=>a.workerId===worker.id&&a.date===day);if(!rec.length)return 'absent';return rec.some(a=>a.type==='out')?'full':'partial';};
+        const CELL={full:'#2D7A4F',partial:T.tan,absent:T.bg};
+        return (
+          <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:'22px 24px',boxShadow:T.shadow}}>
+            <div style={{fontSize:14,fontWeight:600,color:T.text,marginBottom:4}}>Worker Attendance</div>
+            <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Last 30 days — green full day · tan partial · grey absent</div>
+            <div style={{overflowX:'auto'}}><div style={{minWidth:500}}>
+              <div style={{display:'flex',marginLeft:90,marginBottom:4}}>{days.map((d,i)=>(<div key={d} style={{flex:1,fontSize:8,color:T.dim,textAlign:'center',minWidth:0,overflow:'hidden',whiteSpace:'nowrap'}}>{dayLabels[i]}</div>))}</div>
+              {active.map(w=>(<div key={w.id} style={{display:'flex',alignItems:'center',marginBottom:4}}><div style={{width:84,fontSize:11,color:T.text,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',paddingRight:6,flexShrink:0}}>{w.name}</div><div style={{display:'flex',flex:1,gap:2}}>{days.map(day=>(<div key={day} style={{flex:1,aspectRatio:'1',borderRadius:2,background:CELL[getStatus(w,day)],border:`1px solid ${T.borderLight}`,minWidth:0}}/>))}</div></div>))}
+              <div style={{display:'flex',gap:14,marginTop:10,marginLeft:90}}>{[{color:'#2D7A4F',l:'Full day'},{color:T.tan,l:'Partial'},{color:T.bg,l:'Absent'}].map(({color,l})=>(<div key={l} style={{display:'flex',alignItems:'center',gap:4}}><div style={{width:10,height:10,borderRadius:2,background:color,border:`1px solid ${T.borderLight}`}}/><span style={{fontSize:10,color:T.dim}}>{l}</span></div>))}</div>
+            </div></div>
+          </div>
+        );
+      })()}
+
+      {/* ══ ACTIVITY ════════════════════════════════════════════════ */}
+      {widgets.includes('recent')&&(
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:-8}}>
+          <div style={{width:3,height:14,background:T.dim,borderRadius:2}}/>
+          <span style={{fontSize:11,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.12em'}}>Recent Activity</span>
+          <div style={{flex:1,height:1,background:T.borderLight}}/>
+        </div>
+      )}
+
       {widgets.includes('recent')&&(
       <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:22,boxShadow:T.shadow}}>
-        <div style={{fontWeight:600,color:T.text,fontSize:14,marginBottom:16}}>Recent Invoices</div>
+        <div style={{fontWeight:600,color:T.text,fontSize:14,marginBottom:16}}>Recent Supplier Invoices</div>
         <div style={{overflowX:'auto'}}>
           <table style={{width:'100%',fontSize:13,borderCollapse:'collapse'}}>
             <thead>
               <tr style={{color:T.dim,fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em'}}>
                 {['Supplier','Invoice #','Project','Category','Date','Total','Status'].map(h=>(
-                  <th key={h} style={{textAlign:['Total','Status'].includes(h)?'right':'left',
-                    paddingBottom:10,paddingRight:14,whiteSpace:'nowrap'}}>{h}</th>
+                  <th key={h} style={{textAlign:['Total','Status'].includes(h)?'right':'left',paddingBottom:10,paddingRight:14,whiteSpace:'nowrap'}}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -1830,11 +2401,12 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
           No dashboard widgets enabled. Contact your admin to adjust visibility settings.
         </div>
       )}
+
     </div>
   );
 }
 
-function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,onShowToast,users,acctSettings}){
+function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,onShowToast,users,acctSettings,logAction=()=>{},activeUser=null}){
   const [modal,setModal]=useState(null);
   const [search,setSearch]=useState('');
   const [sfilt,setSfilt]=useState('Active');
@@ -1844,34 +2416,45 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
   const iif=k=>v=>setInvForm(p=>({...p,[k]:v}));
   const [deleteTarget,setDeleteTarget]=useState(null);
   const [quoteOcr,setQuoteOcr]=useState({loading:false,done:false,err:''});
+  const [quoteCompressing,setQuoteCompressing]=useState(false);
   const [voOcr,setVoOcr]=useState({loading:false,done:false,err:''});
   const [docViewer,setDocViewer]=useState(null); // {title, data, filename}
   const quoteFileRef=useRef();
   const voFileRef=useRef();
   const blank={id:'',name:'',client:'',clientEmail:'',clientPhone:'',clientAddress:'',contractAmount:'',
     refNo:'',quotationFilename:'',quotationFile:null,
-    voList:[],  // [{id, filename, file, amount, description, date, uploadedAt}]
-    scopeItems:[],
+    voList:[],scopeItems:[],
     designer:'',pm:'',
     startDate:'',endDate:'',status:'Planning',variationOrders:'0',
-    designerCommMethod:'profit_pct',designerRate:'5',designerCommAmt:'0',
-    pmCommMethod:'profit_pct',pmRate:'3',pmCommAmt:'0',
+    projectNumber:null,projectYear:null,
+    designerCommMethod:'profit_pct',designerRate:'0',designerCommAmt:'0',
+    pmCommMethod:'profit_pct',pmRate:'0',pmCommAmt:'0',
     commissionPaid:false,commissionPaidAt:null,
     projectType:'Residential',createdAt:new Date().toISOString(),archived:false};
   const [form,setForm]=useState(blank);
   const ff=k=>v=>setForm(p=>({...p,[k]:v}));
 
+  const [handoverTarget,setHandoverTarget]=useState(null); // project being handed over
+  const [handoverForm,setHandoverForm]=useState({
+    handoverDate:new Date().toISOString().slice(0,10),
+    defects:'',
+    outstanding:'',
+    finalPaymentAmount:'',
+    finalPaymentMethod:'PayNow',
+    finalPaymentReceiptNo:'',
+  });
+
   const extractQuotation=async(file)=>{
     const apiKey=(acctSettings?.anthropicApiKey||'').trim();
-    // Store the file — compress first for Firebase sync (keeps PDF viewable across devices)
-    const fileData=await toB64(file);
-    const rawDataUri=`data:${file.type};base64,${fileData}`;
-    ff('quotationFile')(rawDataUri);
     ff('quotationFilename')(file.name);
-    // Compress in background, replace with smaller version for sync
-    compressForSync(file).then(compressed=>{
-      if(compressed) ff('quotationFile')(compressed);
-    });
+    // Compress BEFORE setting quotationFile so the save button never fires with a raw oversized file
+    setQuoteCompressing(true);
+    const fileData=await toB64(file);
+    const compressed=await compressForSync(file);
+    // Use the compressed version if available, otherwise fall back to raw (images already small)
+    const dataUri=compressed||`data:${file.type};base64,${fileData}`;
+    ff('quotationFile')(dataUri);
+    setQuoteCompressing(false);
 
     if(!apiKey){
       setQuoteOcr({loading:false,done:false,err:'AI OCR not configured. File saved. Go to System → set Anthropic API key to enable auto-fill.'});
@@ -1963,13 +2546,17 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
   };
 
   const closeProject=(id)=>{
+    const p=projects.find(p=>p.id===id);
     const upd=projects.map(p=>p.id===id?{...p,status:'Completed',archived:true,archivedAt:new Date().toISOString()}:p);
     setProjects(upd);saveProjects(upd);setConfirmClose(null);
+    logAction('CLOSE_PROJECT',`Closed & archived project: ${p?.name||id}`);
   };
 
   const unarchive=(id)=>{
-    const upd=projects.map(p=>p.id===id?{...p,archived:false,status:'In Progress'}:p);
+    const p=projects.find(pr=>pr.id===id);
+    const upd=projects.map(pr=>pr.id===id?{...pr,archived:false,status:'In Progress'}:pr);
     setProjects(upd);saveProjects(upd);
+    logAction('REOPEN_PROJECT',`Reopened project: ${p?.name||id}`);
   };
 
 
@@ -1998,8 +2585,19 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
       designerCommAmt:parseFloat(form.designerCommAmt)||0,
       pmCommAmt:parseFloat(form.pmCommAmt)||0,
       createdAt:form.createdAt||new Date().toISOString()};
-    const upd=modal==='new'?[...projects,{...d,id:uid()}]:projects.map(p=>p.id===d.id?d:p);
-    setProjects(upd);saveProjects(upd);setModal(null);
+    const isNew=modal==='new';
+    const newId=uid();
+    let finalD={...d};
+    if(isNew){
+      const yr=new Date().getFullYear();
+      const sameYear=projects.filter(p=>(p.projectYear||(p.createdAt?new Date(p.createdAt).getFullYear():yr))===yr);
+      const maxNum=sameYear.reduce((m,p)=>Math.max(m,p.projectNumber||0),0);
+      finalD.projectNumber=maxNum+1;
+      finalD.projectYear=yr;
+    }
+    const upd=isNew?[...projects,{...finalD,id:newId}]:projects.map(p=>p.id===d.id?d:p);
+    setProjects(upd);saveProjects(upd);setModal(null);setQuoteCompressing(false);
+    logAction(isNew?'CREATE_PROJECT':'EDIT_PROJECT',`${isNew?'Created':'Edited'} project: ${d.name} (Client: ${d.client}${d.contractAmount?', $'+Number(d.contractAmount).toLocaleString('en-SG'):''})`);
   };
   const del_=(id)=>{
     const proj=projects.find(p=>p.id===id);
@@ -2078,31 +2676,78 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                   Archived
                 </div>
               )}
-              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:14}}>
-                <div style={{flex:1,minWidth:0,paddingRight:10}}>
-                  <div style={{fontSize:14,fontWeight:700,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</div>
-                  <div style={{fontSize:12,color:T.muted,marginTop:2}}>{p.client}{p.clientPhone&&` · ${p.clientPhone}`}</div>
-                  {p.clientAddress&&<div style={{fontSize:11,color:T.dim,marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.clientAddress}</div>}
+              {/* ── Top: name + info + edit/delete only ── */}
+              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:10}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:3,flexWrap:'wrap'}}>
+                    {p.projectNumber&&(
+                      <span style={{background:T.text,color:'#F8F6F2',borderRadius:5,padding:'1px 7px',
+                        fontSize:11,fontWeight:700,fontFamily:'monospace',flexShrink:0,letterSpacing:'0.04em'}}>
+                        {String(p.projectYear||new Date().getFullYear()).slice(-2)}-{String(p.projectNumber).padStart(2,'0')}
+                      </span>
+                    )}
+                    <div style={{fontSize:15,fontWeight:700,color:T.text}}>{p.name}</div>
+                  </div>
+                  <div style={{fontSize:12,color:T.muted}}>{p.client}{p.clientPhone&&` · ${p.clientPhone}`}</div>
+                  {p.clientAddress&&<div style={{fontSize:11,color:T.dim,marginTop:2}}>{p.clientAddress}</div>}
                   {p.refNo&&<div style={{fontSize:10,color:T.dim,marginTop:2,fontFamily:'monospace'}}>Ref: {p.refNo}</div>}
-                  <div style={{fontSize:11,color:T.dim,marginTop:2}}>{p.designer}{p.pm&&p.designer&&' . '}{p.pm}</div>
+                  {(p.designer||p.pm)&&<div style={{fontSize:11,color:T.dim,marginTop:2}}>{p.designer}{p.pm&&p.designer&&' · '}{p.pm}</div>}
                 </div>
-                <div style={{display:'flex',gap:5,alignItems:'center',flexShrink:0}}>
-                  <Badge color={ST_CLR[p.status]}>{p.status}</Badge>
+                {/* Edit / delete icons only */}
+                <div style={{display:'flex',gap:4,alignItems:'center',flexShrink:0,marginLeft:8}}>
                   {!p.archived&&(
-                    <button onClick={()=>{setForm({...p,contractAmount:String(p.contractAmount),variationOrders:String(p.variationOrders||0),designerRate:String(p.designerRate||5),pmRate:String(p.pmRate||3)});setModal('edit');}}
-                      style={{background:'none',border:'none',cursor:'pointer',color:T.dim,display:'flex',padding:3}}><Edit3 size={13}/></button>
+                    <button onClick={()=>{setForm({...p,contractAmount:String(p.contractAmount),variationOrders:String(p.variationOrders??0),designerRate:String(p.designerRate??0),pmRate:String(p.pmRate??0)});setModal('edit');}}
+                      style={{background:'none',border:'none',cursor:'pointer',color:T.dim,display:'flex',padding:4,borderRadius:6}}>
+                      <Edit3 size={13}/>
+                    </button>
                   )}
                   {p.archived?(
-                    <button title="Restore project" onClick={()=>unarchive(p.id)}
+                    <button onClick={()=>unarchive(p.id)}
                       style={{background:T.infoLight,border:'none',cursor:'pointer',color:T.info,
-                        display:'flex',padding:'3px 7px',borderRadius:5,fontSize:11,fontWeight:600,alignItems:'center',gap:4}}>
+                        display:'flex',padding:'3px 8px',borderRadius:5,fontSize:11,fontWeight:600,alignItems:'center',gap:3}}>
                       Restore
                     </button>
                   ):isAdmin?(
-                    <button onClick={()=>del_(p.id)} title="Delete project"
-                      style={{background:'none',border:'none',cursor:'pointer',color:T.dim,display:'flex',padding:3,borderRadius:6,transition:'color 0.15s'}}><Trash2 size={13}/></button>
+                    <button onClick={()=>del_(p.id)}
+                      style={{background:'none',border:'none',cursor:'pointer',color:T.dim,display:'flex',padding:4,borderRadius:6}}>
+                      <Trash2 size={13}/>
+                    </button>
                   ):null}
                 </div>
+              </div>
+              {/* ── Action row: status + Cover + Handover ── */}
+              <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:12,flexWrap:'wrap'}}>
+                <Badge color={ST_CLR[p.status]}>{p.status}</Badge>
+                <button
+                  title="Print filing cover page"
+                  onClick={()=>{
+                    const projInv=invoices.filter(i=>i.projectId===p.id);
+                    const projPay=payments.filter(py=>py.projectId===p.id);
+                    printDoc(buildCoverPageHTML(p,projInv,projPay,getCo(acctSettings),activeUser?.name),`Cover — ${p.name}`,true);
+                  }}
+                  style={{background:T.tanLight,border:`1px solid ${T.tan}`,cursor:'pointer',color:T.text,
+                    display:'flex',padding:'4px 10px',borderRadius:6,fontSize:11,fontWeight:600,
+                    alignItems:'center',gap:4,fontFamily:'inherit'}}>
+                  <FileSpreadsheet size={11}/>Cover
+                </button>
+                {!p.archived&&p.status!=='Cancelled'&&(
+                <button
+                  title="Print handover form"
+                  onClick={()=>{
+                    setHandoverTarget(p);
+                    setHandoverForm({
+                      handoverDate:new Date().toISOString().slice(0,10),
+                      defects:'',outstanding:'',
+                      finalPaymentAmount:'',finalPaymentMethod:'PayNow',finalPaymentReceiptNo:'',
+                    });
+                  }}
+                  style={{background:T.successLight,border:`1px solid ${T.success}55`,
+                    cursor:'pointer',color:T.success,
+                    display:'flex',padding:'4px 10px',borderRadius:6,fontSize:11,fontWeight:600,
+                    alignItems:'center',gap:4,fontFamily:'inherit'}}>
+                  <CheckCircle size={11}/>Handover
+                </button>
+                )}
               </div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:8,marginBottom:12}}>
                 {[
@@ -2116,62 +2761,92 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                   </div>
                 ))}
               </div>
-              <div style={{height:5,background:T.bg,borderRadius:3,overflow:'hidden',marginBottom:6}}>
-                <div style={{height:'100%',width:`${pctBudget}%`,background:pctBudget>85?T.danger:T.accent,borderRadius:3,transition:'width .5s'}}/>
-              </div>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:11,color:T.dim,
-                paddingTop:10,borderTop:`1px solid ${T.borderLight}`,marginTop:6}}>
-                <span>{fmtDate(p.startDate)} → {fmtDate(p.endDate)}</span>
-                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-                  {!p.archived&&(
-                    <button onClick={()=>{setInvoiceModal(p.id);setInvForm({paymentType:'Progress',amount:'',description:'',date:new Date().toISOString().slice(0,10)});}}
-                      style={{background:T.accentLight,border:`1px solid ${T.accent}30`,cursor:'pointer',color:T.accent,
-                        display:'flex',padding:'3px 9px',borderRadius:6,fontSize:11,fontWeight:700,fontFamily:'inherit',alignItems:'center',gap:4}}>
-                      <Receipt size={11}/>Generate Invoice
+              {/* ── Payment collection bar ── */}
+              {(()=>{
+                const collected=payments.filter(py=>py.projectId===p.id&&py.status==='Received').reduce((s,py)=>s+py.amount,0);
+                const pctCollected=rev>0?Math.min(collected/rev*100,100):0;
+                const invCount=invoices.filter(i=>i.projectId===p.id).length;
+                const paidInvCount=invoices.filter(i=>i.projectId===p.id&&i.status==='Paid').length;
+                const daysLeft=p.endDate?Math.ceil((new Date(p.endDate)-new Date())/864e5):null;
+                const overdue=daysLeft!==null&&daysLeft<0&&p.status!=='Completed'&&!p.archived;
+                return (
+                  <div style={{marginBottom:10}}>
+                    {/* Progress bars */}
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+                      <div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:T.dim,marginBottom:3,textTransform:'uppercase',letterSpacing:'0.06em'}}>
+                          <span>Budget used</span><span style={{color:pctBudget>85?T.danger:T.muted,fontWeight:600}}>{pctBudget.toFixed(0)}%</span>
+                        </div>
+                        <div style={{height:4,background:T.bg,borderRadius:2,overflow:'hidden'}}>
+                          <div style={{height:'100%',width:`${pctBudget}%`,background:pctBudget>85?T.danger:T.tan,borderRadius:2,transition:'width .5s'}}/>
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:T.dim,marginBottom:3,textTransform:'uppercase',letterSpacing:'0.06em'}}>
+                          <span>Collected</span><span style={{color:pctCollected>=100?T.success:T.muted,fontWeight:600}}>{pctCollected.toFixed(0)}%</span>
+                        </div>
+                        <div style={{height:4,background:T.bg,borderRadius:2,overflow:'hidden'}}>
+                          <div style={{height:'100%',width:`${pctCollected}%`,background:pctCollected>=100?T.success:T.info,borderRadius:2,transition:'width .5s'}}/>
+                        </div>
+                      </div>
+                    </div>
+                    {/* Meta row */}
+                    <div style={{display:'flex',gap:12,fontSize:11,color:T.dim,flexWrap:'wrap',alignItems:'center'}}>
+                      <span>{fmtDate(p.startDate)}{p.endDate&&` → ${fmtDate(p.endDate)}`}</span>
+                      {invCount>0&&<span style={{color:T.muted}}>{paidInvCount}/{invCount} inv paid</span>}
+                      {daysLeft!==null&&!p.archived&&p.status!=='Completed'&&(
+                        <span style={{color:overdue?T.danger:daysLeft<=14?T.warning:T.dim,fontWeight:overdue?700:400}}>
+                          {overdue?`${Math.abs(daysLeft)}d overdue`:`${daysLeft}d left`}
+                        </span>
+                      )}
+                      {designerComm>0&&<span>D: <span style={{color:T.accent,fontWeight:600}}>{fmtSGD(designerComm)}</span></span>}
+                      {pmComm>0&&<span>PM: <span style={{color:T.info,fontWeight:600}}>{fmtSGD(pmComm)}</span></span>}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Bottom actions: all buttons in one tidy row ── */}
+              <div style={{borderTop:`1px solid ${T.borderLight}`,paddingTop:10,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+                {!p.archived&&(
+                  <button onClick={()=>{setInvoiceModal(p.id);setInvForm({paymentType:'Progress',amount:'',description:'',date:new Date().toISOString().slice(0,10)});}}
+                    style={{background:T.accentLight,border:`1px solid ${T.borderLight}`,cursor:'pointer',color:T.text,
+                      display:'flex',padding:'5px 10px',borderRadius:7,fontSize:11,fontWeight:700,fontFamily:'inherit',alignItems:'center',gap:4}}>
+                    <Receipt size={11}/>Generate Invoice
+                  </button>
+                )}
+                {p.quotationFile&&(
+                  <>
+                    <button type="button" onClick={()=>setDocViewer({title:`Quotation — ${p.quotationFilename||'document'}`,data:p.quotationFile,filename:p.quotationFilename||'quotation'})}
+                      style={{background:T.accentLight,border:`1px solid ${T.borderLight}`,borderRadius:7,padding:'5px 10px',cursor:'pointer',fontSize:11,color:T.text,fontFamily:'inherit',fontWeight:600,display:'inline-flex',alignItems:'center',gap:4}}>
+                      <ZoomIn size={10}/>View Quotation
                     </button>
-                  )}
-                  {closeable&&(
-                    <button onClick={()=>setConfirmClose(p.id)}
-                      style={{background:T.successLight,border:`1px solid rgba(29,131,72,0.3)`,
-                        cursor:'pointer',color:T.success,display:'flex',padding:'3px 9px',borderRadius:6,
-                        fontSize:11,fontWeight:700,fontFamily:'inherit',alignItems:'center',gap:4}}>
-                      <CheckCircle size={11}/>Close Project
+                    <a href={p.quotationFile} download={p.quotationFilename||'quotation'}
+                      style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:7,padding:'5px 10px',cursor:'pointer',fontSize:11,color:T.muted,fontFamily:'inherit',fontWeight:600,display:'inline-flex',alignItems:'center',gap:4,textDecoration:'none'}}>
+                      <Download size={10}/>Download
+                    </a>
+                  </>
+                )}
+                {(p.voList||[]).map((vo,i)=>(
+                  vo.file?(
+                    <button key={vo.id} type="button" onClick={()=>setDocViewer({title:`VO ${i+1} — ${vo.filename||'document'}`,data:vo.file,filename:vo.filename||`VO${i+1}`})}
+                      style={{background:T.infoLight,border:`1px solid ${T.borderLight}`,borderRadius:7,padding:'5px 10px',cursor:'pointer',fontSize:11,color:T.info,fontFamily:'inherit',fontWeight:600,display:'inline-flex',alignItems:'center',gap:4}}>
+                      <ZoomIn size={10}/>VO {i+1}{vo.voNo?` #${vo.voNo}`:''}
                     </button>
-                  )}
-                  <span style={{color:T.muted,fontSize:11}}>D: <span style={{color:T.accent}}>{fmtSGD(designerComm)}</span></span>
-                  <span style={{color:T.muted,fontSize:11}}>PM: <span style={{color:T.info}}>{fmtSGD(pmComm)}</span></span>
-                </div>
+                  ):null
+                ))}
+                {closeable&&(
+                  <button onClick={()=>setConfirmClose(p.id)}
+                    style={{background:T.successLight,border:`1px solid rgba(45,122,79,0.3)`,
+                      cursor:'pointer',color:T.success,display:'flex',padding:'5px 10px',borderRadius:7,
+                      fontSize:11,fontWeight:700,fontFamily:'inherit',alignItems:'center',gap:4,marginLeft:'auto'}}>
+                    <CheckCircle size={11}/>Close Project
+                  </button>
+                )}
               </div>
               {p.archived&&p.archivedAt&&(
-                <div style={{marginTop:10,fontSize:11,color:T.dim,borderTop:`1px solid ${T.borderLight}`,paddingTop:8}}>
+                <div style={{marginTop:8,fontSize:11,color:T.dim}}>
                   Closed & archived {fmtDate(p.archivedAt)}
-                </div>
-              )}
-              {/* Quotation & VO document links */}
-              {(p.quotationFile||(p.voList||[]).length>0)&&(
-                <div style={{marginTop:10,borderTop:`1px solid ${T.borderLight}`,paddingTop:10,display:'flex',gap:6,flexWrap:'wrap'}}>
-                  {p.quotationFile&&(
-                    <>
-                      <button type="button" onClick={()=>setDocViewer({title:`Quotation — ${p.quotationFilename||'document'}`,data:p.quotationFile,filename:p.quotationFilename||'quotation'})}
-                        style={{background:T.accentLight,border:'none',borderRadius:7,padding:'3px 9px',cursor:'pointer',fontSize:11,color:T.accent,fontFamily:'inherit',fontWeight:600,display:'inline-flex',alignItems:'center',gap:4}}>
-                        <ZoomIn size={10}/>View Quotation
-                      </button>
-                      <a href={p.quotationFile} download={p.quotationFilename||'quotation'}
-                        style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:7,padding:'3px 9px',cursor:'pointer',fontSize:11,color:T.muted,fontFamily:'inherit',fontWeight:600,display:'inline-flex',alignItems:'center',gap:4,textDecoration:'none'}}>
-                        <Download size={10}/>Download
-                      </a>
-                    </>
-                  )}
-                  {(p.voList||[]).map((vo,i)=>(
-                    <span key={vo.id} style={{display:'inline-flex',gap:4,alignItems:'center'}}>
-                      {vo.file&&(
-                        <button type="button" onClick={()=>setDocViewer({title:`VO ${i+1} — ${vo.filename||'document'}`,data:vo.file,filename:vo.filename||`VO${i+1}`})}
-                          style={{background:'rgba(8,100,200,0.08)',border:'none',borderRadius:7,padding:'3px 9px',cursor:'pointer',fontSize:11,color:T.info,fontFamily:'inherit',fontWeight:600,display:'inline-flex',alignItems:'center',gap:4}}>
-                          <ZoomIn size={10}/>VO {i+1}{vo.voNo?` #${vo.voNo}`:''}
-                        </button>
-                      )}
-                    </span>
-                  ))}
                 </div>
               )}
             </div>
@@ -2385,6 +3060,26 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
             )}
 
             {/* Ref / Quotation No */}
+            <div>
+              <label style={{fontSize:12,fontWeight:500,color:T.muted,display:'block',marginBottom:6}}>
+                File No. <span style={{fontSize:10,color:T.dim}}>(auto-assigned, editable)</span>
+              </label>
+              <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                <div style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:10,
+                  padding:'11px 14px',fontFamily:'monospace',fontSize:15,fontWeight:700,
+                  color:form.projectNumber?T.text:T.dim,minWidth:60,textAlign:'center',flexShrink:0}}>
+                  {form.projectNumber?String(form.projectNumber).padStart(2,'0'):'—'}
+                </div>
+                <input type="number" min="1" max="999"
+                  value={form.projectNumber||''}
+                  onChange={e=>ff('projectNumber')(parseInt(e.target.value)||null)}
+                  placeholder="Auto"
+                  style={{...iStyle,width:90,flexShrink:0}}/>
+                <span style={{fontSize:11,color:T.dim,lineHeight:1.4}}>
+                  {form.projectYear||new Date().getFullYear()} · resets each year
+                </span>
+              </div>
+            </div>
             <Field label="Quotation / Ref No." value={form.refNo||''} onChange={ff('refNo')} placeholder="e.g. Q2604-NS-01"/>
             <Field label="Project Type" value={form.projectType||'Residential'} onChange={ff('projectType')} as="select" options={PROJ_TYPES.map(t=>({v:t,l:t}))}/>
 
@@ -2470,7 +3165,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
           </div>
           <div style={{display:'flex',justifyContent:'flex-end',gap:10,marginTop:22}}>
             <Btn variant="secondary" onClick={()=>setModal(null)}>Cancel</Btn>
-            <Btn onClick={save_}>{modal==='new'?'Create Project':'Save Changes'}</Btn>
+            <Btn onClick={save_} disabled={quoteCompressing} loading={quoteCompressing}>{quoteCompressing?'Compressing file…':modal==='new'?'Create Project':'Save Changes'}</Btn>
           </div>
         </Modal>
       )}
@@ -2483,6 +3178,111 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
           onConfirm={()=>confirmSoftDelete(deleteTarget)}
           onClose={()=>setDeleteTarget(null)}
         />
+      )}
+
+      {/* ── Handover Modal ── */}
+      {handoverTarget&&(
+        <Modal title={`Handover — ${handoverTarget.name}`} onClose={()=>setHandoverTarget(null)} wide>
+          <div style={{display:'flex',flexDirection:'column',gap:16}}>
+            {/* Info banner */}
+            <div style={{background:'rgba(45,122,79,0.07)',border:`1px solid ${T.success}30`,borderRadius:12,padding:'12px 16px',display:'flex',gap:12,alignItems:'flex-start'}}>
+              <CheckCircle size={16} style={{color:T.success,flexShrink:0,marginTop:2}}/>
+              <div style={{fontSize:13,color:T.text,lineHeight:1.5}}>
+                This generates a <strong>2-page handover document</strong> — Page 1 (client signs &amp; keeps) and Page 2 (defects record for your file). Fill in the details below before printing.
+              </div>
+            </div>
+
+            {/* Handover date */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:12}}>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:T.muted,display:'block',marginBottom:6}}>Handover Date *</label>
+                <input type="date" value={handoverForm.handoverDate}
+                  onChange={e=>setHandoverForm(f=>({...f,handoverDate:e.target.value}))}
+                  style={{...iStyle}}/>
+              </div>
+              <div style={{background:T.bg,borderRadius:10,padding:'10px 14px',border:`1px solid ${T.borderLight}`}}>
+                <div style={{fontSize:10,color:T.dim,marginBottom:2}}>Warranty expires</div>
+                <div style={{fontSize:13,fontWeight:700,color:T.danger}}>
+                  {handoverForm.handoverDate?(()=>{const d=new Date(handoverForm.handoverDate);d.setFullYear(d.getFullYear()+1);return d.toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'});})():'—'}
+                </div>
+              </div>
+            </div>
+
+            {/* Final payment */}
+            <div>
+              <div style={{fontSize:12,fontWeight:600,color:T.text,marginBottom:10,display:'flex',alignItems:'center',gap:6}}>
+                <div style={{width:4,height:14,background:T.tan,borderRadius:2}}/>Final Payment Details
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:10}}>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:T.muted,display:'block',marginBottom:6}}>Amount (S$)</label>
+                  <input type="number" value={handoverForm.finalPaymentAmount}
+                    onChange={e=>setHandoverForm(f=>({...f,finalPaymentAmount:e.target.value}))}
+                    placeholder="0.00" style={{...iStyle}}/>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:T.muted,display:'block',marginBottom:6}}>Payment Method</label>
+                  <select value={handoverForm.finalPaymentMethod}
+                    onChange={e=>setHandoverForm(f=>({...f,finalPaymentMethod:e.target.value}))}
+                    style={{...iStyle,appearance:'none'}}>
+                    {['PayNow','Bank Transfer','Cash','Cheque','Others'].map(m=><option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{fontSize:12,fontWeight:500,color:T.muted,display:'block',marginBottom:6}}>Receipt No.</label>
+                  <input value={handoverForm.finalPaymentReceiptNo}
+                    onChange={e=>setHandoverForm(f=>({...f,finalPaymentReceiptNo:e.target.value}))}
+                    placeholder="RCP-2026-xxxxx" style={{...iStyle}}/>
+                </div>
+              </div>
+            </div>
+
+            {/* Defects */}
+            <div>
+              <label style={{fontSize:12,fontWeight:500,color:T.muted,display:'block',marginBottom:6}}>
+                Defects / Remarks at Handover <span style={{color:T.dim,fontWeight:400}}>(leave blank for "Nil")</span>
+              </label>
+              <textarea value={handoverForm.defects}
+                onChange={e=>setHandoverForm(f=>({...f,defects:e.target.value}))}
+                placeholder="e.g. Minor paint touch-up on bedroom wall to be completed within 7 days."
+                rows={3}
+                style={{...iStyle,resize:'vertical',fontFamily:'inherit',lineHeight:1.5}}/>
+            </div>
+
+            {/* Outstanding works */}
+            <div>
+              <label style={{fontSize:12,fontWeight:500,color:T.muted,display:'block',marginBottom:6}}>
+                Outstanding Works <span style={{color:T.dim,fontWeight:400}}>(leave blank if none)</span>
+              </label>
+              <textarea value={handoverForm.outstanding}
+                onChange={e=>setHandoverForm(f=>({...f,outstanding:e.target.value}))}
+                placeholder="e.g. Supply of kitchen cabinet handles — to complete by 15 Jun 2026."
+                rows={2}
+                style={{...iStyle,resize:'vertical',fontFamily:'inherit',lineHeight:1.5}}/>
+            </div>
+
+            {/* Actions */}
+            <div style={{display:'flex',justifyContent:'flex-end',gap:10,paddingTop:4}}>
+              <Btn variant="secondary" onClick={()=>setHandoverTarget(null)}>Cancel</Btn>
+              <Btn onClick={()=>{
+                const projInv=invoices.filter(i=>i.projectId===handoverTarget.id);
+                const finalPay=handoverForm.finalPaymentAmount?{
+                  amount:parseFloat(handoverForm.finalPaymentAmount)||0,
+                  method:handoverForm.finalPaymentMethod,
+                  receiptNo:handoverForm.finalPaymentReceiptNo,
+                }:null;
+                printDoc(
+                  buildHandoverHTML(handoverTarget,projInv,finalPay,handoverForm,getCo(acctSettings),activeUser?.name||''),
+                  `Handover — ${handoverTarget.name}`,
+                  true
+                );
+                setHandoverTarget(null);
+              }}>
+                <CheckCircle size={13}/>Print Handover Form
+              </Btn>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {invoiceModal&&(()=>{
@@ -2553,7 +3353,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
   );
 }
 
-function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToast,invoiceBatches=[],setInvoiceBatches,acctSettings={}}){
+function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToast,invoiceBatches=[],setInvoiceBatches,acctSettings={},logAction=()=>{}}){
   const [modal,setModal]=useState(false);
   const [search,setSearch]=useState('');
   const [pfilt,setPfilt]=useState('All');
@@ -2573,6 +3373,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
   const [batchName,setBatchName]=useState('');
   const [batchPayModal,setBatchPayModal]=useState(null);
   const [batchPayForm,setBatchPayForm]=useState({amount:'',date:new Date().toISOString().slice(0,10),method:'paynow',reference:'',notes:'',proofImage:null});
+  const [hidePaidBatches,setHidePaidBatches]=useState(true);
   const [payForm,setPayForm]=useState({amount:'',date:new Date().toISOString().slice(0,10),method:'paynow',reference:'',notes:'',proofImage:null});
   const [proofOcrLoading,setProofOcrLoading]=useState(false);
   const payProofRef=useRef();
@@ -2719,6 +3520,8 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
       total:parseFloat(form.total)||0};
     const upd=[...invoices,inv];
     setInvoices(upd);saveInvoices(upd);
+    const projName=projects.find(p=>p.id===inv.projectId)?.name||'Unknown project';
+    logAction('CREATE_INVOICE',`Captured invoice ${inv.invoiceNo||''} from ${inv.supplier} — ${inv.category} — $${inv.total.toLocaleString('en-SG',{minimumFractionDigits:2})} (${projName})`);
     setModal(false);setPreview(null);setOcr({loading:false,done:false,err:''});setDup('');
   };
 
@@ -2747,6 +3550,8 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
     const newStatus=calcInvStatus(inv,records);
     const upd=invoices.map(i=>i.id===payModal?{...i,paymentRecords:records,status:newStatus}:i);
     setInvoices(upd);saveInvoices(upd);
+    const inv2=invoices.find(i=>i.id===payModal);
+    logAction('PAY_INVOICE',`Recorded $${parseFloat(payForm.amount).toLocaleString('en-SG',{minimumFractionDigits:2})} payment for invoice ${inv2?.invoiceNo||''} from ${inv2?.supplier||''} (${newStatus})`);
     setPayModal(null);
     setPayForm({amount:'',date:new Date().toISOString().slice(0,10),method:'paynow',reference:'',notes:'',proofImage:null});
   };
@@ -3108,11 +3913,21 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
       {/* Payment Batches */}
       {(invoiceBatches||[]).length>0&&(
         <div style={{display:'flex',flexDirection:'column',gap:10}}>
-          <div style={{fontSize:13,fontWeight:700,color:T.text,display:'flex',alignItems:'center',gap:8}}>
+          <div style={{fontSize:13,fontWeight:700,color:T.text,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
             <Receipt size={14} style={{color:T.accent}}/>Payment Batches
             <span style={{fontSize:11,color:T.muted,fontWeight:400}}>Grouped invoices paid together</span>
+            <button onClick={()=>setHidePaidBatches(h=>!h)}
+              style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:5,background:'transparent',border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'4px 10px',fontSize:11,fontWeight:500,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>
+              {hidePaidBatches?<Eye size={11}/>:<EyeOff size={11}/>}
+              {hidePaidBatches?'Show paid':'Hide paid'}
+              {hidePaidBatches&&(invoiceBatches||[]).filter(b=>getBatchStatus(b)==='Paid').length>0&&(
+                <span style={{background:T.success,color:'#fff',borderRadius:10,padding:'1px 6px',fontSize:10,fontWeight:700}}>
+                  {(invoiceBatches||[]).filter(b=>getBatchStatus(b)==='Paid').length}
+                </span>
+              )}
+            </button>
           </div>
-          {(invoiceBatches||[]).map(batch=>{
+          {(invoiceBatches||[]).filter(batch=>!hidePaidBatches||getBatchStatus(batch)!=='Paid').map(batch=>{
             const batchInvoices=batch.invoiceIds.map(id=>invoices.find(i=>i.id===id)).filter(Boolean);
             const totalPaid=getBatchTotalPaid(batch);
             const batchOnlyPaid=(batch.paymentRecords||[]).reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
@@ -3848,7 +4663,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
     </div>
   );
 }
-function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,onShowToast,acctSettings}){
+function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,onShowToast,acctSettings,logAction=()=>{}}){
   const [modal,setModal]=useState(false);
   const [form,setForm]=useState({projectId:'',type:'Deposit',amount:'',date:'',status:'Received',paymentMethod:'',reference:''});
   const [deleteTarget,setDeleteTarget]=useState(null);
@@ -3906,6 +4721,8 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
       receiptNo:`RCP-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`};
     const upd=[...payments,pay];
     setPayments(upd);saveS('payments',upd);setModal(false);setReceipt(null);
+    const projName=projects.find(p=>p.id===pay.projectId)?.name||'Unknown project';
+    logAction('CREATE_PAYMENT',`Recorded ${pay.type} payment $${pay.amount.toLocaleString('en-SG',{minimumFractionDigits:2})} — ${projName} — Status: ${pay.status}`);
     if(pay.status==='Received'){
       const proj=projects.find(p=>p.id===pay.projectId);
       setTimeout(()=>{
@@ -6190,56 +7007,143 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
 
       {adminTab==='log'&&(()=>{
         const [undoTarget,setUndoTarget]=useState(null);
-        const ACTION_COLOR={DELETE_PROJECT:T.danger,DELETE_INVOICE:T.danger,DELETE_PAYMENT:T.danger,DELETE_USER:T.danger,DELETE_STAFFCLAIM:T.danger,RESTORE_PROJECT:T.success,RESTORE_INVOICE:T.success,RESTORE_PAYMENT:T.success,RESTORE_USER:T.success,RESTORE_STAFFCLAIM:T.success,PERMANENT_DELETE:'#6d28d9'};
-        const canUndo=entry=>entry.snapshot&&entry.action.startsWith('DELETE_')&&!entry.action.startsWith('PERMANENT');
-        const sortedLog=[...actionLog].sort((a,b)=>new Date(b.at)-new Date(a.at));
+        const [logSearch,setLogSearch]=useState('');
+        const [logUser,setLogUser]=useState('All');
+
+        const ACTION_ICON={
+          CREATE_PROJECT:'📁',EDIT_PROJECT:'✏️',CLOSE_PROJECT:'✅',REOPEN_PROJECT:'🔄',
+          CREATE_INVOICE:'🧾',PAY_INVOICE:'💳',
+          CREATE_PAYMENT:'💰',
+          CREATE_WORKER:'👷',EDIT_WORKER:'✏️',
+          DELETE_PROJECT:'🗑️',DELETE_INVOICE:'🗑️',DELETE_PAYMENT:'🗑️',DELETE_USER:'🗑️',DELETE_STAFFCLAIM:'🗑️',
+          RESTORE_PROJECT:'↩️',RESTORE_INVOICE:'↩️',RESTORE_PAYMENT:'↩️',RESTORE_USER:'↩️',
+          PERMANENT_DELETE:'⛔',
+        };
+        const ACTION_COLOR={
+          CREATE_PROJECT:T.success,EDIT_PROJECT:T.info,CLOSE_PROJECT:T.success,REOPEN_PROJECT:T.tan,
+          CREATE_INVOICE:'#8A6A3A',PAY_INVOICE:T.success,CREATE_PAYMENT:T.success,
+          CREATE_WORKER:T.info,EDIT_WORKER:T.info,
+          DELETE_PROJECT:T.danger,DELETE_INVOICE:T.danger,DELETE_PAYMENT:T.danger,DELETE_USER:T.danger,DELETE_STAFFCLAIM:T.danger,
+          RESTORE_PROJECT:T.tan,RESTORE_INVOICE:T.tan,RESTORE_PAYMENT:T.tan,RESTORE_USER:T.tan,
+          PERMANENT_DELETE:'#6d28d9',
+        };
+        const canUndo=entry=>entry.snapshot&&entry.action.startsWith('DELETE_')&&!entry.action.includes('PERMANENT');
+
+        // Filter and sort
+        const uniqueUsers=['All',...[...new Set(actionLog.map(e=>e.userName))].sort()];
+        const filtered=actionLog
+          .filter(e=>{
+            const matchUser=logUser==='All'||e.userName===logUser;
+            const matchSearch=!logSearch||(e.detail+e.userName+e.action).toLowerCase().includes(logSearch.toLowerCase());
+            return matchUser&&matchSearch;
+          })
+          .sort((a,b)=>new Date(b.at)-new Date(a.at));
+
+        // Group by user for the grouped view
+        const byUser={};
+        filtered.forEach(e=>{
+          if(!byUser[e.userName]) byUser[e.userName]={userName:e.userName,userRole:e.userRole,entries:[]};
+          byUser[e.userName].entries.push(e);
+        });
+        const userGroups=Object.values(byUser).sort((a,b)=>new Date(b.entries[0].at)-new Date(a.entries[0].at));
+
         return (
-          <div style={{display:'flex',flexDirection:'column',gap:10}}>
-            {sortedLog.length===0&&<div style={{textAlign:'center',padding:'48px 0',color:T.muted,fontSize:13}}>No actions recorded yet. Actions are kept for 6 months.</div>}
-            {sortedLog.map(entry=>{
-              const color=ACTION_COLOR[entry.action]||T.muted;
-              const d=new Date(entry.at);
-              const age=Math.floor((Date.now()-d)/60000);
-              const when=age<2?'Just now':age<60?`${age}m ago`:age<1440?`${Math.floor(age/60)}h ago`:d.toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'2-digit'})+' '+d.toLocaleTimeString('en-SG',{hour:'2-digit',minute:'2-digit'});
-              return (
-                <div key={entry.id} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:12,padding:'12px 16px',display:'flex',alignItems:'center',gap:12,boxShadow:T.shadow}}>
-                  <div style={{width:8,height:8,borderRadius:'50%',background:color,flexShrink:0}}/>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:600,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{entry.detail}</div>
-                    <div style={{fontSize:11,color:T.muted,marginTop:2,display:'flex',gap:10,flexWrap:'wrap'}}>
-                      <span>{entry.userName}</span>
-                      <span style={{color:T.dim}}>·</span>
-                      <span style={{color:T.dim}}>{when}</span>
-                      <span style={{color:T.dim}}>·</span>
-                      <span style={{fontFamily:'monospace',fontSize:10,color:T.dim}}>{entry.action}</span>
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            {/* Toolbar */}
+            <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+              <div style={{position:'relative',flex:1,minWidth:180}}>
+                <Search size={12} style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',color:T.dim}}/>
+                <input value={logSearch} onChange={e=>setLogSearch(e.target.value)} placeholder="Search actions…"
+                  style={{...iStyle,paddingLeft:30,fontSize:13}}/>
+              </div>
+              <select value={logUser} onChange={e=>setLogUser(e.target.value)}
+                style={{...iStyle,width:'auto',fontSize:13,cursor:'pointer'}}>
+                {uniqueUsers.map(u=><option key={u} value={u}>{u}</option>)}
+              </select>
+              <div style={{fontSize:12,color:T.dim,display:'flex',alignItems:'center'}}>
+                {filtered.length} action{filtered.length!==1?'s':''}
+              </div>
+            </div>
+
+            {userGroups.length===0&&(
+              <div style={{textAlign:'center',padding:'48px 0',color:T.muted,fontSize:13}}>
+                No actions recorded yet. Actions are automatically tracked from here on.
+              </div>
+            )}
+
+            {/* User groups */}
+            {userGroups.map(group=>(
+              <div key={group.userName} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
+                {/* User header */}
+                <div style={{padding:'12px 18px',background:T.bg,borderBottom:`1px solid ${T.borderLight}`,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:10}}>
+                    <div style={{width:30,height:30,borderRadius:10,background:T.text,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                      <span style={{fontSize:12,color:'#F8F6F2',fontWeight:700}}>{group.userName.charAt(0).toUpperCase()}</span>
+                    </div>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:T.text}}>{group.userName}</div>
+                      <div style={{fontSize:10,color:T.dim}}>{ROLE_LABEL[group.userRole]||group.userRole} · {group.entries.length} action{group.entries.length!==1?'s':''}</div>
                     </div>
                   </div>
-                  {isSuperAdmin&&canUndo(entry)&&(
-                    <button onClick={()=>setUndoTarget(entry)}
-                      style={{background:T.accentLight,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'4px 10px',cursor:'pointer',fontSize:11,fontWeight:600,color:T.text,fontFamily:'inherit',display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
-                      <RotateCcw size={10}/>Undo
-                    </button>
-                  )}
+                  <div style={{fontSize:11,color:T.dim}}>
+                    Last: {(()=>{const d=new Date(group.entries[0].at);const age=Math.floor((Date.now()-d)/60000);return age<2?'Just now':age<60?`${age}m ago`:age<1440?`${Math.floor(age/60)}h ago`:d.toLocaleDateString('en-SG',{day:'numeric',month:'short'});})()}
+                  </div>
                 </div>
-              );
-            })}
+                {/* Action rows */}
+                <div>
+                  {group.entries.map((entry,idx)=>{
+                    const color=ACTION_COLOR[entry.action]||T.muted;
+                    const icon=ACTION_ICON[entry.action]||'•';
+                    const d=new Date(entry.at);
+                    const timeStr=d.toLocaleString('en-SG',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+                    return (
+                      <div key={entry.id} style={{display:'flex',alignItems:'flex-start',gap:12,padding:'10px 18px',
+                        borderTop:idx===0?'none':`1px solid ${T.borderLight}`,
+                        background:'transparent'}}>
+                        <div style={{width:24,height:24,borderRadius:7,background:color+'14',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1,fontSize:13}}>
+                          {icon}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:12,fontWeight:600,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{entry.detail}</div>
+                          <div style={{fontSize:10,color:T.dim,marginTop:2,display:'flex',gap:8,flexWrap:'wrap'}}>
+                            <span style={{fontFamily:'monospace',background:T.bg,padding:'1px 5px',borderRadius:4,fontSize:9}}>{entry.action}</span>
+                            <span>{timeStr}</span>
+                          </div>
+                        </div>
+                        {isSuperAdmin&&canUndo(entry)&&(
+                          <button onClick={()=>setUndoTarget(entry)}
+                            style={{background:T.accentLight,border:`1px solid ${T.borderLight}`,borderRadius:7,
+                              padding:'3px 10px',cursor:'pointer',fontSize:11,fontWeight:600,
+                              color:T.text,fontFamily:'inherit',display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+                            <RotateCcw size={9}/>Undo
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            {/* Undo confirmation modal */}
             {undoTarget&&(
               <Modal title="Confirm Undo" onClose={()=>setUndoTarget(null)}>
                 <div style={{display:'flex',flexDirection:'column',gap:16}}>
                   <div style={{background:T.bg,borderRadius:12,padding:'14px 16px'}}>
-                    <div style={{fontSize:13,color:T.muted,marginBottom:4}}>Action to undo:</div>
+                    <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Action to undo:</div>
                     <div style={{fontSize:14,fontWeight:600,color:T.text}}>{undoTarget.detail}</div>
-                    <div style={{fontSize:11,color:T.dim,marginTop:4}}>By {undoTarget.userName} · {new Date(undoTarget.at).toLocaleString('en-SG')}</div>
+                    <div style={{fontSize:11,color:T.dim,marginTop:4}}>
+                      By {undoTarget.userName} · {new Date(undoTarget.at).toLocaleString('en-SG',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false})}
+                    </div>
                   </div>
                   <div style={{fontSize:13,color:T.muted,lineHeight:1.6}}>
-                    This will restore the deleted item back to its original location. Any changes made after the deletion will not be affected.
+                    This will restore the deleted item back to its original location.
                   </div>
                   <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
                     <Btn variant="secondary" onClick={()=>setUndoTarget(null)}>Cancel</Btn>
-                    <Btn onClick={()=>{
-                      if(undoTarget.snapshot) onUndoAction(undoTarget.snapshot);
-                      setUndoTarget(null);
-                    }}><RotateCcw size={13}/>Confirm Undo</Btn>
+                    <Btn onClick={()=>{if(undoTarget.snapshot)onUndoAction(undoTarget.snapshot);setUndoTarget(null);}}>
+                      <RotateCcw size={13}/>Confirm Undo
+                    </Btn>
                   </div>
                 </div>
               </Modal>
@@ -7527,7 +8431,7 @@ function WorkerPortal({worker, onLogout, attendance, setAttendance, projects, cl
   );
 }
 
-function WorkerAdmin({siteWorkers,setSiteWorkers,attendance,setAttendance,projects,invoices,setInvoices,claims=[],setClaims,acctSettings}){
+function WorkerAdmin({siteWorkers,setSiteWorkers,attendance,setAttendance,projects,invoices,setInvoices,claims=[],setClaims,acctSettings,logAction=()=>{}}){
   const [view,setView]=useState('workers');
   const [selWorker,setSelWorker]=useState(null);
   const [modal,setModal]=useState(null);
@@ -7548,8 +8452,10 @@ function WorkerAdmin({siteWorkers,setSiteWorkers,attendance,setAttendance,projec
       monthlySalary:parseFloat(form.monthlySalary)||0,
       assignedProjects:form.assignedProjects||[],
       pin:form.pin||'1234'};
-    const upd=modal==='new'?[...siteWorkers,{...d,id:uid()}]:siteWorkers.map(w=>w.id===d.id?d:w);
+    const isNew=modal==='new';
+    const upd=isNew?[...siteWorkers,{...d,id:uid()}]:siteWorkers.map(w=>w.id===d.id?d:w);
     setSiteWorkers(upd);saveS('siteWorkers',upd);setModal(null);
+    logAction(isNew?'CREATE_WORKER':'EDIT_WORKER',`${isNew?'Added':'Edited'} site worker: ${d.name} — ${d.trade||'General'} (${d.status})`);
   };
 
   const addCert=()=>setForm(p=>({...p,certificates:[...p.certificates,
@@ -9321,7 +10227,7 @@ function SystemPanel({projects,invoices,payments,siteWorkers,attendance,users,wa
   const ask=(action,label,desc,fn)=>setConfirm({action,label,desc,fn});
 
   const storageKeys=[
-    {key:'projects',   label:'Projects',     count:projects.length},
+    {key:'projects',   label:'Projects',     count:projects.length, note:'files stored separately'},
     {key:'invoices',   label:'Invoices',      count:invoices.length},
     {key:'payments',   label:'Payments',      count:payments.length},
     {key:'siteWorkers',label:'Site Workers',  count:siteWorkers.length},
@@ -9573,11 +10479,43 @@ const NAV_GROUPS={
 };
 
 export default function App(){
+  // ── Dark mode ─────────────────────────────────────────────────────────────
+  const [darkMode,setDarkMode]=useState(()=>{
+    try{ return localStorage.getItem('rl_dark')==='1'; }catch{ return false; }
+  });
+  // Keep T and iStyle in sync with dark mode — called before every render
+  T = THEMES[darkMode?'dark':'light'];
+  iStyle = makeIStyle();
+  useEffect(()=>{
+    try{ localStorage.setItem('rl_dark',darkMode?'1':'0'); }catch{}
+    document.body.style.background = T.bg;
+  },[darkMode]);
+
+  // ── Offline detection ─────────────────────────────────────────────────────
+  const [isOnline,setIsOnline]=useState(()=>navigator.onLine);
+  const [offlineQueue,setOfflineQueue]=useState([]);
+  useEffect(()=>{
+    const goOn =()=>setIsOnline(true);
+    const goOff=()=>setIsOnline(false);
+    window.addEventListener('online', goOn);
+    window.addEventListener('offline',goOff);
+    return ()=>{ window.removeEventListener('online',goOn); window.removeEventListener('offline',goOff); };
+  },[]);
+
   const [tab,setTab]=useState('dashboard');
-  const [projects,setProjects]=useState(SEED_PROJ);
-  const [invoices,setInvoices]=useState(SEED_INV);
-  const [payments,setPayments]=useState(SEED_PAY);
-  const [users,setUsers]=useState(SEED_USERS);
+  const [projects,setProjects]=useState(()=>{
+    // Seed from localStorage cache for instant load
+    try{ const c=localStorage.getItem('rl_cache_projects'); return c?JSON.parse(c):SEED_PROJ; }catch{ return SEED_PROJ; }
+  });
+  const [invoices,setInvoices]=useState(()=>{
+    try{ const c=localStorage.getItem('rl_cache_invoices'); return c?JSON.parse(c):SEED_INV; }catch{ return SEED_INV; }
+  });
+  const [payments,setPayments]=useState(()=>{
+    try{ const c=localStorage.getItem('rl_cache_payments'); return c?JSON.parse(c):SEED_PAY; }catch{ return SEED_PAY; }
+  });
+  const [users,setUsers]=useState(()=>{
+    try{ const c=localStorage.getItem('rl_cache_users'); return c?JSON.parse(c):SEED_USERS; }catch{ return SEED_USERS; }
+  });
   const [warranties,setWarranties]=useState(SEED_WARRANTIES);
   const [trash,setTrash]=useState([]);
   const [actionLog,setActionLog]=useState([]); // audit log — 6 months of user actions
@@ -9607,6 +10545,81 @@ export default function App(){
   const [showWorkerLogin,setShowWorkerLogin]=useState(false);
   const [ready,setReady]=useState(false);
   const [isMobile,setIsMobile]=useState(()=>typeof window!=='undefined'&&window.innerWidth<768);
+  const [notifOpen,setNotifOpen]=useState(false);
+  const [notifSeen,setNotifSeen]=useState(()=>{
+    try{ return new Set(JSON.parse(localStorage.getItem('rl_notif_seen')||'[]')); }catch{ return new Set(); }
+  });
+
+  const notifications = useMemo(()=>{
+    const items=[];
+    const now=new Date();
+    const _isAdmin = activeUserId==='__sa__' || (users.find(u=>u.id===activeUserId)?.role==='admin');
+
+    // 1. Overdue client payments — projects past end date with outstanding balance
+    projects.filter(p=>!p.archived&&p.status!=='Cancelled'&&p.endDate).forEach(p=>{
+      const endD=new Date(p.endDate);
+      const overdueDays=Math.floor((now-endD)/864e5);
+      if(overdueDays>0){
+        const rev=(p.contractAmount||0)+(p.variationOrders||0);
+        const recv=payments.filter(py=>py.projectId===p.id&&py.status==='Received').reduce((s,py)=>s+py.amount,0);
+        const outstanding=rev-recv;
+        if(outstanding>0) items.push({id:`overdue_${p.id}`,type:'danger',title:'Overdue Payment',
+          body:`${p.name} — ${fmtSGD(outstanding)} outstanding, ${overdueDays}d past end date`,
+          action:()=>{setTab('payments');setNotifOpen(false);},at:endD.toISOString()});
+      }
+    });
+
+    // 2. Pending supplier invoices >30 days old
+    invoices.filter(i=>i.status==='Pending').forEach(i=>{
+      const age=Math.floor((now-new Date(i.invoiceDate||now))/864e5);
+      if(age>30) items.push({id:`inv_aging_${i.id}`,type:'warning',title:'Aging Invoice',
+        body:`${i.supplier} — ${i.invoiceNo||''} — ${fmtSGD(i.total)} unpaid for ${age} days`,
+        action:()=>{setTab('invoices');setNotifOpen(false);},at:i.invoiceDate});
+    });
+
+    // 3. Worker document expiry — within 60 days
+    siteWorkers.filter(w=>w.status==='Active').forEach(w=>{
+      const wpDays=daysUntil(w.workPassExpiry);
+      if(wpDays!==null&&wpDays<=60) items.push({id:`wp_${w.id}`,type:wpDays<=14?'danger':'warning',
+        title:'Work Pass Expiring',body:`${w.name} — Work Pass expires in ${wpDays} day${wpDays!==1?'s':''}`,
+        action:()=>{setTab('workers');setNotifOpen(false);},at:w.workPassExpiry});
+      (w.certificates||[]).forEach(c=>{
+        if(!c.expiryDate)return;
+        const cd=daysUntil(c.expiryDate);
+        if(cd!==null&&cd<=60) items.push({id:`cert_${w.id}_${c.id}`,type:cd<=14?'danger':'warning',
+          title:'Certificate Expiring',body:`${w.name} — ${c.name} expires in ${cd} day${cd!==1?'s':''}`,
+          action:()=>{setTab('workers');setNotifOpen(false);},at:c.expiryDate});
+      });
+    });
+
+    // 4. Projects starting within 7 days
+    projects.filter(p=>p.status==='Planning'&&p.startDate).forEach(p=>{
+      const startDays=Math.floor((new Date(p.startDate)-now)/864e5);
+      if(startDays>=0&&startDays<=7) items.push({id:`starting_${p.id}`,type:'info',title:'Project Starting Soon',
+        body:`${p.name} starts in ${startDays===0?'today':`${startDays} day${startDays!==1?'s':''}`}`,
+        action:()=>{setTab('projects');setNotifOpen(false);},at:p.startDate});
+    });
+
+    // 5. Pending staff expense claims
+    const pendingClaims=staffClaims.filter(c=>c.status==='Pending');
+    if(pendingClaims.length>0&&_isAdmin) items.push({id:'pending_claims',type:'info',title:'Pending Expense Claims',
+      body:`${pendingClaims.length} staff claim${pendingClaims.length>1?'s':''} awaiting approval`,
+      action:()=>{setTab('claims');setNotifOpen(false);},at:pendingClaims[0]?.submittedAt||now.toISOString()});
+
+    return items.sort((a,b)=>{
+      const order={danger:0,warning:1,info:2};
+      return (order[a.type]||3)-(order[b.type]||3);
+    });
+  },[projects,invoices,payments,siteWorkers,staffClaims,activeUserId,users]);
+
+  const unreadCount=notifications.filter(n=>!notifSeen.has(n.id)).length;
+
+  const markAllSeen=()=>{
+    const newSeen=new Set([...notifSeen,...notifications.map(n=>n.id)]);
+    setNotifSeen(newSeen);
+    try{ localStorage.setItem('rl_notif_seen',JSON.stringify([...newSeen])); }catch{}
+  };
+
   const [moreOpen,setMoreOpen]=useState(false);
   const [onlinePresence,setOnlinePresence]=useState([]); // [{userId,name,role,photo,loginAt,lastSeen,currentTab}]
 
@@ -9756,7 +10769,7 @@ export default function App(){
   const loadAllData = useCallback(async()=>{
     setSyncing(true);
     try{
-      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,nt]=await Promise.all([
+      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no]=await Promise.all([
         loadS('projects',SEED_PROJ),
         loadS('invoices',SEED_INV),
         loadS('payments',SEED_PAY),
@@ -9772,12 +10785,57 @@ export default function App(){
         loadS('actionLog',[]),
         loadS('notices',[]),
       ]);
-      setProjects(Array.isArray(p)?p:SEED_PROJ);
-      const rawInvoices=Array.isArray(i)?i:SEED_INV;
-      setInvoices(rawInvoices.map(stripLargeImages));
-      setPayments(Array.isArray(py)?py:SEED_PAY);
+      let finalProjects = Array.isArray(p) ? p : SEED_PROJ;
+      // Rehydrate quotation files and VO files from separate per-project keys
+      if(finalProjects.length > 0){
+        const fileResults = await Promise.all(
+          finalProjects.map(proj => loadS(`proj_file_${proj.id}`, null))
+        );
+        finalProjects = finalProjects.map((proj, i) => {
+          const fd = fileResults[i];
+          if(!fd) return proj;
+          const rehydrated = {...proj};
+          if(fd.quotationFile) rehydrated.quotationFile = fd.quotationFile;
+          if(fd.quotationFilename && !proj.quotationFilename) rehydrated.quotationFilename = fd.quotationFilename;
+          if(proj.voList){
+            rehydrated.voList = proj.voList.map(vo => {
+              const vf = fd[`vo_${vo.id}`];
+              return vf ? {...vo, file: vf} : vo;
+            });
+          }
+          return rehydrated;
+        });
+      }
+      setProjects(finalProjects);
+      // Cache to localStorage for offline
+      try{ localStorage.setItem('rl_cache_projects',JSON.stringify(finalProjects)); }catch{}
+      let rawInvoices=Array.isArray(i)?i:SEED_INV;
+      // Rehydrate proof images from per-invoice file documents
+      if(rawInvoices.length>0){
+        const invFileResults=await Promise.all(rawInvoices.map(inv=>loadS(`inv_file_${inv.id}`,null)));
+        rawInvoices=rawInvoices.map((inv,idx)=>{
+          const fd=invFileResults[idx];
+          if(!fd) return inv;
+          const r={...inv};
+          if(fd.proofImage) r.proofImage=fd.proofImage;
+          if(inv.paymentRecords)
+            r.paymentRecords=inv.paymentRecords.map(pr=>{
+              const rp=fd[`pay_${pr.id}`];
+              return rp?{...pr,proofImage:rp}:pr;
+            });
+          return r;
+        });
+      }
+      setInvoices(rawInvoices);
+      // Cache without images to avoid localStorage quota issues
+      try{ localStorage.setItem('rl_cache_invoices',JSON.stringify(rawInvoices.map(inv=>({...inv,proofImage:null})))); }catch{}
+      const rawPay=Array.isArray(py)?py:SEED_PAY;
+      setPayments(rawPay);
+      try{ localStorage.setItem('rl_cache_payments',JSON.stringify(rawPay)); }catch{}
       const rawUsers=Array.isArray(us)&&us.length>0?us:SEED_USERS;
-      setUsers(rawUsers.map(u=>(!u.photo||u.photo.length<=66666)?u:{...u,photo:''}));
+      const cleanUsers=rawUsers.map(u=>(!u.photo||u.photo.length<=66666)?u:{...u,photo:''});
+      setUsers(cleanUsers);
+      try{ localStorage.setItem('rl_cache_users',JSON.stringify(cleanUsers)); }catch{}
       setWarranties(Array.isArray(ws)?ws:SEED_WARRANTIES);
       setAcctSettings({...SEED_ACCT_SETTINGS,...(as&&typeof as==='object'?as:{})});
       setSiteWorkers(Array.isArray(sw)?sw:SEED_WORKERS);
@@ -9785,7 +10843,7 @@ export default function App(){
       setWorkerClaims(Array.isArray(wc)?wc:[]);
       setStaffClaims(Array.isArray(sc)?sc:[]);
       setInvoiceBatches(Array.isArray(ib)?ib:[]);
-      setNotices(Array.isArray(nt)?nt:[]);
+      setNotices(Array.isArray(no)?no:[]);
       // Trash kept for 12 months (previously 30 days)
       const twelveMonthsAgo=Date.now()-365*24*60*60*1000;
       const freshTrash=(Array.isArray(tr)?tr:[]).filter(t=>new Date(t._deletedAt).getTime()>twelveMonthsAgo);
@@ -9917,22 +10975,81 @@ export default function App(){
     <div style={{background:T.bg,minHeight:'100vh',fontFamily:'"DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',color:T.text}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap');
-        html,body{font-size:${isMobile?'15px':'15px'};}
+        html,body{font-size:15px;background:${T.bg};}
         *{box-sizing:border-box;margin:0;padding:0;}
         ::placeholder{color:${T.dim};}
         ::-webkit-scrollbar{width:4px;height:4px;}
         ::-webkit-scrollbar-track{background:transparent;}
         ::-webkit-scrollbar-thumb{background:${T.borderLight};border-radius:4px;}
         input[type=number]::-webkit-inner-spin-button{opacity:0;}
-        input:focus,select:focus{border-color:${T.text} !important;box-shadow:0 0 0 3px rgba(26,26,26,0.08) !important;outline:none;}
+        input:focus,select:focus{border-color:${T.text} !important;box-shadow:0 0 0 3px ${T.accentLight} !important;outline:none;}
         @keyframes spin{to{transform:rotate(360deg);}}
         @keyframes fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+        @keyframes slideDown{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
         .page-content{animation:fadeIn 0.18s ease;}
         button{-webkit-tap-highlight-color:transparent;font-family:"DM Sans",-apple-system,sans-serif;}
-        select option{background:#fff;color:${T.text};}
+        select option{background:${T.card};color:${T.text};}
       `}</style>
 
-      {/* DESKTOP — sidebar */}
+      {/* ── Offline banner ── */}
+      {!isOnline&&(
+        <div style={{position:'fixed',top:0,left:0,right:0,zIndex:999,background:'#9A6A00',
+          color:'#fff',textAlign:'center',fontSize:12,fontWeight:600,padding:'8px',
+          display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+          <AlertCircle size={13}/>
+          You're offline — showing cached data. Changes will sync when connection returns.
+        </div>
+      )}
+
+      {/* ── Notification panel ── */}
+      {notifOpen&&(
+        <div style={{position:'fixed',inset:0,zIndex:200}} onClick={()=>setNotifOpen(false)}>
+          <div style={{position:'absolute',top:isMobile?52:60,right:isMobile?8:16,
+            width:Math.min(360,window.innerWidth-16),
+            background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,
+            boxShadow:T.shadowLg,overflow:'hidden',animation:'slideDown 0.18s ease'}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{padding:'16px 18px 12px',borderBottom:`1px solid ${T.borderLight}`,
+              display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+              <div style={{fontWeight:700,fontSize:14,color:T.text}}>Notifications {notifications.length>0&&`(${notifications.length})`}</div>
+              <div style={{display:'flex',gap:10,alignItems:'center'}}>
+                {unreadCount>0&&(
+                  <button onClick={markAllSeen} style={{background:'none',border:'none',
+                    fontSize:11,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Mark all read</button>
+                )}
+                <button onClick={()=>setNotifOpen(false)} style={{background:'none',border:'none',cursor:'pointer',color:T.dim,display:'flex'}}><X size={14}/></button>
+              </div>
+            </div>
+            <div style={{maxHeight:380,overflowY:'auto',WebkitOverflowScrolling:'touch'}}>
+              {notifications.length===0?(
+                <div style={{padding:'32px 18px',textAlign:'center',color:T.muted,fontSize:13}}>
+                  <div style={{fontSize:28,marginBottom:8}}>✓</div>All clear — no alerts
+                </div>
+              ):notifications.map(n=>{
+                const isNew=!notifSeen.has(n.id);
+                const NCLR={danger:T.danger,warning:T.warning,info:T.info};
+                const NBKG={danger:T.dangerLight,warning:T.warningLight,info:T.infoLight};
+                const NICON={danger:'⚠️',warning:'🕐',info:'ℹ️'};
+                return (
+                  <div key={n.id} onClick={()=>{n.action&&n.action();markAllSeen();}}
+                    style={{padding:'12px 18px',borderBottom:`1px solid ${T.borderLight}`,
+                      cursor:'pointer',background:isNew?NBKG[n.type]:'transparent',
+                      display:'flex',gap:10,alignItems:'flex-start'}}>
+                    <span style={{fontSize:16,flexShrink:0,marginTop:1}}>{NICON[n.type]}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:2}}>
+                        <span style={{fontSize:12,fontWeight:700,color:NCLR[n.type]}}>{n.title}</span>
+                        {isNew&&<span style={{width:6,height:6,borderRadius:'50%',background:NCLR[n.type],display:'inline-block'}}/>}
+                      </div>
+                      <div style={{fontSize:12,color:T.muted,lineHeight:1.5}}>{n.body}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
       {!isMobile&&(
         <div style={{position:'fixed',left:0,top:0,bottom:0,width:240,
           background:T.card,borderRight:`1px solid ${T.borderLight}`,
@@ -9958,14 +11075,28 @@ export default function App(){
                 {syncStatus==='error'&&<AlertCircle size={9}/>}
                 {syncStatus==='saved'&&<CheckCircle size={9} style={{color:T.success}}/>}
                 {syncing?'Syncing…':syncStatus==='saved'?'Saved':syncStatus==='error'?
-                  <span style={{cursor:'pointer'}} onClick={()=>alert(`Sync failed: ${syncError}\n\nCheck internet and try again.`)}>Not synced</span>
+                  <span style={{cursor:'pointer'}} onClick={()=>alert(`Sync failed: ${syncError}`)}>Not synced</span>
                   :lastSync?`${lastSync.getHours().toString().padStart(2,'0')}:${lastSync.getMinutes().toString().padStart(2,'0')}`:''}
               </span>
-              <button onClick={()=>loadAllData()} disabled={syncing}
-                style={{background:'none',border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'2px 8px',
-                  cursor:'pointer',fontSize:10,color:T.dim,fontFamily:'inherit',display:'flex',alignItems:'center',gap:3}}>
-                <RefreshCw size={9} style={syncing?{animation:'spin 1s linear infinite'}:{}}/>Refresh
-              </button>
+              <div style={{display:'flex',alignItems:'center',gap:4}}>
+                <button onClick={()=>{setNotifOpen(o=>!o);if(!notifOpen)markAllSeen();}}
+                  style={{background:'none',border:'none',cursor:'pointer',position:'relative',
+                    padding:4,color:T.muted,display:'flex',alignItems:'center'}}>
+                  <Bell size={14}/>
+                  {unreadCount>0&&(
+                    <span style={{position:'absolute',top:0,right:0,width:14,height:14,
+                      background:T.danger,borderRadius:'50%',fontSize:8,fontWeight:700,
+                      color:'#fff',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      {unreadCount>9?'9+':unreadCount}
+                    </span>
+                  )}
+                </button>
+                <button onClick={()=>loadAllData()} disabled={syncing}
+                  style={{background:'none',border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'2px 8px',
+                    cursor:'pointer',fontSize:10,color:T.dim,fontFamily:'inherit',display:'flex',alignItems:'center',gap:3}}>
+                  <RefreshCw size={9} style={syncing?{animation:'spin 1s linear infinite'}:{}}/>Refresh
+                </button>
+              </div>
             </div>
             {isSuperAdmin&&(
               <div style={{marginTop:8,background:'rgba(109,40,217,0.06)',border:'1px solid rgba(109,40,217,0.18)',borderRadius:8,padding:'5px 10px',display:'flex',alignItems:'center',gap:6}}>
@@ -9986,6 +11117,12 @@ export default function App(){
             <button onClick={logout} style={{background:'none',border:'none',cursor:'pointer',
               fontSize:11,color:T.dim,fontFamily:'inherit',padding:'2px 0',whiteSpace:'nowrap'}}>
               Sign out
+            </button>
+            {/* Dark mode toggle */}
+            <button onClick={()=>setDarkMode(d=>!d)}
+              style={{background:'none',border:'none',cursor:'pointer',fontSize:16,padding:'2px 0',lineHeight:1}}
+              title={darkMode?'Switch to light mode':'Switch to dark mode'}>
+              {darkMode?'☀️':'🌙'}
             </button>
           </div>
 
@@ -10054,6 +11191,24 @@ export default function App(){
                 {lastSync.getHours().toString().padStart(2,'0')}:{lastSync.getMinutes().toString().padStart(2,'0')}
               </span>
             )}
+            {/* Bell */}
+            <button onClick={()=>{setNotifOpen(o=>!o);}}
+              style={{background:'none',border:'none',padding:4,cursor:'pointer',
+                display:'flex',alignItems:'center',position:'relative',color:T.muted}}>
+              <Bell size={16}/>
+              {unreadCount>0&&(
+                <span style={{position:'absolute',top:0,right:0,width:14,height:14,
+                  background:T.danger,borderRadius:'50%',fontSize:8,fontWeight:700,
+                  color:'#fff',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  {unreadCount>9?'9+':unreadCount}
+                </span>
+              )}
+            </button>
+            {/* Dark mode */}
+            <button onClick={()=>setDarkMode(d=>!d)}
+              style={{background:'none',border:'none',padding:4,cursor:'pointer',fontSize:14}}>
+              {darkMode?'☀️':'🌙'}
+            </button>
             <button onClick={()=>loadAllData()} disabled={syncing}
               style={{background:'none',border:'none',padding:4,cursor:'pointer',
                 display:'flex',alignItems:'center',color:T.dim}}>
@@ -10170,16 +11325,22 @@ export default function App(){
           </div>
         )}
         <div style={{padding:isMobile?'12px 10px 16px':'24px 32px 48px'}}>
-          {tab==='dashboard'&&(<Dashboard projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments.filter(py=>userProjects.some(p=>p.id===py.projectId))} widgets={activeUser?.widgets||DASH_WIDGETS.map(w=>w.id)} siteWorkers={siteWorkers} onlinePresence={onlinePresence} activeUserId={activeUserId} notices={notices} setNotices={setNotices} isAdmin={isAdmin} activeUser={activeUser}/>)}
-          {tab==='projects'&&<Projects projects={userProjects} setProjects={setProjects} invoices={invoices} payments={payments} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} users={users} acctSettings={acctSettings}/>}
-          {tab==='invoices'&&<Invoices invoices={invoices} setInvoices={setInvoices} projects={userProjects} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} invoiceBatches={invoiceBatches} setInvoiceBatches={setInvoiceBatches} acctSettings={acctSettings}/>}
-          {tab==='payments'&&<Payments payments={payments} setPayments={setPayments} projects={userProjects} invoices={invoices} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} acctSettings={acctSettings}/>}
+          {tab==='dashboard'&&(()=>{
+            // Merge any new widget IDs that aren't in the user's saved list yet
+            const allIds=DASH_WIDGETS.map(w=>w.id);
+            const userWidgets=activeUser?.widgets||allIds;
+            const mergedWidgets=[...userWidgets, ...allIds.filter(id=>!userWidgets.includes(id))];
+            return <Dashboard projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments.filter(py=>userProjects.some(p=>p.id===py.projectId))} widgets={mergedWidgets} siteWorkers={siteWorkers} onlinePresence={onlinePresence} activeUserId={activeUserId} notices={notices} setNotices={(n)=>{setNotices(n);saveNotices(n);}} isAdmin={isAdmin}/>;
+          })()}
+          {tab==='projects'&&<Projects projects={userProjects} setProjects={setProjects} invoices={invoices} payments={payments} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} users={users} acctSettings={acctSettings} logAction={logAction} activeUser={activeUser}/>}
+          {tab==='invoices'&&<Invoices invoices={invoices} setInvoices={setInvoices} projects={userProjects} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} invoiceBatches={invoiceBatches} setInvoiceBatches={setInvoiceBatches} acctSettings={acctSettings} logAction={logAction}/>}
+          {tab==='payments'&&<Payments payments={payments} setPayments={setPayments} projects={userProjects} invoices={invoices} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='contacts'&&<Contacts projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments}/>}
           {tab==='reports'&&<Reports projects={userProjects} invoices={invoices} payments={payments} acctSettings={acctSettings}/>}
           {tab==='commissions'&&<Commissions projects={projects} setProjects={setProjects} invoices={invoices} isAdmin={isAdmin} users={users}/>}
           {tab==='claims'&&<StaffClaims claims={staffClaims} setClaims={setStaffClaims} projects={userProjects} users={users} activeUser={activeUser} isAdmin={isAdmin} invoices={invoices} setInvoices={setInvoices} acctSettings={acctSettings} trash={trash} setTrash={setTrash}/>}
           {tab==='warranty'&&<Warranty warranties={warranties} setWarranties={setWarranties} projects={projects} isAdmin={isAdmin} acctSettings={acctSettings}/>}
-          {tab==='workers'&&<WorkerAdmin siteWorkers={siteWorkers} setSiteWorkers={setSiteWorkers} attendance={attendance} setAttendance={setAttendance} projects={projects} invoices={invoices} setInvoices={setInvoices} claims={workerClaims} setClaims={setWorkerClaims} acctSettings={acctSettings}/>}
+          {tab==='workers'&&<WorkerAdmin siteWorkers={siteWorkers} setSiteWorkers={setSiteWorkers} attendance={attendance} setAttendance={setAttendance} projects={projects} invoices={invoices} setInvoices={setInvoices} claims={workerClaims} setClaims={setWorkerClaims} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='checkin'&&<WorkerLoginScreen siteWorkers={siteWorkers} onLogin={(w)=>setWorkerSession(w)} onAdminLogin={()=>setTab('dashboard')} acctSettings={acctSettings}/>}
           {tab==='accounts'&&isAdmin&&(<CompanyAccounts projects={projects} invoices={invoices} payments={payments} acctSettings={acctSettings} setAcctSettings={setAcctSettings}/>)}
           {tab==='trash'&&isAdmin&&(<TrashBin trash={trash} onRestore={handleRestore} onPermanentDelete={handlePermanentDelete} isSuperAdmin={isSuperAdmin}/>)}
