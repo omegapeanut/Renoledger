@@ -2728,7 +2728,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                 <div style={{display:'flex',gap:4,alignItems:'center',flexShrink:0,marginLeft:8}}>
                   {!p.archived&&(
                     <button onClick={()=>{
-                      const inferredYear=p.projectYear||(p.startDate?new Date(p.startDate).getFullYear():p.createdAt?new Date(p.createdAt).getFullYear():new Date().getFullYear());
+                      const inferredYear=p.startDate?new Date(p.startDate).getFullYear():(p.projectYear||(p.createdAt?new Date(p.createdAt).getFullYear():new Date().getFullYear()));
                       setForm({...p,contractAmount:String(p.contractAmount),variationOrders:String(p.variationOrders??0),designerRate:String(p.designerRate??0),pmRate:String(p.pmRate??0),projectYear:inferredYear});setModal('edit');}}
                       style={{background:'none',border:'none',cursor:'pointer',color:T.dim,display:'flex',padding:4,borderRadius:6}}>
                       <Edit3 size={13}/>
@@ -3154,6 +3154,8 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                 const sameYear=projects.filter(p=>(p.projectYear||(p.createdAt?new Date(p.createdAt).getFullYear():new Date().getFullYear()))===yr);
                 const nextNum=sameYear.reduce((m,p)=>Math.max(m,p.projectNumber||0),0)+1;
                 setForm(prev=>({...prev,startDate:v,projectYear:yr,projectNumber:nextNum}));
+              } else if(modal==='edit'&&v){
+                setForm(prev=>({...prev,startDate:v,projectYear:new Date(v).getFullYear()}));
               } else {
                 ff('startDate')(v);
               }
