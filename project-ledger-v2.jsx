@@ -1934,6 +1934,9 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
         )}
       </div>
 
+      {/* ── Holiday Calendar ── */}
+      <HolidayCalendar/>
+
       {/* Worker document expiry alerts */}
       {(()=>{
         const alerts=[];
@@ -2838,6 +2841,32 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                   </div>
                 );
               })()}
+
+              {/* ── Site map ── */}
+              {p.clientAddress&&(
+                <div style={{marginBottom:12,borderRadius:10,overflow:'hidden',
+                  border:`1px solid ${T.borderLight}`,position:'relative'}}>
+                  <iframe
+                    src={`https://maps.google.com/maps?q=${encodeURIComponent(p.clientAddress+', Singapore')}&output=embed&z=16&hl=en`}
+                    width="100%" height="160"
+                    style={{display:'block',border:'none',
+                      filter:T.bg==='#141412'?'grayscale(20%) brightness(0.80) contrast(1.05)':'none'}}
+                    loading="lazy"
+                    title={`Map — ${p.clientAddress}`}
+                    allowFullScreen={false}
+                  />
+                  <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.clientAddress+', Singapore')}`}
+                    target="_blank" rel="noopener noreferrer"
+                    style={{position:'absolute',bottom:7,right:7,
+                      background:T.card,border:`1px solid ${T.borderLight}`,
+                      borderRadius:6,padding:'4px 9px',fontSize:10,fontWeight:600,
+                      color:T.text,textDecoration:'none',
+                      display:'inline-flex',alignItems:'center',gap:4,
+                      boxShadow:T.shadow}}>
+                    <MapPin size={9}/>Open in Maps
+                  </a>
+                </div>
+              )}
 
               {/* ── Bottom actions: all buttons in one tidy row ── */}
               <div style={{borderTop:`1px solid ${T.borderLight}`,paddingTop:10,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
@@ -9898,6 +9927,104 @@ function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSetting
   );
 }
 
+
+// -- Singapore MOM Holiday Calendar --
+const SG_HOLIDAYS = {
+  '2024-01-01':"New Year's Day",'2024-02-10':'Chinese New Year','2024-02-11':'Chinese New Year',
+  '2024-03-29':'Good Friday','2024-04-10':'Hari Raya Puasa','2024-05-01':'Labour Day',
+  '2024-05-22':'Vesak Day','2024-06-17':'Hari Raya Haji','2024-08-09':'National Day',
+  '2024-10-31':'Deepavali','2024-12-25':'Christmas Day',
+  '2025-01-01':"New Year's Day",'2025-01-29':'Chinese New Year','2025-01-30':'Chinese New Year',
+  '2025-03-31':'Hari Raya Puasa','2025-04-18':'Good Friday','2025-05-01':'Labour Day',
+  '2025-05-12':'Vesak Day','2025-06-06':'Hari Raya Haji',
+  '2025-08-09':'National Day','2025-08-11':'National Day (Sub)',
+  '2025-10-20':'Deepavali','2025-12-25':'Christmas Day',
+  '2026-01-01':"New Year's Day",'2026-02-17':'Chinese New Year','2026-02-18':'Chinese New Year',
+  '2026-03-20':'Hari Raya Puasa','2026-04-03':'Good Friday','2026-05-01':'Labour Day',
+  '2026-05-27':'Hari Raya Haji','2026-06-01':'Vesak Day',
+  '2026-08-09':'National Day','2026-08-10':'National Day (Sub)',
+  '2026-11-09':'Deepavali','2026-12-25':'Christmas Day',
+};
+function HolidayCalendar(){
+  const [calDate,setCalDate]=useState(()=>new Date());
+  const yr=calDate.getFullYear(), mo=calDate.getMonth();
+  const todayStr=new Date().toISOString().slice(0,10);
+  const firstDow=new Date(yr,mo,1).getDay();
+  const daysInMo=new Date(yr,mo+1,0).getDate();
+  const cells=[];
+  for(let i=0;i<firstDow;i++) cells.push(null);
+  for(let d=1;d<=daysInMo;d++) cells.push(d);
+  while(cells.length%7!==0) cells.push(null);
+  const moKey=`${yr}-${String(mo+1).padStart(2,'0')}`;
+  const moLabel=calDate.toLocaleDateString('en-SG',{month:'long',year:'numeric'});
+  const moHolidays=Object.entries(SG_HOLIDAYS).filter(([k])=>k.startsWith(moKey)).sort(([a],[b])=>a.localeCompare(b));
+  return (
+    <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:20,boxShadow:T.shadow}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <div style={{width:32,height:32,borderRadius:10,background:T.tanLight,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+            <Calendar size={15} style={{color:T.tan}}/>
+          </div>
+          <div>
+            <div style={{fontSize:14,fontWeight:700,color:T.text}}>Public Holidays</div>
+            <div style={{fontSize:11,color:T.muted}}>Singapore MOM</div>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:4,alignItems:'center'}}>
+          <button onClick={()=>setCalDate(d=>new Date(d.getFullYear(),d.getMonth()-1,1))}
+            style={{background:'none',border:`1px solid ${T.borderLight}`,borderRadius:7,width:26,height:26,
+              cursor:'pointer',color:T.muted,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15}}>‹</button>
+          <span style={{fontSize:12,fontWeight:600,color:T.text,minWidth:130,textAlign:'center'}}>{moLabel}</span>
+          <button onClick={()=>setCalDate(d=>new Date(d.getFullYear(),d.getMonth()+1,1))}
+            style={{background:'none',border:`1px solid ${T.borderLight}`,borderRadius:7,width:26,height:26,
+              cursor:'pointer',color:T.muted,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15}}>›</button>
+        </div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2,marginBottom:6}}>
+        {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d=>(
+          <div key={d} style={{textAlign:'center',fontSize:9,fontWeight:700,color:T.dim,letterSpacing:'0.06em',padding:'2px 0'}}>{d}</div>
+        ))}
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:3}}>
+        {cells.map((d,i)=>{
+          if(!d) return <div key={i}/>;
+          const ds=`${yr}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+          const holiday=SG_HOLIDAYS[ds];
+          const isToday=ds===todayStr;
+          const isSun=i%7===0, isSat=i%7===6;
+          return (
+            <div key={i} title={holiday||undefined}
+              style={{textAlign:'center',borderRadius:7,padding:'5px 1px',
+                background:isToday?T.text:holiday?T.tanLight:'transparent',
+                color:isToday?T.bg:holiday?'#8A6A3A':isSun||isSat?T.tan:T.text,
+                fontSize:11,fontWeight:isToday||holiday?700:400,
+                cursor:holiday?'help':'default',
+                border:holiday&&!isToday?`1px solid rgba(196,168,130,0.3)`:'1px solid transparent',
+                position:'relative'}}>
+              {d}
+              {holiday&&!isToday&&<div style={{width:3,height:3,borderRadius:'50%',background:T.tan,margin:'1px auto 0'}}/>}
+            </div>
+          );
+        })}
+      </div>
+      {moHolidays.length>0?(
+        <div style={{marginTop:14,borderTop:`1px solid ${T.borderLight}`,paddingTop:12,display:'flex',flexDirection:'column',gap:7}}>
+          {moHolidays.map(([k,name])=>(
+            <div key={k} style={{display:'flex',alignItems:'center',gap:9}}>
+              <div style={{width:28,textAlign:'center',fontSize:12,fontWeight:700,color:T.tan,
+                background:T.tanLight,borderRadius:6,padding:'2px 0',flexShrink:0}}>
+                {parseInt(k.slice(8))}
+              </div>
+              <div style={{fontSize:12,color:T.text,fontWeight:500}}>{name}</div>
+            </div>
+          ))}
+        </div>
+      ):(
+        <div style={{marginTop:12,textAlign:'center',fontSize:12,color:T.dim}}>No public holidays this month</div>
+      )}
+    </div>
+  );
+}
 
 // -- Worker Login Screen --
 function WorkerLoginScreen({siteWorkers, onLogin, onAdminLogin, acctSettings}){
