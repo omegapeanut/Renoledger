@@ -1310,7 +1310,7 @@ const Btn = ({variant='primary',size='md',onClick,children,disabled,loading,full
   const pad={sm:'7px 14px',md:'10px 18px',lg:'12px 24px'}[size];
   const fs={sm:12,md:13,lg:14}[size];
   const vs={
-    primary:{background:hov?T.accentHover:T.accent,color:'#fff',boxShadow:hov?'0 4px 14px rgba(26,26,26,0.22)':'none'},
+    primary:{background:hov?T.accentHover:T.accent,color:T.bg,boxShadow:hov?'0 4px 14px rgba(26,26,26,0.22)':'none'},
     secondary:{background:hov?T.borderLight:T.bg,color:T.secondary,border:`1px solid ${T.borderLight}`},
     ghost:{background:'transparent',color:T.muted},
     danger:{background:hov?'#FDEEEC':'#FEF4F3',color:T.danger,border:`1px solid #F5C8C4`},
@@ -2712,7 +2712,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:3,flexWrap:'wrap'}}>
                     {p.projectNumber&&(
-                      <span style={{background:T.text,color:'#F8F6F2',borderRadius:5,padding:'1px 7px',
+                      <span style={{background:T.text,color:T.bg,borderRadius:5,padding:'1px 7px',
                         fontSize:11,fontWeight:700,fontFamily:'monospace',flexShrink:0,letterSpacing:'0.04em'}}>
                         {String(p.projectYear||new Date().getFullYear()).slice(-2)}-{String(p.projectNumber).padStart(2,'0')}
                       </span>
@@ -2894,7 +2894,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
           <div style={{display:'flex',flexDirection:'column',gap:12}}>
             <div style={{textAlign:'right'}}>
               <a href={docViewer.data} download={docViewer.filename}
-                style={{display:'inline-flex',alignItems:'center',gap:6,padding:'7px 16px',borderRadius:9,background:T.accent,color:'#fff',fontFamily:'inherit',fontSize:13,fontWeight:600,textDecoration:'none'}}>
+                style={{display:'inline-flex',alignItems:'center',gap:6,padding:'7px 16px',borderRadius:9,background:T.accent,color:T.bg,fontFamily:'inherit',fontSize:13,fontWeight:600,textDecoration:'none'}}>
                 <Download size={14}/>Download {docViewer.filename}
               </a>
             </div>
@@ -4033,7 +4033,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
                           _histFound:!!hist,
                         });
                       }}
-                        style={{display:'flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:9,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:12,fontWeight:700,background:T.accent,color:'#fff'}}>
+                        style={{display:'flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:9,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:12,fontWeight:700,background:T.accent,color:T.bg}}>
                         <CreditCard size={13}/>{preExisting>0?`Pay Balance ${fmtSGD(outstanding)}`:'Record Payment'}
                       </button>
                     )}
@@ -4232,7 +4232,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
             {/* STEP 1 — Upload invoice */}
             <div>
               <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
-                <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
+                <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
                 Upload Invoice {(acctSettings?.anthropicApiKey||'').trim()&&<span style={{fontSize:10,color:T.accent,fontWeight:400}}>— AI fills all fields below</span>}
               </div>
               <DropZone accept="image/*,application/pdf" onDrop={f=>doOCR(f)}>
@@ -4292,7 +4292,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
             {/* STEP 2 — Review and confirm fields */}
             <div>
               <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:12,display:'flex',alignItems:'center',gap:6}}>
-                <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
+                <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
                 Review & Confirm Details
                 {ocr.loading&&<span style={{fontSize:10,color:T.accent,fontWeight:400}}>— filling from invoice...</span>}
               </div>
@@ -4449,7 +4449,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
               {/* STEP 1 — Upload proof first */}
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
-                  <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
+                  <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
                   Upload Payment Screenshot {(acctSettings?.anthropicApiKey||'').trim()&&<span style={{fontSize:10,color:T.accent,fontWeight:400}}>— AI fills details below</span>}
                 </div>
                 <DropZone accept="image/*,application/pdf" onDrop={f=>extractProof(f,setBatchPayForm)}>
@@ -4486,7 +4486,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
               {/* STEP 2 — Summary */}
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
-                  <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
+                  <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
                   Verify Payment Details
                 </div>
                 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:8,marginBottom:10}}>
@@ -4629,7 +4629,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
               {/* STEP 1 — Upload proof first */}
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
-                  <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
+                  <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
                   Upload Payment Screenshot {(acctSettings?.anthropicApiKey||'').trim()&&<span style={{fontSize:10,color:T.accent,fontWeight:400}}>— AI fills details below</span>}
                 </div>
                 <DropZone accept="image/*,application/pdf" onDrop={f=>extractProof(f,setPayForm)}>
@@ -4666,7 +4666,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
               {/* STEP 2 — Verify details */}
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
-                  <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
+                  <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
                   Verify Payment Details
                 </div>
                 <div style={{background:T.bg,borderRadius:12,padding:'12px 14px',marginBottom:10}}>
@@ -4975,7 +4975,7 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
             {/* STEP 1 — Upload screenshot */}
             <div>
               <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
-                <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
+                <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
                 Upload Payment Screenshot {acctSettings?.anthropicApiKey&&<span style={{fontSize:10,color:T.accent,fontWeight:400}}>— AI fills details below</span>}
               </div>
               <DropZone accept="image/*,application/pdf" onDrop={f=>extractPayment(f)}>
@@ -5025,7 +5025,7 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
             {/* STEP 2 — Review and confirm fields */}
             <div>
               <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:12,display:'flex',alignItems:'center',gap:6}}>
-                <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
+                <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
                 Review & Confirm Details
                 {ocrLoading&&<span style={{fontSize:10,color:T.accent,fontWeight:400}}>— filling from screenshot...</span>}
               </div>
@@ -5895,7 +5895,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
         <div style={{flex:1}}/>
         {tab==='my'&&(
           <button type="button" onClick={()=>setForm({projectId:myProjects[0]?.id||'',type:'',amount:'',description:'',date:new Date().toISOString().slice(0,10),receiptImage:null,paidBy:'personal',companyReceiptImage:null})}
-            style={{display:'flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:10,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:600,background:T.accent,color:'#fff'}}>
+            style={{display:'flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:10,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:600,background:T.accent,color:T.bg}}>
             <Plus size={14}/>Submit Claim
           </button>
         )}
@@ -6034,7 +6034,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
                           setAdminPayTarget(c.id);
                           setAdminPayForm({method:'',reference:'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
                         }}
-                          style={{display:'flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:9,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:12,fontWeight:700,background:T.accent,color:'#fff',whiteSpace:'nowrap'}}>
+                          style={{display:'flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:9,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:12,fontWeight:700,background:T.accent,color:T.bg,whiteSpace:'nowrap'}}>
                           <Upload size={13}/>Upload Proof
                         </button>
                       </div>
@@ -6221,7 +6221,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
                                   setAdminPayTarget(c.id);
                                   setAdminPayForm({method:'',reference:'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
                                 }}
-                                  style={{display:'flex',alignItems:'center',gap:7,padding:'9px 16px',borderRadius:10,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:700,background:T.accent,color:'#fff',whiteSpace:'nowrap'}}>
+                                  style={{display:'flex',alignItems:'center',gap:7,padding:'9px 16px',borderRadius:10,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:700,background:T.accent,color:T.bg,whiteSpace:'nowrap'}}>
                                   <Upload size={14}/>Upload Payment Proof
                                 </button>
                               </div>
@@ -6298,7 +6298,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
               {/* STEP 1 — Upload receipt */}
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
-                  <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
+                  <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
                    Upload Receipt {(acctSettings?.anthropicApiKey||'').trim()&&<span style={{fontSize:10,color:T.accent,fontWeight:400,marginLeft:4}}>— AI will auto-fill details below</span>}
                 </div>
               <DropZone accept="image/*,application/pdf" onDrop={f=>handleClaimReceiptUpload(f)}>
@@ -6342,7 +6342,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
               {/* STEP 2 — Who paid */}
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
-                  <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
+                  <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
                   Who paid?
                 </div>
                 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:10}}>
@@ -6366,7 +6366,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
               {/* STEP 3 — Expense type */}
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
-                  <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>3</span>
+                  <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>3</span>
                   Type of Expense
                 </div>
                 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:8}}>
@@ -6387,7 +6387,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
               {/* STEP 4 — Amount, date, description, project */}
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:10,display:'flex',alignItems:'center',gap:6}}>
-                  <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>4</span>
+                  <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>4</span>
                   Claim Details
                   {claimOcrLoading&&<span style={{fontSize:10,color:T.accent,fontWeight:400}}>— filling from receipt...</span>}
                 </div>
@@ -6465,7 +6465,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
               {/* STEP 1 — Upload payment screenshot */}
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
-                  <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
+                  <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>1</span>
                   Upload Payment Screenshot / Proof
                   {acctSettings?.anthropicApiKey&&<span style={{fontSize:10,color:T.accent,fontWeight:400}}>— AI fills details below</span>}
                 </div>
@@ -6512,7 +6512,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
               {/* STEP 2 — Verify payment details */}
               <div>
                 <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:10,display:'flex',alignItems:'center',gap:6}}>
-                  <span style={{background:T.accent,color:'#fff',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
+                  <span style={{background:T.accent,color:T.bg,borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:800,flexShrink:0}}>2</span>
                   Verify Payment Details
                   {adminOcrLoading&&<span style={{fontSize:10,color:T.accent,fontWeight:400}}>— filling from screenshot...</span>}
                 </div>
@@ -10317,7 +10317,7 @@ function LoginScreen({users, siteWorkers, onStaffLogin, onWorkerPortal, acctSett
               <button className="login-btn" onClick={handleStaffLogin}
                 disabled={loading||!email||!password}
                 style={{background:loading||!email||!password?T.dim:T.text,
-                  color:'#fff',border:'none',borderRadius:12,padding:'15px',
+                  color:T.bg,border:'none',borderRadius:12,padding:'15px',
                   fontSize:15,fontWeight:600,cursor:loading||!email||!password?'not-allowed':'pointer',
                   fontFamily:'inherit',letterSpacing:'0.01em',
                   display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
