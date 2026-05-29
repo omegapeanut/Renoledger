@@ -3946,6 +3946,14 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
                         Receipt
                       </button>
                     )}
+                    {pay.proofImage&&(
+                      <button onClick={()=>setLightbox({type:'img',src:pay.proofImage,title:`Payment Screenshot — ${pay.type}`})}
+                        style={{background:T.infoLight,border:'none',cursor:'pointer',color:T.info,
+                          display:'flex',padding:'3px 8px',borderRadius:5,fontSize:11,fontWeight:600,
+                          fontFamily:'inherit',alignItems:'center',gap:4}}>
+                        <Eye size={11}/>View
+                      </button>
+                    )}
                     <button onClick={()=>del_(pay.id)}
                       style={{background:'none',border:'none',cursor:'pointer',color:T.dim,display:'flex'}}><Trash2 size={13}/></button>
                   </div>
