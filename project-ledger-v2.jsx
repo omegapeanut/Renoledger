@@ -904,7 +904,7 @@ const isMobileDevice = () => typeof window !== 'undefined' && window.innerWidth 
 // DropZone — wraps any upload trigger with drag-and-drop on desktop
 // onDrop receives a File object
 const DropZone = ({onDrop, accept='*', children, style={}}) => {
-  const [dragging, setDragging] = React.useState(false);
+  const [dragging, setDragging] = useState(false);
   // Only disable on touch-only devices (no mouse)
   if(typeof window !== 'undefined' && !window.matchMedia('(hover: hover)').matches)
     return <div style={style}>{children}</div>;
@@ -985,13 +985,13 @@ const Modal = ({title,onClose,children,wide}) => (
 
 // PDF viewer using PDF.js — renders pages as canvas, works inside sandboxed iframes
 const PdfViewer = ({src}) => {
-  const [pages, setPages] = React.useState([]);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState('');
-  const [currentPage, setCurrentPage] = React.useState(1);
-  const canvasRef = React.useRef();
+  const [pages, setPages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const canvasRef = useRef();
 
-  React.useEffect(()=>{
+  useEffect(()=>{
     if(!src) return;
     setLoading(true); setError(''); setPages([]);
     // Load PDF.js from CDN
@@ -1503,7 +1503,7 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
 
       {/* Revenue vs Expenses chart + Project status donut */}
       {(widgets.includes('budget')||widgets.includes('catbreak'))&&(()=>{
-        const [chartRange,setChartRange]=React.useState('12m');
+        const [chartRange,setChartRange]=useState('12m');
         const now=new Date();
         const numMonths=chartRange==='6m'?6:chartRange==='24m'?24:12;
         const months=[];
