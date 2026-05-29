@@ -565,7 +565,7 @@ const buildReceiptHTML = (payment, proj, receiptNo, co) => `
         ${proj?.clientEmail?`<div style="font-size:11px;color:#7A7468;">${proj.clientEmail}</div>`:''}
       </div>
       <div style="text-align:right;">
-        <div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px;">Date</div>
+        <div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px;">Transfer Date</div>
         <div style="font-size:13px;font-weight:600;color:#1A1A1A;">${payment.date?new Date(payment.date).toLocaleDateString('en-SG',{day:'2-digit',month:'long',year:'numeric'}):'—'}</div>
       </div>
     </div>
@@ -576,11 +576,13 @@ const buildReceiptHTML = (payment, proj, receiptNo, co) => `
           <td style="padding:7px 0;font-size:11px;color:#7A7468;">Project</td>
           <td style="padding:7px 0;font-size:12px;font-weight:600;text-align:right;color:#1A1A1A;">${proj?.name||'—'}</td>
         </tr>
+        ${proj?.clientAddress?`<tr style="border-bottom:1px solid #EDE9E1;"><td style="padding:7px 0;font-size:11px;color:#7A7468;">Project Address</td><td style="padding:7px 0;font-size:12px;font-weight:600;text-align:right;color:#1A1A1A;">${proj.clientAddress}</td></tr>`:''}
         <tr style="border-bottom:1px solid #EDE9E1;">
           <td style="padding:7px 0;font-size:11px;color:#7A7468;">Payment Type</td>
           <td style="padding:7px 0;font-size:12px;font-weight:600;text-align:right;color:#1A1A1A;">${payment.type} Payment</td>
         </tr>
-        ${payment.paymentMethod?`<tr style="border-bottom:1px solid #EDE9E1;"><td style="padding:7px 0;font-size:11px;color:#7A7468;">Method</td><td style="padding:7px 0;font-size:12px;font-weight:600;text-align:right;color:#1A1A1A;">${payment.paymentMethod==='paynow'?'PayNow':payment.paymentMethod==='bank_transfer'?'Bank Transfer':'Cash'}</td></tr>`:''}
+        ${payment.paymentMethod?`<tr style="border-bottom:1px solid #EDE9E1;"><td style="padding:7px 0;font-size:11px;color:#7A7468;">Transfer Method</td><td style="padding:7px 0;font-size:12px;font-weight:600;text-align:right;color:#1A1A1A;">${payment.paymentMethod==='paynow'?'PayNow':payment.paymentMethod==='bank_transfer'?'Bank Transfer':'Cash'}</td></tr>`:''}
+        ${payment.reference?`<tr style="border-bottom:1px solid #EDE9E1;"><td style="padding:7px 0;font-size:11px;color:#7A7468;">Transaction Ref.</td><td style="padding:7px 0;font-size:12px;font-weight:600;text-align:right;color:#1A1A1A;font-family:monospace;">${payment.reference}</td></tr>`:''}
         <tr>
           <td style="padding:12px 0 0;font-size:13px;font-weight:600;color:#1A1A1A;">Amount Received</td>
           <td style="padding:12px 0 0;font-size:22px;font-weight:700;color:#2D7A4F;text-align:right;font-family:'DM Serif Display',Georgia,serif;">S$${Number(payment.amount).toLocaleString('en-SG',{minimumFractionDigits:2})}</td>
