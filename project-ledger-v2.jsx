@@ -3451,9 +3451,9 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
   const [batchModal,setBatchModal]=useState(false); // create batch modal
   const [batchName,setBatchName]=useState('');
   const [batchPayModal,setBatchPayModal]=useState(null);
-  const [batchPayForm,setBatchPayForm]=useState({amount:'',date:new Date().toISOString().slice(0,10),method:'paynow',reference:'',notes:'',proofImage:null});
+  const [batchPayForm,setBatchPayForm]=useState({amount:'',date:new Date().toISOString().slice(0,10),method:'paynow',reference:'',bankName:'',bankAccount:'',bankAccountName:'',notes:'',proofImage:null});
   const [hidePaidBatches,setHidePaidBatches]=useState(true);
-  const [payForm,setPayForm]=useState({amount:'',date:new Date().toISOString().slice(0,10),method:'paynow',reference:'',notes:'',proofImage:null});
+  const [payForm,setPayForm]=useState({amount:'',date:new Date().toISOString().slice(0,10),method:'paynow',reference:'',bankName:'',bankAccount:'',bankAccountName:'',notes:'',proofImage:null});
   const [proofOcrLoading,setProofOcrLoading]=useState(false);
   const payProofRef=useRef();
   const batchProofRef=useRef();
@@ -3479,9 +3479,9 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
         headers:{'Content-Type':'application/json','x-api-key':apiKey,
           'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
         body:JSON.stringify({
-          model:'claude-opus-4-5',max_tokens:300,
+          model:'claude-opus-4-5',max_tokens:500,
           messages:[{role:'user',content:[part,{type:'text',
-            text:'Extract from this payment screenshot/receipt. Return ONLY valid JSON:\n{"date":"YYYY-MM-DD","method":"paynow|bank_transfer|cash","reference":"","amount":0}\nRules: date=transaction date. method=paynow if PayNow/QR/UEN, bank_transfer if bank/FAST/GIRO/transfer, cash if cash. reference=PayNow number/UEN/account/transaction ref. amount=total amount paid (numeric, 0 if unclear). Empty string if not found.'}]}]
+            text:'Extract from this payment receipt/screenshot. Return ONLY valid JSON:\n{"date":"YYYY-MM-DD","method":"paynow|bank_transfer|cash","transactionRef":"","payerUEN":"","bankName":"","bankAccount":"","bankAccountName":"","amount":0}\nRules: date=transaction date YYYY-MM-DD. method=paynow if PayNow/UEN/QR-code transfer, bank_transfer if bank/FAST/GIRO/IBG/telegraphic, cash if cash. transactionRef=the unique bank transaction reference/ID number (e.g. FAST ref, transfer ID — NOT account number or UEN). payerUEN=for PayNow only, the sender UEN or phone number. bankName=bank name (DBS/OCBC/UOB/POSB/etc). bankAccount=account number of sender or recipient as shown. bankAccountName=account holder name. amount=total amount paid numeric. Use empty string if not found.'}]}]
         })
       });
       const data=await res.json();
@@ -3492,7 +3492,10 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
         ...prev,
         date:parsed.date||prev.date,
         method:parsed.method||prev.method,
-        reference:parsed.reference||prev.reference,
+        reference:parsed.transactionRef||parsed.payerUEN||prev.reference,
+        bankName:parsed.bankName||prev.bankName||'',
+        bankAccount:parsed.bankAccount||prev.bankAccount||'',
+        bankAccountName:parsed.bankAccountName||prev.bankAccountName||'',
         amount:parsed.amount&&!prev.amount?String(parsed.amount):prev.amount,
       }));
     }catch(e){console.warn('Proof OCR:',e);}
@@ -3632,7 +3635,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
     const inv2=invoices.find(i=>i.id===payModal);
     logAction('PAY_INVOICE',`Recorded $${parseFloat(payForm.amount).toLocaleString('en-SG',{minimumFractionDigits:2})} payment for invoice ${inv2?.invoiceNo||''} from ${inv2?.supplier||''} (${newStatus})`);
     setPayModal(null);
-    setPayForm({amount:'',date:new Date().toISOString().slice(0,10),method:'paynow',reference:'',notes:'',proofImage:null});
+    setPayForm({amount:'',date:new Date().toISOString().slice(0,10),method:'paynow',reference:'',bankName:'',bankAccount:'',bankAccountName:'',notes:'',proofImage:null});
   };
 
   const deletePayRecord=(invId,recId)=>{
@@ -3741,7 +3744,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
     setInvoices(updInvoices);saveInvoices(updInvoices);
     setInvoiceBatches(updBatches);saveS('invoiceBatches',updBatches);
     setBatchPayModal(null);
-    setBatchPayForm({amount:'',date:new Date().toISOString().slice(0,10),method:'paynow',reference:'',notes:'',proofImage:null});
+    setBatchPayForm({amount:'',date:new Date().toISOString().slice(0,10),method:'paynow',reference:'',bankName:'',bankAccount:'',bankAccountName:'',notes:'',proofImage:null});
   };
 
   const deleteBatch=(batchId)=>{
@@ -3881,7 +3884,9 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
                 const hist=getSupplierHistory(inv.supplier);
                 setPayModal(inv.id);
                 setPayForm({amount:String(Math.round(outstanding*100)/100),date:new Date().toISOString().slice(0,10),
-                  method:hist?.method||'paynow',reference:hist?.reference||'',notes:'',proofImage:null,_histFound:!!hist});
+                  method:hist?.method||'paynow',reference:'',
+                  bankName:hist?.bankName||'',bankAccount:hist?.bankAccount||'',bankAccountName:hist?.bankAccountName||'',
+                  notes:'',proofImage:null,_histFound:!!hist});
               }}
                 style={{background:T.successLight,border:`1px solid ${T.success}30`,cursor:'pointer',color:T.success,display:'flex',padding:'3px 8px',borderRadius:6,alignItems:'center',gap:3,fontSize:11,fontFamily:'inherit',fontWeight:600}}>
                 <CreditCard size={11}/>Pay</button>
@@ -4056,7 +4061,8 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
                           amount:String(Math.round(outstanding*100)/100),
                           date:new Date().toISOString().slice(0,10),
                           method:hist?.method||'paynow',
-                          reference:hist?.reference||'',
+                          reference:'',
+                          bankName:hist?.bankName||'',bankAccount:hist?.bankAccount||'',bankAccountName:hist?.bankAccountName||'',
                           notes:preExisting>0?'Balance payment':'50% deposit',
                           proofImage:null,
                           _histFound:!!hist,
@@ -4132,7 +4138,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
                           <span style={{fontSize:16}}>{icons[r.method]||'💰'}</span>
                           <div>
                             <div style={{fontSize:12,fontWeight:600,color:T.success}}>{fmtSGD(r.amount)}</div>
-                            <div style={{fontSize:10,color:T.dim}}>{r.method==='paynow'?'PayNow':r.method==='bank_transfer'?'Bank Transfer':'Cash'}{r.reference&&` · ${r.reference}`}</div>
+                            <div style={{fontSize:10,color:T.dim}}>{r.method==='paynow'?'PayNow':r.method==='bank_transfer'?'Bank Transfer':'Cash'}{r.reference&&` · Ref: ${r.reference}`}{r.bankName&&` · ${r.bankName}${r.bankAccount?' '+r.bankAccount:''}`}</div>
                           </div>
                         </div>
                         <div style={{display:'flex',alignItems:'center',gap:8}}>
@@ -4556,9 +4562,16 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
                     ))}
                   </div>
                 </div>
-                <Field label={batchPayForm.method==='paynow'?'PayNow / UEN':batchPayForm.method==='bank_transfer'?'Bank Account':'Receipt / Reference'}
+                <Field label={batchPayForm.method==='paynow'?'PayNow / UEN':batchPayForm.method==='bank_transfer'?'Bank Transaction Ref.':'Receipt / Reference'}
                   value={batchPayForm.reference} onChange={pf('reference')}
-                  placeholder={batchPayForm.method==='paynow'?'e.g. 202320231N':batchPayForm.method==='bank_transfer'?'e.g. DBS 0721-0976-05':'e.g. Receipt #001'}/>
+                  placeholder={batchPayForm.method==='paynow'?'e.g. 202320231N':batchPayForm.method==='bank_transfer'?'e.g. FAST-20250601-12345':'e.g. Receipt #001'}/>
+                {batchPayForm.method==='bank_transfer'&&(
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:4}}>
+                    <Field label="Bank Name" value={batchPayForm.bankName||''} onChange={pf('bankName')} placeholder="e.g. DBS"/>
+                    <Field label="Account No." value={batchPayForm.bankAccount||''} onChange={pf('bankAccount')} placeholder="e.g. 0721-0976-05"/>
+                    <div style={{gridColumn:'1/-1'}}><Field label="Account Holder Name" value={batchPayForm.bankAccountName||''} onChange={pf('bankAccountName')} placeholder="e.g. ABC Trading Pte Ltd"/></div>
+                  </div>
+                )}
                 <div style={{marginTop:10}}>
                   <Field label="Notes (optional)" value={batchPayForm.notes} onChange={pf('notes')} placeholder="e.g. 50% deposit"/>
                 </div>
@@ -4615,7 +4628,8 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
                         <span style={{fontSize:11,color:T.dim}}>{fmtDate(r.date)}</span>
                       </div>
                       <div style={{fontSize:12,color:T.muted,fontWeight:600}}>{labels[r.method]||r.method}</div>
-                      {r.reference&&<div style={{fontSize:11,color:T.dim,marginTop:2,fontFamily:'monospace'}}>Ref: {r.reference}</div>}
+                      {r.reference&&<div style={{fontSize:11,color:T.dim,marginTop:2,fontFamily:'monospace'}}>Transaction Ref: {r.reference}</div>}
+                      {(r.bankName||r.bankAccount)&&<div style={{fontSize:11,color:T.dim,marginTop:2}}>🏦 {[r.bankAccountName,r.bankName,r.bankAccount].filter(Boolean).join(' · ')}</div>}
                       {r.notes&&<div style={{fontSize:11,color:T.dim,marginTop:2}}>{r.notes}</div>}
                       {r.proofImage&&<button type="button" onClick={()=>setLightbox({type:'img',src:r.proofImage,title:'Payment Screenshot'})}
                         style={{marginTop:5,background:T.successLight,border:'none',borderRadius:6,padding:'2px 9px',cursor:'pointer',fontSize:11,color:T.success,fontFamily:'inherit',fontWeight:600,display:'inline-flex',alignItems:'center',gap:4}}>
@@ -4774,9 +4788,9 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
         headers:{'Content-Type':'application/json','x-api-key':apiKey,
           'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
         body:JSON.stringify({
-          model:'claude-opus-4-5',max_tokens:400,
+          model:'claude-opus-4-5',max_tokens:500,
           messages:[{role:'user',content:[part,{type:'text',
-            text:'Extract from this payment receipt/screenshot. Return ONLY valid JSON:\n{"amount":0,"date":"YYYY-MM-DD","method":"paynow|bank_transfer|cash","reference":"","notes":""}\nRules: amount=total paid (numeric). date=YYYY-MM-DD. method=paynow if PayNow/UEN/QR, bank_transfer if bank/FAST/GIRO, cash if cash. reference=PayNow number/UEN/bank account/transaction ref. notes=any other useful info. Use empty string if not found.'}]}]
+            text:'Extract from this payment receipt/screenshot. Return ONLY valid JSON:\n{"amount":0,"date":"YYYY-MM-DD","method":"paynow|bank_transfer|cash","transactionRef":"","payerUEN":"","bankName":"","bankAccount":"","bankAccountName":"","notes":""}\nRules: amount=total paid numeric. date=YYYY-MM-DD. method=paynow if PayNow/UEN/QR-code transfer, bank_transfer if bank/FAST/GIRO/IBG/telegraphic, cash if cash. transactionRef=the unique bank transaction reference/ID number (NOT account number or UEN). payerUEN=for PayNow only, the sender UEN or phone number. bankName=bank name (DBS/OCBC/UOB/POSB/etc). bankAccount=account number shown. bankAccountName=account holder name. notes=any other useful info. Use empty string if not found.'}]}]
         })
       });
       const data=await res.json();
@@ -4788,7 +4802,10 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
         amount:parsed.amount?String(parsed.amount):prev.amount,
         date:parsed.date||prev.date,
         paymentMethod:parsed.method||prev.paymentMethod,
-        reference:parsed.reference||prev.reference,
+        reference:parsed.transactionRef||parsed.payerUEN||prev.reference,
+        bankName:parsed.bankName||prev.bankName||'',
+        bankAccount:parsed.bankAccount||prev.bankAccount||'',
+        bankAccountName:parsed.bankAccountName||prev.bankAccountName||'',
       }));
     }catch(e){console.warn('Payment OCR failed:',e);}
     finally{setOcrLoading(false);}
@@ -5083,9 +5100,18 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
                   </div>
                 </div>
                 {form.paymentMethod&&(
-                  <Field label={form.paymentMethod==='paynow'?'PayNow Number / UEN':form.paymentMethod==='bank_transfer'?'Bank Account Number':'Receipt / Reference'}
-                    value={form.reference||''} onChange={ff('reference')}
-                    placeholder={form.paymentMethod==='paynow'?'e.g. 202320231N':form.paymentMethod==='bank_transfer'?'e.g. DBS 0721-0976-05':'e.g. Receipt #001'}/>
+                  <>
+                    <Field label={form.paymentMethod==='paynow'?'PayNow / UEN':form.paymentMethod==='bank_transfer'?'Bank Transaction Ref.':'Receipt / Reference'}
+                      value={form.reference||''} onChange={ff('reference')}
+                      placeholder={form.paymentMethod==='paynow'?'e.g. 202320231N':form.paymentMethod==='bank_transfer'?'e.g. FAST-20250601-12345':'e.g. Receipt #001'}/>
+                    {form.paymentMethod==='bank_transfer'&&(
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                        <Field label="Bank Name" value={form.bankName||''} onChange={ff('bankName')} placeholder="e.g. DBS"/>
+                        <Field label="Account No." value={form.bankAccount||''} onChange={ff('bankAccount')} placeholder="e.g. 0721-0976-05"/>
+                        <div style={{gridColumn:'1/-1'}}><Field label="Account Holder Name" value={form.bankAccountName||''} onChange={ff('bankAccountName')} placeholder="e.g. ABC Trading Pte Ltd"/></div>
+                      </div>
+                    )}
+                  </>
                 )}
                 <Field label="Status" value={form.status} onChange={ff('status')} as="select" options={['Received','Pending'].map(s=>({v:s,l:s}))}/>
               </div>
@@ -5607,7 +5633,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
   const [rejectTarget,setRejectTarget]=useState(null);
   const [rejectReason,setRejectReason]=useState('');
   const [adminPayTarget,setAdminPayTarget]=useState(null);
-  const [adminPayForm,setAdminPayForm]=useState({method:'',reference:'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
+  const [adminPayForm,setAdminPayForm]=useState({method:'',reference:'',bankName:'',bankAccount:'',bankAccountName:'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
   const [adminOcrLoading,setAdminOcrLoading]=useState(false);
   const [claimOcrLoading,setClaimOcrLoading]=useState(false);
   const receiptRef=useRef();
@@ -5682,9 +5708,9 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
         headers:{'Content-Type':'application/json','x-api-key':apiKey,
           'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
         body:JSON.stringify({
-          model:'claude-opus-4-5',max_tokens:300,
+          model:'claude-opus-4-5',max_tokens:500,
           messages:[{role:'user',content:[part,{type:'text',
-            text:'Extract from this company payment receipt/screenshot. Return ONLY valid JSON:\n{"date":"YYYY-MM-DD","method":"paynow|bank_transfer|cash","reference":""}\nRules: date=payment date. method=paynow if PayNow/QR/UEN, bank_transfer if bank/FAST/GIRO, cash if cash. reference=PayNow number/UEN/account/transaction ref. Use empty string if not found.'}]}]
+            text:'Extract from this payment receipt/screenshot. Return ONLY valid JSON:\n{"date":"YYYY-MM-DD","method":"paynow|bank_transfer|cash","transactionRef":"","payerUEN":"","bankName":"","bankAccount":"","bankAccountName":""}\nRules: date=payment date YYYY-MM-DD. method=paynow if PayNow/UEN/QR-code, bank_transfer if bank/FAST/GIRO/IBG, cash if cash. transactionRef=unique bank transaction reference ID (NOT account number or UEN). payerUEN=for PayNow only, sender UEN or phone. bankName=bank name. bankAccount=account number. bankAccountName=account holder name. Use empty string if not found.'}]}]
         })
       });
       const data=await res.json();
@@ -5695,7 +5721,10 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
         ...prev,
         date:parsed.date||prev.date,
         method:parsed.method||prev.method,
-        reference:parsed.reference||prev.reference,
+        reference:parsed.transactionRef||parsed.payerUEN||prev.reference,
+        bankName:parsed.bankName||prev.bankName||'',
+        bankAccount:parsed.bankAccount||prev.bankAccount||'',
+        bankAccountName:parsed.bankAccountName||prev.bankAccountName||'',
       }));
     }catch(e){console.warn('Admin pay OCR failed:',e);}
     finally{setAdminOcrLoading(false);}
@@ -5806,7 +5835,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
     }:c);
     setClaims(upd);saveS('staffClaims',upd);
     setAdminPayTarget(null);
-    setAdminPayForm({method:'',reference:'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
+    setAdminPayForm({method:'',reference:'',bankName:'',bankAccount:'',bankAccountName:'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
   };
 
   const submitClaim=()=>{
@@ -6061,7 +6090,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
                         <div style={{fontSize:15,fontWeight:800,color:T.text}}>{fmtSGD(c.amount)}</div>
                         <button type="button" onClick={()=>{
                           setAdminPayTarget(c.id);
-                          setAdminPayForm({method:'',reference:'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
+                          setAdminPayForm({method:'',reference:'',bankName:'',bankAccount:'',bankAccountName:'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
                         }}
                           style={{display:'flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:9,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:12,fontWeight:700,background:T.accent,color:T.bg,whiteSpace:'nowrap'}}>
                           <Upload size={13}/>Upload Proof
@@ -6232,7 +6261,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
                                   )}
                                   <button type="button" onClick={()=>{
                                     setAdminPayTarget(c.id);
-                                    setAdminPayForm({method:c.adminPayment?.method||'',reference:c.adminPayment?.reference||'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
+                                    setAdminPayForm({method:c.adminPayment?.method||'',reference:c.adminPayment?.reference||'',bankName:c.adminPayment?.bankName||'',bankAccount:c.adminPayment?.bankAccount||'',bankAccountName:c.adminPayment?.bankAccountName||'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
                                   }}
                                     style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'5px 12px',cursor:'pointer',fontSize:12,color:T.muted,fontFamily:'inherit',fontWeight:600,display:'flex',alignItems:'center',gap:5}}>
                                     <Edit3 size={11}/>Update
@@ -6248,7 +6277,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
                                 </div>
                                 <button type="button" onClick={()=>{
                                   setAdminPayTarget(c.id);
-                                  setAdminPayForm({method:'',reference:'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
+                                  setAdminPayForm({method:'',reference:'',bankName:'',bankAccount:'',bankAccountName:'',receiptImage:null,date:new Date().toISOString().slice(0,10)});
                                 }}
                                   style={{display:'flex',alignItems:'center',gap:7,padding:'9px 16px',borderRadius:10,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:700,background:T.accent,color:T.bg,whiteSpace:'nowrap'}}>
                                   <Upload size={14}/>Upload Payment Proof
@@ -6561,9 +6590,18 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
                     </div>
                   </div>
                   {adminPayForm.method&&(
-                    <Field label={adminPayForm.method==='paynow'?'PayNow Number / UEN':adminPayForm.method==='bank_transfer'?'Bank Account Number':'Receipt / Reference'}
-                      value={adminPayForm.reference} onChange={apf('reference')}
-                      placeholder={adminPayForm.method==='paynow'?'e.g. 9123 4567 or UEN':adminPayForm.method==='bank_transfer'?'e.g. DBS 0721-0976-05':'e.g. Receipt #001'}/>
+                    <>
+                      <Field label={adminPayForm.method==='paynow'?'PayNow / UEN':adminPayForm.method==='bank_transfer'?'Bank Transaction Ref.':'Receipt / Reference'}
+                        value={adminPayForm.reference} onChange={apf('reference')}
+                        placeholder={adminPayForm.method==='paynow'?'e.g. 9123 4567 or UEN':adminPayForm.method==='bank_transfer'?'e.g. FAST-20250601-12345':'e.g. Receipt #001'}/>
+                      {adminPayForm.method==='bank_transfer'&&(
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                          <Field label="Bank Name" value={adminPayForm.bankName||''} onChange={apf('bankName')} placeholder="e.g. DBS"/>
+                          <Field label="Account No." value={adminPayForm.bankAccount||''} onChange={apf('bankAccount')} placeholder="e.g. 0721-0976-05"/>
+                          <div style={{gridColumn:'1/-1'}}><Field label="Account Holder Name" value={adminPayForm.bankAccountName||''} onChange={apf('bankAccountName')} placeholder="e.g. John Tan"/></div>
+                        </div>
+                      )}
+                    </>
                   )}
                   <Field label="Date Paid *" type="date" value={adminPayForm.date} onChange={apf('date')}/>
                 </div>
