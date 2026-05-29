@@ -3146,7 +3146,16 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                 ))}
               </select>
             </div>
-            <Field label="Start Date" type="date" value={form.startDate} onChange={ff('startDate')}/>
+            <Field label="Start Date" type="date" value={form.startDate} onChange={v=>{
+              if(modal==='new'&&v){
+                const yr=new Date(v).getFullYear();
+                const sameYear=projects.filter(p=>(p.projectYear||(p.createdAt?new Date(p.createdAt).getFullYear():new Date().getFullYear()))===yr);
+                const nextNum=sameYear.reduce((m,p)=>Math.max(m,p.projectNumber||0),0)+1;
+                setForm(prev=>({...prev,startDate:v,projectYear:yr,projectNumber:nextNum}));
+              } else {
+                ff('startDate')(v);
+              }
+            }}/>
             {/* Completion date only shown when editing an existing project */}
             {modal==='edit'&&<Field label="Completion Date" type="date" value={form.endDate} onChange={ff('endDate')}/>}
             <Field label="Status" value={form.status} onChange={ff('status')} as="select" options={PROJ_STATUSES.map(s=>({v:s,l:s}))}/>
