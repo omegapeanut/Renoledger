@@ -2675,7 +2675,13 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
           <option value="" style={{}}>By status…</option>
           {PROJ_STATUSES.map(s=><option key={s} value={s} style={{}}>{s}</option>)}
         </select>
-        <Btn onClick={()=>{setForm({...blank,createdAt:new Date().toISOString()});setModal('new');}}><Plus size={13}/>New Project</Btn>
+        <Btn onClick={()=>{
+          const yr=new Date().getFullYear();
+          const sameYear=projects.filter(p=>(p.projectYear||(p.createdAt?new Date(p.createdAt).getFullYear():yr))===yr);
+          const nextNum=sameYear.reduce((m,p)=>Math.max(m,p.projectNumber||0),0)+1;
+          setForm({...blank,createdAt:new Date().toISOString(),projectYear:yr,projectNumber:nextNum});
+          setModal('new');
+        }}><Plus size={13}/>New Project</Btn>
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(min(350px,100%),1fr))',gap:14}}>
@@ -3092,8 +3098,10 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
               <div style={{display:'flex',gap:8,alignItems:'center'}}>
                 <div style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:10,
                   padding:'11px 14px',fontFamily:'monospace',fontSize:15,fontWeight:700,
-                  color:form.projectNumber?T.text:T.dim,minWidth:60,textAlign:'center',flexShrink:0}}>
-                  {form.projectNumber?String(form.projectNumber).padStart(2,'0'):'—'}
+                  color:form.projectNumber?T.accent:T.dim,minWidth:80,textAlign:'center',flexShrink:0}}>
+                  {form.projectNumber
+                    ? `${String(form.projectYear||new Date().getFullYear()).slice(-2)}-${String(form.projectNumber).padStart(2,'0')}`
+                    : '—'}
                 </div>
                 <input type="number" min="1" max="999"
                   value={form.projectNumber||''}
@@ -3101,7 +3109,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                   placeholder="Auto"
                   style={{...iStyle,width:90,flexShrink:0}}/>
                 <span style={{fontSize:11,color:T.dim,lineHeight:1.4}}>
-                  {form.projectYear||new Date().getFullYear()} · resets each year
+                  Resets each year
                 </span>
               </div>
             </div>
