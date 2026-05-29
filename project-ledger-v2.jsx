@@ -9928,82 +9928,150 @@ function WorkerLoginScreen({siteWorkers, onLogin, onAdminLogin, acctSettings}){
   const handleDelete = () => { setPin(p=>p.slice(0,-1)); setErr(''); };
 
   return (
-    <div style={{minHeight:'100vh',background:'#F5F5F7',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:24,gap:20}}>
-      <div style={{width:64,height:64,background:'rgba(0,113,227,0.1)',borderRadius:20,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:4}}>
-        <Users size={30} style={{color:T.accent}}/>
-      </div>
-      <div style={{textAlign:'center',marginBottom:4}}>
-        <div style={{fontSize:24,fontWeight:700,color:T.text,letterSpacing:'-0.025em'}}>{acctSettings?.companyName||"TDI Workspace"}</div>
-        <div style={{fontSize:14,color:T.muted,marginTop:4}}>Site Attendance System</div>
+    <div style={{minHeight:'100vh',background:T.bg,display:'flex',flexDirection:'column',
+      alignItems:'center',justifyContent:'center',padding:'24px 20px',
+      fontFamily:'"DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap');
+        *{box-sizing:border-box;}
+        .wl-card-btn:hover{box-shadow:0 4px 20px rgba(0,0,0,0.10)!important;transform:translateY(-1px);}
+        .wl-card-btn{transition:box-shadow 0.2s,transform 0.2s;}
+        .wl-pin-btn:hover{background:${T.borderLight}!important;}
+        .wl-pin-btn{transition:background 0.1s;}
+      `}</style>
+
+      {/* Decorative background — same blobs as staff login */}
+      <div style={{position:'fixed',inset:0,overflow:'hidden',pointerEvents:'none',zIndex:0}}>
+        <div style={{position:'absolute',top:-80,right:-80,width:400,height:400,borderRadius:'50%',background:'rgba(196,168,130,0.12)'}}/>
+        <div style={{position:'absolute',bottom:-60,left:-60,width:300,height:300,borderRadius:'50%',background:'rgba(196,168,130,0.08)'}}/>
       </div>
 
-      {step==='pick'&&(
-        <div style={{width:'100%',maxWidth:360,display:'flex',flexDirection:'column',gap:10}}>
-          <div style={{fontSize:13,fontWeight:600,color:T.muted,textAlign:'center',marginBottom:4}}>Select your name</div>
-          {activeWorkers.map(w=>(
-            <button key={w.id} onClick={()=>{setSelWorker(w);setPin('');setErr('');setStep('pin');}}
-              style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,
-                padding:'16px 20px',cursor:'pointer',fontFamily:'inherit',
-                display:'flex',alignItems:'center',gap:14,
-                boxShadow:T.shadow,textAlign:'left',width:'100%',transition:'all 0.12s'}}>
-              <Avatar photo={w.photo} name={w.name} size={46} color={T.accent}/>
-              <div>
-                <div style={{fontSize:16,fontWeight:700,color:T.text}}>{w.name}</div>
-                <div style={{fontSize:12,color:T.muted,marginTop:2}}>{w.nationality}</div>
-              </div>
-            </button>
-          ))}
-          {activeWorkers.length===0&&<div style={{textAlign:'center',color:T.dim,padding:24,fontSize:13}}>No active workers. Contact admin.</div>}
-          <div style={{marginTop:12,textAlign:'center'}}>
-            <button onClick={()=>setShowAdminEntry(p=>!p)} style={{background:'none',border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:12,color:T.dim}}>
-              Admin login
-            </button>
-            {showAdminEntry&&(
-              <div style={{marginTop:10}}>
-                <button onClick={onAdminLogin} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:12,padding:'10px 24px',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:600,color:T.accent}}>
-                  Enter Admin Dashboard →
-                </button>
-              </div>
-            )}
+      <div style={{position:'relative',zIndex:1,width:'100%',maxWidth:400}}>
+        {/* Logo — same as staff login */}
+        <div style={{textAlign:'center',marginBottom:32}}>
+          <div style={{display:'inline-flex',alignItems:'center',justifyContent:'center',
+            width:60,height:60,background:T.text,borderRadius:18,marginBottom:18,
+            boxShadow:'0 4px 20px rgba(26,26,26,0.25)'}}>
+            <Building size={26} style={{color:'#fff'}}/>
+          </div>
+          <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:32,color:T.text,letterSpacing:'-0.02em',lineHeight:1}}>
+            Reno<span style={{color:T.tan}}>Ledger</span>
+          </div>
+          <div style={{fontSize:13,color:T.muted,marginTop:6,fontWeight:400}}>
+            {acctSettings?.companyName||'TDI Workspace Pte. Ltd.'}
+          </div>
+          <div style={{display:'inline-block',marginTop:10,background:'rgba(196,168,130,0.15)',
+            border:`1px solid rgba(196,168,130,0.3)`,borderRadius:20,padding:'4px 14px',
+            fontSize:12,fontWeight:500,color:'#8A6A3A',letterSpacing:'0.02em'}}>
+            Site Attendance System
           </div>
         </div>
-      )}
 
-      {step==='pin'&&selWorker&&(
-        <div style={{width:'100%',maxWidth:320,display:'flex',flexDirection:'column',alignItems:'center',gap:20}}>
-          <button onClick={()=>{setStep('pick');setPin('');setErr('');}} style={{alignSelf:'flex-start',background:'none',border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:13,color:T.muted}}>← Back</button>
-          <div style={{textAlign:'center'}}>
-            <div style={{margin:'0 auto 10px',display:'flex',justifyContent:'center'}}>
-              <Avatar photo={selWorker.photo} name={selWorker.name} size={60} color={T.accent}/>
+        {/* Worker picker */}
+        {step==='pick'&&(
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            <div style={{fontSize:12,fontWeight:500,color:T.muted,textAlign:'center',marginBottom:6,letterSpacing:'0.03em',textTransform:'uppercase'}}>
+              Select your name to check in
             </div>
-            <div style={{fontSize:18,fontWeight:700,color:T.text}}>{selWorker.name}</div>
-            <div style={{fontSize:13,color:T.muted,marginTop:4}}>Enter your 4-digit PIN</div>
-          </div>
-
-          <div style={{display:'flex',gap:14,justifyContent:'center'}}>
-            {[0,1,2,3].map(i=>(
-              <div key={i} style={{width:18,height:18,borderRadius:'50%',
-                background:i<pin.length?T.accent:T.borderLight,
-                transition:'background 0.15s'}}/>
-            ))}
-          </div>
-
-          {err&&<div style={{fontSize:13,color:T.danger,fontWeight:600,textAlign:'center'}}>{err}</div>}
-
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:12,width:'100%'}}>
-            {['1','2','3','4','5','6','7','8','9','','0','⌫'].map((d,i)=>(
-              d===''?<div key={i}/>:
-              <button key={i} onClick={()=>d==='⌫'?handleDelete():handlePinDigit(d)}
-                style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,
-                  padding:'18px 0',fontSize:d==='⌫'?20:22,fontWeight:d==='⌫'?400:600,
-                  cursor:'pointer',fontFamily:'inherit',color:d==='⌫'?T.muted:T.text,
-                  boxShadow:T.shadow,transition:'background 0.1s',textAlign:'center'}}>
-                {d}
+            {activeWorkers.map(w=>(
+              <button key={w.id} className="wl-card-btn"
+                onClick={()=>{setSelWorker(w);setPin('');setErr('');setStep('pin');}}
+                style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:20,
+                  padding:'16px 20px',cursor:'pointer',fontFamily:'inherit',
+                  display:'flex',alignItems:'center',gap:14,
+                  boxShadow:T.shadow,textAlign:'left',width:'100%'}}>
+                <Avatar photo={w.photo} name={w.name} size={46} color={T.tan}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:15,fontWeight:600,color:T.text}}>{w.name}</div>
+                  <div style={{fontSize:12,color:T.muted,marginTop:2}}>{w.trade||w.nationality||'Site Worker'}</div>
+                </div>
+                <div style={{fontSize:20,color:T.dim,fontWeight:300}}>›</div>
               </button>
             ))}
+            {activeWorkers.length===0&&(
+              <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:20,
+                padding:'32px 24px',textAlign:'center',boxShadow:T.shadow}}>
+                <Users size={32} style={{color:T.dim,margin:'0 auto 10px'}}/>
+                <div style={{fontSize:14,color:T.muted}}>No active workers found.</div>
+                <div style={{fontSize:12,color:T.dim,marginTop:4}}>Please contact your admin.</div>
+              </div>
+            )}
+            <div style={{marginTop:16,textAlign:'center'}}>
+              <button onClick={()=>setShowAdminEntry(p=>!p)}
+                style={{background:'none',border:'none',cursor:'pointer',fontFamily:'inherit',
+                  fontSize:12,color:T.dim,letterSpacing:'0.01em'}}>
+                Admin / Staff login
+              </button>
+              {showAdminEntry&&(
+                <div style={{marginTop:10}}>
+                  <button onClick={onAdminLogin}
+                    style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:12,
+                      padding:'10px 24px',cursor:'pointer',fontFamily:'inherit',
+                      fontSize:13,fontWeight:600,color:T.text,boxShadow:T.shadow}}>
+                    Enter Admin Dashboard →
+                  </button>
+                </div>
+              )}
+            </div>
+            <div style={{textAlign:'center',marginTop:4}}>
+              <span style={{fontSize:11,color:T.dim}}>{APP_FULL} · Build {APP_BUILD}</span>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* PIN entry */}
+        {step==='pin'&&selWorker&&(
+          <div style={{display:'flex',flexDirection:'column',gap:0}}>
+            <button onClick={()=>{setStep('pick');setPin('');setErr('');}}
+              style={{alignSelf:'flex-start',background:'none',border:'none',cursor:'pointer',
+                fontFamily:'inherit',fontSize:13,color:T.muted,marginBottom:16,display:'flex',alignItems:'center',gap:4}}>
+              ← Back
+            </button>
+            <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:24,
+              padding:28,boxShadow:T.shadowMd,display:'flex',flexDirection:'column',alignItems:'center',gap:20}}>
+              <div style={{textAlign:'center'}}>
+                <div style={{margin:'0 auto 12px',display:'flex',justifyContent:'center'}}>
+                  <Avatar photo={selWorker.photo} name={selWorker.name} size={64} color={T.tan}/>
+                </div>
+                <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:22,color:T.text}}>{selWorker.name}</div>
+                <div style={{fontSize:13,color:T.muted,marginTop:4}}>{selWorker.trade||selWorker.nationality||'Site Worker'}</div>
+                <div style={{fontSize:12,color:T.muted,marginTop:8}}>Enter your 4-digit PIN</div>
+              </div>
+
+              {/* PIN dots */}
+              <div style={{display:'flex',gap:16,justifyContent:'center'}}>
+                {[0,1,2,3].map(i=>(
+                  <div key={i} style={{width:16,height:16,borderRadius:'50%',
+                    background:i<pin.length?T.text:T.borderLight,
+                    transition:'background 0.15s'}}/>
+                ))}
+              </div>
+
+              {err&&(
+                <div style={{background:T.dangerLight,border:`1px solid ${T.danger}25`,borderRadius:10,
+                  padding:'10px 14px',fontSize:13,color:T.danger,fontWeight:500,width:'100%',textAlign:'center'}}>
+                  {err}
+                </div>
+              )}
+
+              {/* Numpad */}
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,width:'100%'}}>
+                {['1','2','3','4','5','6','7','8','9','','0','⌫'].map((d,i)=>(
+                  d===''?<div key={i}/>:
+                  <button key={i} className="wl-pin-btn"
+                    onClick={()=>d==='⌫'?handleDelete():handlePinDigit(d)}
+                    style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:14,
+                      padding:'18px 0',fontSize:d==='⌫'?18:20,fontWeight:d==='⌫'?400:600,
+                      cursor:'pointer',fontFamily:'inherit',
+                      color:d==='⌫'?T.muted:T.text,textAlign:'center'}}>
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
