@@ -1844,6 +1844,49 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:20}}>
+      {/* Who's Online */}
+      {onlinePresence.length>0&&(
+        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:'14px 18px',boxShadow:T.shadow}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <div style={{width:8,height:8,borderRadius:'50%',background:T.success,boxShadow:`0 0 0 3px ${T.successLight}`}}/>
+              <span style={{fontSize:13,fontWeight:700,color:T.text}}>Online Now</span>
+              <span style={{fontSize:12,color:T.muted}}>{onlinePresence.length} {onlinePresence.length===1?'person':'people'}</span>
+            </div>
+            <span style={{fontSize:11,color:T.dim}}>Updates every 20s</span>
+          </div>
+          <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
+            {onlinePresence.map(p=>{
+              const isMe=p.userId===activeUserId;
+              const tabLabel=ALL_NAV.find(n=>n.id===p.currentTab)?.label||p.currentTab;
+              const minsAgo=Math.floor((Date.now()-new Date(p.lastSeen).getTime())/60000);
+              return (
+                <div key={p.userId} style={{display:'flex',alignItems:'center',gap:10,
+                  background:isMe?T.accentLight:T.bg,
+                  border:`1px solid ${isMe?T.accent+'30':T.borderLight}`,
+                  borderRadius:12,padding:'8px 12px',minWidth:160}}>
+                  <div style={{position:'relative',flexShrink:0}}>
+                    <Avatar photo={p.photo} name={p.name} size={32} color={ROLE_CLR[p.role]||T.accent}/>
+                    <div style={{position:'absolute',bottom:-1,right:-1,width:9,height:9,borderRadius:'50%',
+                      background:T.success,border:'2px solid #fff'}}/>
+                  </div>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:600,color:T.text,display:'flex',alignItems:'center',gap:5}}>
+                      {p.name}{isMe&&<span style={{fontSize:10,color:T.accent,fontWeight:700}}>(you)</span>}
+                    </div>
+                    <div style={{fontSize:10,color:ROLE_CLR[p.role]||T.muted,fontWeight:600}}>{ROLE_LABEL[p.role]}</div>
+                    <div style={{fontSize:10,color:T.dim,marginTop:1}}>
+                      {tabLabel&&`on ${tabLabel}`}
+                      {minsAgo>0&&` · ${minsAgo}m ago`}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── Notice Board ── */}
       <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`}}>
@@ -1934,9 +1977,6 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
         )}
       </div>
 
-      {/* ── Holiday Calendar ── */}
-      <HolidayCalendar/>
-
       {/* Worker document expiry alerts */}
       {(()=>{
         const alerts=[];
@@ -2007,49 +2047,6 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
           </div>
         );
       })()}
-
-      {/* Who's Online */}
-      {onlinePresence.length>0&&(
-        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:'14px 18px',boxShadow:T.shadow}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-            <div style={{display:'flex',alignItems:'center',gap:8}}>
-              <div style={{width:8,height:8,borderRadius:'50%',background:T.success,boxShadow:`0 0 0 3px ${T.successLight}`}}/>
-              <span style={{fontSize:13,fontWeight:700,color:T.text}}>Online Now</span>
-              <span style={{fontSize:12,color:T.muted}}>{onlinePresence.length} {onlinePresence.length===1?'person':'people'}</span>
-            </div>
-            <span style={{fontSize:11,color:T.dim}}>Updates every 20s</span>
-          </div>
-          <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
-            {onlinePresence.map(p=>{
-              const isMe=p.userId===activeUserId;
-              const tabLabel=ALL_NAV.find(n=>n.id===p.currentTab)?.label||p.currentTab;
-              const minsAgo=Math.floor((Date.now()-new Date(p.lastSeen).getTime())/60000);
-              return (
-                <div key={p.userId} style={{display:'flex',alignItems:'center',gap:10,
-                  background:isMe?T.accentLight:T.bg,
-                  border:`1px solid ${isMe?T.accent+'30':T.borderLight}`,
-                  borderRadius:12,padding:'8px 12px',minWidth:160}}>
-                  <div style={{position:'relative',flexShrink:0}}>
-                    <Avatar photo={p.photo} name={p.name} size={32} color={ROLE_CLR[p.role]||T.accent}/>
-                    <div style={{position:'absolute',bottom:-1,right:-1,width:9,height:9,borderRadius:'50%',
-                      background:T.success,border:'2px solid #fff'}}/>
-                  </div>
-                  <div style={{minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:600,color:T.text,display:'flex',alignItems:'center',gap:5}}>
-                      {p.name}{isMe&&<span style={{fontSize:10,color:T.accent,fontWeight:700}}>(you)</span>}
-                    </div>
-                    <div style={{fontSize:10,color:ROLE_CLR[p.role]||T.muted,fontWeight:600}}>{ROLE_LABEL[p.role]}</div>
-                    <div style={{fontSize:10,color:T.dim,marginTop:1}}>
-                      {tabLabel&&`on ${tabLabel}`}
-                      {minsAgo>0&&` · ${minsAgo}m ago`}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* ── Section header helper ───────────────────────────────── */}
       {widgets.includes('stats')&&(
@@ -2425,6 +2422,9 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
         </div>
       </div>
       )}
+
+      {/* ── Holiday Calendar — bottom of dashboard ── */}
+      <HolidayCalendar/>
 
       {widgets.length===0&&(
         <div style={{color:T.dim,fontSize:13,textAlign:'center',padding:48,background:T.card,borderRadius:14,border:`1px solid ${T.borderLight}`}}>
