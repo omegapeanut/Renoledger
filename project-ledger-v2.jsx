@@ -1349,7 +1349,7 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
   );
 }
 
-function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId}){
+function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId,notices=[],setNotices,isAdmin,activeUser}){
   const totRev = useMemo(()=>projects.reduce((s,p)=>s+p.contractAmount+(p.variationOrders||0),0),[projects]);
   const totExp = useMemo(()=>invoices.reduce((s,i)=>s+i.total,0),[invoices]);
   const totRecv = useMemo(()=>payments.filter(p=>p.status==='Received').reduce((s,p)=>s+p.amount,0),[payments]);
@@ -1365,8 +1365,130 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
 
   const recent = [...invoices].sort((a,b)=>new Date(b.invoiceDate)-new Date(a.invoiceDate)).slice(0,8);
 
+  const [noticeModal,setNoticeModal]=useState(null); // null | {id?,title,body,priority}
+
+  const NOTICE_PRIORITIES=[
+    {id:'urgent', label:'Urgent', color:'#dc2626', bg:'#FEF2F2', border:'#FCA5A5'},
+    {id:'info',   label:'Info',   color:'#2563eb', bg:'#EFF6FF', border:'#93C5FD'},
+    {id:'normal', label:'Normal', color:'#15803d', bg:'#F0FDF4', border:'#86EFAC'},
+  ];
+  const nPri=p=>NOTICE_PRIORITIES.find(x=>x.id===p)||NOTICE_PRIORITIES[2];
+
+  const saveNotice=()=>{
+    if(!(noticeModal?.title||'').trim())return;
+    const now=new Date().toISOString();
+    let upd;
+    if(noticeModal.id){
+      upd=notices.map(n=>n.id===noticeModal.id?{...n,title:noticeModal.title,body:noticeModal.body,priority:noticeModal.priority,editedAt:now}:n);
+    }else{
+      const n={id:Date.now().toString(),title:noticeModal.title,body:noticeModal.body,priority:noticeModal.priority,postedBy:activeUser?.name||'Admin',postedAt:now};
+      upd=[n,...notices];
+    }
+    setNotices(upd);saveS('notices',upd);setNoticeModal(null);
+  };
+  const deleteNotice=(id)=>{
+    const upd=notices.filter(n=>n.id!==id);
+    setNotices(upd);saveS('notices',upd);
+  };
+
   return (
     <div style={{display:'flex',flexDirection:'column',gap:20}}>
+
+      {/* Notice Board */}
+      {(notices.length>0||isAdmin)&&(
+        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:'16px 20px',boxShadow:T.shadow}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:notices.length>0?14:0}}>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <Bell size={15} style={{color:T.accent}}/>
+              <span style={{fontSize:13,fontWeight:700,color:T.text}}>Notice Board</span>
+              {notices.length>0&&<span style={{fontSize:11,color:T.muted,background:T.bg,borderRadius:10,padding:'1px 8px',border:`1px solid ${T.borderLight}`}}>{notices.length}</span>}
+            </div>
+            {isAdmin&&(
+              <button onClick={()=>setNoticeModal({title:'',body:'',priority:'normal'})}
+                style={{display:'flex',alignItems:'center',gap:5,background:T.accent,border:'none',cursor:'pointer',
+                  color:'#fff',borderRadius:8,padding:'5px 12px',fontSize:12,fontWeight:600,fontFamily:'inherit'}}>
+                <Plus size={13}/> Post Notice
+              </button>
+            )}
+          </div>
+          {notices.length===0&&isAdmin&&(
+            <div style={{color:T.dim,fontSize:12,paddingTop:6}}>No notices posted yet. Click "Post Notice" to share something with your team.</div>
+          )}
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {[...notices].sort((a,b)=>new Date(b.postedAt)-new Date(a.postedAt)).map(n=>{
+              const pri=nPri(n.priority);
+              return(
+                <div key={n.id} style={{background:pri.bg,border:`1px solid ${pri.border}`,borderRadius:10,padding:'12px 14px',position:'relative'}}>
+                  <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:8}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:n.body?6:0}}>
+                        <span style={{fontSize:10,fontWeight:700,color:pri.color,background:'#fff',border:`1px solid ${pri.border}`,borderRadius:6,padding:'1px 7px',textTransform:'uppercase',letterSpacing:'0.04em'}}>{pri.label}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:T.text}}>{n.title}</span>
+                      </div>
+                      {n.body&&<p style={{fontSize:13,color:T.text,margin:0,whiteSpace:'pre-wrap',lineHeight:1.55}}>{n.body}</p>}
+                      <div style={{fontSize:11,color:T.muted,marginTop:6}}>
+                        {n.postedBy} · {new Date(n.postedAt).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'})}
+                        {n.editedAt&&<span style={{marginLeft:6}}>(edited)</span>}
+                      </div>
+                    </div>
+                    {isAdmin&&(
+                      <div style={{display:'flex',gap:6,flexShrink:0}}>
+                        <button onClick={()=>setNoticeModal({id:n.id,title:n.title,body:n.body||'',priority:n.priority||'normal'})}
+                          style={{background:'#fff8',border:`1px solid ${pri.border}`,cursor:'pointer',borderRadius:6,padding:'3px 8px',fontSize:11,color:T.text,fontFamily:'inherit'}}>Edit</button>
+                        <button onClick={()=>deleteNotice(n.id)}
+                          style={{background:'#fff8',border:`1px solid ${T.danger}40`,cursor:'pointer',borderRadius:6,padding:'3px 8px',fontSize:11,color:T.danger,fontFamily:'inherit'}}>Delete</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Notice compose/edit modal */}
+      {noticeModal&&(
+        <div style={{position:'fixed',inset:0,background:'#0008',zIndex:3000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:T.card,borderRadius:16,padding:24,width:'100%',maxWidth:480,boxShadow:'0 20px 60px #0004'}}>
+            <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:18}}>{noticeModal.id?'Edit Notice':'Post Notice'}</div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:600,color:T.muted,marginBottom:5}}>Priority</div>
+              <div style={{display:'flex',gap:8}}>
+                {NOTICE_PRIORITIES.map(p=>(
+                  <button key={p.id} onClick={()=>setNoticeModal(m=>({...m,priority:p.id}))}
+                    style={{flex:1,padding:'7px 0',borderRadius:8,border:`2px solid ${noticeModal.priority===p.id?p.color:T.borderLight}`,
+                      background:noticeModal.priority===p.id?p.bg:'transparent',
+                      color:noticeModal.priority===p.id?p.color:T.muted,
+                      fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit',transition:'all .15s'}}>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:600,color:T.muted,marginBottom:5}}>Title <span style={{color:T.danger}}>*</span></div>
+              <input value={noticeModal.title} onChange={e=>setNoticeModal(m=>({...m,title:e.target.value}))}
+                placeholder="Notice title…"
+                style={{width:'100%',padding:'9px 12px',borderRadius:8,border:`1px solid ${T.border}`,background:T.bg,color:T.text,fontSize:13,fontFamily:'inherit',outline:'none'}}/>
+            </div>
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:12,fontWeight:600,color:T.muted,marginBottom:5}}>Message <span style={{color:T.dim,fontWeight:400}}>(optional)</span></div>
+              <textarea value={noticeModal.body} onChange={e=>setNoticeModal(m=>({...m,body:e.target.value}))}
+                placeholder="Additional details…" rows={4}
+                style={{width:'100%',padding:'9px 12px',borderRadius:8,border:`1px solid ${T.border}`,background:T.bg,color:T.text,fontSize:13,fontFamily:'inherit',outline:'none',resize:'vertical'}}/>
+            </div>
+            <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
+              <button onClick={()=>setNoticeModal(null)}
+                style={{padding:'8px 18px',borderRadius:8,border:`1px solid ${T.border}`,background:'transparent',color:T.text,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+              <button onClick={saveNotice} disabled={!(noticeModal.title||'').trim()}
+                style={{padding:'8px 18px',borderRadius:8,border:'none',background:T.accent,color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit',opacity:(noticeModal.title||'').trim()?1:0.5}}>
+                {noticeModal.id?'Save Changes':'Post'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Worker document expiry alerts */}
       {(()=>{
         const alerts=[];
@@ -9478,6 +9600,7 @@ export default function App(){
   const [workerClaims,setWorkerClaims]=useState([]);
   const [staffClaims,setStaffClaims]=useState([]);
   const [invoiceBatches,setInvoiceBatches]=useState([]);
+  const [notices,setNotices]=useState([]);
 
   const [activeUserId,setActiveUserId]=useState(null); // null = not logged in
   const [workerSession,setWorkerSession]=useState(null);
@@ -9633,7 +9756,7 @@ export default function App(){
   const loadAllData = useCallback(async()=>{
     setSyncing(true);
     try{
-      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al]=await Promise.all([
+      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,nt]=await Promise.all([
         loadS('projects',SEED_PROJ),
         loadS('invoices',SEED_INV),
         loadS('payments',SEED_PAY),
@@ -9647,6 +9770,7 @@ export default function App(){
         loadS('staffClaims',[]),
         loadS('invoiceBatches',[]),
         loadS('actionLog',[]),
+        loadS('notices',[]),
       ]);
       setProjects(Array.isArray(p)?p:SEED_PROJ);
       const rawInvoices=Array.isArray(i)?i:SEED_INV;
@@ -9661,6 +9785,7 @@ export default function App(){
       setWorkerClaims(Array.isArray(wc)?wc:[]);
       setStaffClaims(Array.isArray(sc)?sc:[]);
       setInvoiceBatches(Array.isArray(ib)?ib:[]);
+      setNotices(Array.isArray(nt)?nt:[]);
       // Trash kept for 12 months (previously 30 days)
       const twelveMonthsAgo=Date.now()-365*24*60*60*1000;
       const freshTrash=(Array.isArray(tr)?tr:[]).filter(t=>new Date(t._deletedAt).getTime()>twelveMonthsAgo);
@@ -10045,7 +10170,7 @@ export default function App(){
           </div>
         )}
         <div style={{padding:isMobile?'12px 10px 16px':'24px 32px 48px'}}>
-          {tab==='dashboard'&&(<Dashboard projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments.filter(py=>userProjects.some(p=>p.id===py.projectId))} widgets={activeUser?.widgets||DASH_WIDGETS.map(w=>w.id)} siteWorkers={siteWorkers} onlinePresence={onlinePresence} activeUserId={activeUserId}/>)}
+          {tab==='dashboard'&&(<Dashboard projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments.filter(py=>userProjects.some(p=>p.id===py.projectId))} widgets={activeUser?.widgets||DASH_WIDGETS.map(w=>w.id)} siteWorkers={siteWorkers} onlinePresence={onlinePresence} activeUserId={activeUserId} notices={notices} setNotices={setNotices} isAdmin={isAdmin} activeUser={activeUser}/>)}
           {tab==='projects'&&<Projects projects={userProjects} setProjects={setProjects} invoices={invoices} payments={payments} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} users={users} acctSettings={acctSettings}/>}
           {tab==='invoices'&&<Invoices invoices={invoices} setInvoices={setInvoices} projects={userProjects} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} invoiceBatches={invoiceBatches} setInvoiceBatches={setInvoiceBatches} acctSettings={acctSettings}/>}
           {tab==='payments'&&<Payments payments={payments} setPayments={setPayments} projects={userProjects} invoices={invoices} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} acctSettings={acctSettings}/>}
