@@ -7128,7 +7128,7 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
                 <div style={{padding:'12px 18px',background:T.bg,borderBottom:`1px solid ${T.borderLight}`,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
                   <div style={{display:'flex',alignItems:'center',gap:10}}>
                     <div style={{width:30,height:30,borderRadius:10,background:T.text,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                      <span style={{fontSize:12,color:'#F8F6F2',fontWeight:700}}>{group.userName.charAt(0).toUpperCase()}</span>
+                      <span style={{fontSize:12,color:T.bg,fontWeight:700}}>{group.userName.charAt(0).toUpperCase()}</span>
                     </div>
                     <div>
                       <div style={{fontSize:13,fontWeight:700,color:T.text}}>{group.userName}</div>
@@ -9952,7 +9952,7 @@ function WorkerLoginScreen({siteWorkers, onLogin, onAdminLogin, acctSettings}){
           <div style={{display:'inline-flex',alignItems:'center',justifyContent:'center',
             width:60,height:60,background:T.text,borderRadius:18,marginBottom:18,
             boxShadow:'0 4px 20px rgba(26,26,26,0.25)'}}>
-            <Building size={26} style={{color:'#fff'}}/>
+            <Building size={26} style={{color:T.bg}}/>
           </div>
           <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:32,color:T.text,letterSpacing:'-0.02em',lineHeight:1}}>
             Reno<span style={{color:T.tan}}>Ledger</span>
@@ -10176,7 +10176,7 @@ function LoginScreen({users, siteWorkers, onStaffLogin, onWorkerPortal, acctSett
             cursor:'pointer',userSelect:'none',WebkitUserSelect:'none',
             boxShadow:'0 4px 20px rgba(26,26,26,0.25)',
             transition:'transform 0.1s',transform:tapCount>0?'scale(0.94)':'scale(1)'}}>
-            <Building size={26} style={{color:'#fff'}}/>
+            <Building size={26} style={{color:T.bg}}/>
           </div>
           <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:32,color:T.text,letterSpacing:'-0.02em',lineHeight:1}}>
             Reno<span style={{color:T.tan}}>Ledger</span>
@@ -10241,7 +10241,7 @@ function LoginScreen({users, siteWorkers, onStaffLogin, onWorkerPortal, acctSett
               <div style={{display:'flex',alignItems:'center',gap:14}}>
                 <div style={{width:44,height:44,background:T.text,borderRadius:13,
                   display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                  <Users size={19} style={{color:'#fff'}}/>
+                  <Users size={19} style={{color:T.bg}}/>
                 </div>
                 <div>
                   <div style={{fontSize:15,fontWeight:600,color:T.text}}>Staff Login</div>
@@ -11042,7 +11042,7 @@ export default function App(){
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@500&family=DM+Serif+Display&display=swap');@keyframes blink{0%,100%{opacity:0.2}50%{opacity:1}}.ld1{animation:blink 1.2s ease-in-out infinite 0s}.ld2{animation:blink 1.2s ease-in-out infinite 0.2s}.ld3{animation:blink 1.2s ease-in-out infinite 0.4s}`}</style>
       <div style={{display:'flex',alignItems:'center',gap:12}}>
         <div style={{width:44,height:44,background:T.text,borderRadius:13,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 4px 16px rgba(26,26,26,0.20)'}}>
-          <Building size={20} style={{color:'#fff'}}/>
+          <Building size={20} style={{color:T.bg}}/>
         </div>
         <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:26,color:T.text,lineHeight:1}}>
           RenoLedger
@@ -11177,7 +11177,7 @@ export default function App(){
             <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
               <div style={{width:34,height:34,background:T.text,borderRadius:10,
                 display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                <Building size={16} style={{color:'#fff'}}/>
+                <Building size={16} style={{color:T.bg}}/>
               </div>
               <div>
                 <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:17,color:T.text,lineHeight:1}}>
@@ -11293,7 +11293,7 @@ export default function App(){
           <div style={{display:'flex',alignItems:'center',gap:8}}>
             <div style={{width:28,height:28,background:T.text,borderRadius:8,
               display:'flex',alignItems:'center',justifyContent:'center'}}>
-              <Building size={13} style={{color:'#fff'}}/>
+              <Building size={13} style={{color:T.bg}}/>
             </div>
             <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:16,color:T.text}}>
               RenoLedger
