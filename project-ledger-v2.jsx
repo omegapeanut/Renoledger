@@ -337,6 +337,33 @@ const compressForSync = async (file) => {
   return null;
 };
 
+// ── Cloudinary image storage ──
+const CLOUDINARY_CLOUD = 'du3f8jjrp';
+const CLOUDINARY_PRESET = 'tdiworkspace';
+const CL_UPLOAD_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/upload`;
+
+const uploadToCloudinary = async (file) => {
+  if (!file) return null;
+  try {
+    let dataUrl;
+    if (file.type === 'application/pdf') {
+      dataUrl = await pdfToCompressedImage(file);
+    } else if (file.type.startsWith('image/')) {
+      dataUrl = await compressImageFile(file);
+    }
+    if (!dataUrl) return null;
+    const fd = new FormData();
+    fd.append('upload_preset', CLOUDINARY_PRESET);
+    fd.append('file', dataUrl);
+    const res = await fetch(CL_UPLOAD_URL, { method: 'POST', body: fd });
+    if (!res.ok) throw new Error(`Cloudinary ${res.status}`);
+    const data = await res.json();
+    return data.secure_url || null;
+  } catch(e) {
+    console.warn('uploadToCloudinary error:', e.message);
+    return null;
+  }
+};
 
 
 // Save users — strips any photo >50KB to prevent Firebase document size limit on mobile
@@ -2447,14 +2474,12 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
   const extractQuotation=async(file)=>{
     const apiKey=(acctSettings?.anthropicApiKey||'').trim();
     ff('quotationFilename')(file.name);
-    // Compress BEFORE setting quotationFile so the save button never fires with a raw oversized file
     setQuoteCompressing(true);
     const fileData=await toB64(file);
-    const compressed=await compressForSync(file);
-    // Use the compressed version if available, otherwise fall back to raw (images already small)
-    const dataUri=compressed||`data:${file.type};base64,${fileData}`;
-    ff('quotationFile')(dataUri);
+    // Show local preview immediately, upload to Cloudinary in background
+    ff('quotationFile')(`data:${file.type};base64,${fileData}`);
     setQuoteCompressing(false);
+    uploadToCloudinary(file).then(url=>{if(url)ff('quotationFile')(url);});
 
     if(!apiKey){
       setQuoteOcr({loading:false,done:false,err:'AI OCR not configured. File saved. Go to System → set Anthropic API key to enable auto-fill.'});
@@ -2496,17 +2521,17 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
 
   const extractVO=async(file)=>{
     const apiKey=(acctSettings?.anthropicApiKey||'').trim();
-    // Read full file for OCR, compress separately for storage
     const fileData=await toB64(file);
     const rawDataUri=`data:${file.type};base64,${fileData}`;
     setVoOcr({loading:true,done:false,err:''});
-    // Start compression in background
-    const compressedPromise=compressForSync(file);
     const voEntry={id:uid(),filename:file.name,file:rawDataUri,amount:0,description:'',date:new Date().toISOString().slice(0,10),uploadedAt:new Date().toISOString(),confirmed:false};
+    // Upload to Cloudinary in background; replace local data URL when done
+    const uploadPromise=uploadToCloudinary(file);
+    const replaceVoFile=(id,url)=>setForm(prev=>prev?{...prev,voList:(prev.voList||[]).map(v=>v.id===id?{...v,file:url}:v)}:prev);
 
     if(!apiKey){
-      const compressed=await compressedPromise;
-      setForm(prev=>({...prev,voList:[...(prev.voList||[]),{...voEntry,file:compressed||rawDataUri,confirmed:true}]}));
+      setForm(prev=>({...prev,voList:[...(prev.voList||[]),{...voEntry,confirmed:true}]}));
+      uploadPromise.then(url=>{if(url)replaceVoFile(voEntry.id,url);});
       setVoOcr({loading:false,done:false,err:'File saved. Set Anthropic API key for auto-fill.'});
       return;
     }
@@ -2526,13 +2551,13 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
       const data=await res.json();
       if(data.error) throw new Error(data.error.message);
       const parsed=JSON.parse((data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim());
-      const compressed=await compressedPromise;
-      const enriched={...voEntry,file:compressed||rawDataUri,amount:parsed.amount||0,description:parsed.description||'',date:parsed.date||voEntry.date,voNo:parsed.voNo||''};
+      const enriched={...voEntry,amount:parsed.amount||0,description:parsed.description||'',date:parsed.date||voEntry.date,voNo:parsed.voNo||''};
       setForm(prev=>({...prev,voList:[...(prev.voList||[]),enriched]}));
+      uploadPromise.then(url=>{if(url)replaceVoFile(voEntry.id,url);});
       setVoOcr({loading:false,done:true,err:''});
     }catch(e){
-      const compressed=await compressedPromise;
-      setForm(prev=>({...prev,voList:[...(prev.voList||[]),{...voEntry,file:compressed||rawDataUri}]}));
+      setForm(prev=>({...prev,voList:[...(prev.voList||[]),voEntry]}));
+      uploadPromise.then(url=>{if(url)replaceVoFile(voEntry.id,url);});
       setVoOcr({loading:false,done:false,err:`Could not read VO: ${e.message||'File saved, please fill in manually.'}`});
     }
   };
@@ -3386,7 +3411,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
     const reader=new FileReader();
     reader.onload=ev=>setFormFn(p=>({...p,proofImage:ev.target.result}));
     reader.readAsDataURL(file);
-    compressForSync(file).then(c=>{if(c)setFormFn(p=>({...p,proofImage:c}));});
+    uploadToCloudinary(file).then(url=>{if(url)setFormFn(p=>({...p,proofImage:url}));});
     if(!apiKey) return;
     setProofOcrLoading(true);
     try{
@@ -3468,7 +3493,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
     // Show original immediately for display while compressing in background
     const rdr=new FileReader();rdr.onload=e=>setPreview(e.target.result);rdr.readAsDataURL(file);
     // Compress for Firebase sync (replaces preview once done)
-    compressForSync(file).then(compressed=>{if(compressed)setPreview(compressed);});
+    uploadToCloudinary(file).then(url=>{if(url)setPreview(url);});
     if(!apiKey){
       setOcr({loading:false,done:false,err:'AI OCR not configured. Go to System → set your Anthropic API key, or fill in manually.'});
       return;
@@ -4678,7 +4703,7 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
     const reader=new FileReader();
     reader.onload=ev=>setReceipt(ev.target.result);
     reader.readAsDataURL(file);
-    compressForSync(file).then(c=>{if(c)setReceipt(c);});
+    uploadToCloudinary(file).then(url=>{if(url)setReceipt(url);});
 
     const apiKey=(acctSettings?.anthropicApiKey||'').trim();
     if(!apiKey) return; // no key — just store image
@@ -5589,7 +5614,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
     const reader=new FileReader();
     reader.onload=ev=>setAdminPayForm(p=>({...p,receiptImage:ev.target.result}));
     reader.readAsDataURL(file);
-    compressForSync(file).then(c=>{if(c)setAdminPayForm(p=>({...p,receiptImage:c}));});
+    uploadToCloudinary(file).then(url=>{if(url)setAdminPayForm(p=>({...p,receiptImage:url}));});
     if(!apiKey) return;
     setAdminOcrLoading(true);
     try{
@@ -5631,7 +5656,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
       const reader=new FileReader();
       reader.onload=ev=>setForm(prev=>prev?{...prev,receiptImage:ev.target.result}:prev);
       reader.readAsDataURL(file);
-      compressForSync(file).then(c=>{if(c)setForm(prev=>prev?{...prev,receiptImage:c}:prev);});
+      uploadToCloudinary(file).then(url=>{if(url)setForm(prev=>prev?{...prev,receiptImage:url}:prev);});
     }catch(e){ console.warn('FileReader error:',e); }
 
     // OCR — only if API key configured, never blocks submit
@@ -8070,9 +8095,9 @@ function Warranty({warranties,setWarranties,projects,isAdmin,acctSettings}){
                   <Camera size={14}/><span style={{fontSize:10}}>Camera</span>
                 </button>
                 <input ref={claimFileRef} type="file" accept="image/*" style={{display:'none'}}
-                  onChange={e=>{const f=e.target.files?.[0];if(f){const r=new FileReader();r.onload=ev=>addClaimPhoto(ev.target.result);r.readAsDataURL(f);}e.target.value='';}}/>
+                  onChange={async e=>{const f=e.target.files?.[0];if(f){const idx=(claimForm.photos||[]).length;const r=new FileReader();r.onload=ev=>addClaimPhoto(ev.target.result);r.readAsDataURL(f);const url=await uploadToCloudinary(f);if(url)setClaimForm(p=>({...p,photos:(p.photos||[]).map((ph,i)=>i===idx?url:ph)}));}e.target.value='';}}/>
                 <input ref={claimCamRef} type="file" accept="image/*" capture="environment" style={{display:'none'}}
-                  onChange={e=>{const f=e.target.files?.[0];if(f){const r=new FileReader();r.onload=ev=>addClaimPhoto(ev.target.result);r.readAsDataURL(f);}e.target.value='';}}/>
+                  onChange={async e=>{const f=e.target.files?.[0];if(f){const idx=(claimForm.photos||[]).length;const r=new FileReader();r.onload=ev=>addClaimPhoto(ev.target.result);r.readAsDataURL(f);const url=await uploadToCloudinary(f);if(url)setClaimForm(p=>({...p,photos:(p.photos||[]).map((ph,i)=>i===idx?url:ph)}));}e.target.value='';}}/>
               </div>
             </div>
           </div>
@@ -8412,9 +8437,9 @@ function WorkerPortal({worker, onLogout, attendance, setAttendance, projects, cl
                   <Camera size={20}/><span>Camera</span><span style={{fontSize:10,color:T.dim}}>take photo</span>
                 </button>
                 <input ref={claimPhotoRef} type="file" accept="image/*" style={{display:'none'}}
-                  onChange={async e=>{const f=e.target.files?.[0];if(f){const r=new FileReader();r.onload=async ev=>{cf('photo')(await compressPhoto(ev.target.result));};r.readAsDataURL(f);}e.target.value='';}}/>
+                  onChange={async e=>{const f=e.target.files?.[0];if(f){const r=new FileReader();r.onload=ev=>cf("photo")(ev.target.result);r.readAsDataURL(f);const url=await uploadToCloudinary(f);if(url)cf("photo")(url);}e.target.value="";}}/>
                 <input ref={claimCamRef} type="file" accept="image/*" capture="environment" style={{display:'none'}}
-                  onChange={async e=>{const f=e.target.files?.[0];if(f){const r=new FileReader();r.onload=async ev=>{cf('photo')(await compressPhoto(ev.target.result));};r.readAsDataURL(f);}e.target.value='';}}/>
+                  onChange={async e=>{const f=e.target.files?.[0];if(f){const r=new FileReader();r.onload=ev=>cf("photo")(ev.target.result);r.readAsDataURL(f);const url=await uploadToCloudinary(f);if(url)cf("photo")(url);}e.target.value="";}}/>
               </div>
             )}
           </div>
