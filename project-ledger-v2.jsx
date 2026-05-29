@@ -1794,7 +1794,7 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
   );
 }
 
-function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId,notices=[],setNotices,isAdmin}){
+function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId,notices=[],setNotices,isAdmin,attendance=[]}){
   const totRev = useMemo(()=>projects.reduce((s,p)=>s+p.contractAmount+(p.variationOrders||0),0),[projects]);
   const totExp = useMemo(()=>invoices.reduce((s,i)=>s+i.total,0),[invoices]);
   const totRecv = useMemo(()=>payments.filter(p=>p.status==='Received').reduce((s,p)=>s+p.amount,0),[payments]);
@@ -11380,7 +11380,7 @@ export default function App(){
             const allIds=DASH_WIDGETS.map(w=>w.id);
             const userWidgets=activeUser?.widgets||allIds;
             const mergedWidgets=[...userWidgets, ...allIds.filter(id=>!userWidgets.includes(id))];
-            return <Dashboard projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments.filter(py=>userProjects.some(p=>p.id===py.projectId))} widgets={mergedWidgets} siteWorkers={siteWorkers} onlinePresence={onlinePresence} activeUserId={activeUserId} notices={notices} setNotices={(n)=>{setNotices(n);saveNotices(n);}} isAdmin={isAdmin}/>;
+            return <Dashboard projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments.filter(py=>userProjects.some(p=>p.id===py.projectId))} widgets={mergedWidgets} siteWorkers={siteWorkers} onlinePresence={onlinePresence} activeUserId={activeUserId} notices={notices} setNotices={(n)=>{setNotices(n);saveNotices(n);}} isAdmin={isAdmin} attendance={attendance}/>;
           })()}
           {tab==='projects'&&<Projects projects={userProjects} setProjects={setProjects} invoices={invoices} payments={payments} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} users={users} acctSettings={acctSettings} logAction={logAction} activeUser={activeUser}/>}
           {tab==='invoices'&&<Invoices invoices={invoices} setInvoices={setInvoices} projects={userProjects} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} invoiceBatches={invoiceBatches} setInvoiceBatches={setInvoiceBatches} acctSettings={acctSettings} logAction={logAction}/>}
