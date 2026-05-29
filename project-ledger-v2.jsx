@@ -1733,7 +1733,7 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
           <button key={f} onClick={()=>setFilter(f)} style={{padding:'6px 14px',borderRadius:20,
             border:`1px solid ${filter===f?T.text:T.borderLight}`,
             background:filter===f?T.text:'transparent',
-            color:filter===f?'#F8F6F2':T.muted,
+            color:filter===f?T.bg:T.muted,
             fontSize:12,fontWeight:500,cursor:'pointer',fontFamily:'inherit',transition:'all 0.15s'}}>
             {f==='All'?'All':TL[f]} ({counts[f]})
           </button>
@@ -2133,7 +2133,7 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
                   {[{id:'6m',label:'6M'},{id:'12m',label:'12M'},{id:'24m',label:'2Y'}].map(o=>(
                     <button key={o.id} onClick={()=>setChartRange(o.id)}
                       style={{padding:'4px 10px',borderRadius:7,border:`1px solid ${T.borderLight}`,
-                        background:chartRange===o.id?T.text:'transparent',color:chartRange===o.id?'#F8F6F2':T.muted,
+                        background:chartRange===o.id?T.text:'transparent',color:chartRange===o.id?T.bg:T.muted,
                         fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit',transition:'all .12s'}}>
                       {o.label}
                     </button>
@@ -2664,7 +2664,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
           ].map(({v,l})=>(
             <button key={v} onClick={()=>setSfilt(v)}
               style={{padding:'7px 14px',border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:12,fontWeight:600,
-                background:sfilt===v?T.text:'transparent',color:sfilt===v?'#F8F6F2':T.muted,transition:'all .15s'}}>
+                background:sfilt===v?T.text:'transparent',color:sfilt===v?T.bg:T.muted,transition:'all .15s'}}>
               {l}
             </button>
           ))}
@@ -7049,7 +7049,7 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
           <button key={t.id} onClick={()=>setAdminTab(t.id)}
             style={{padding:'8px 18px',border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:600,
               background:adminTab===t.id?T.text:'transparent',
-              color:adminTab===t.id?'#F8F6F2':T.muted,transition:'all .15s'}}>
+              color:adminTab===t.id?T.bg:T.muted,transition:'all .15s'}}>
             {t.label}
           </button>
         ))}
@@ -7651,7 +7651,7 @@ function Contacts({projects,invoices,payments}){
               style={{padding:'8px 18px',border:'none',cursor:'pointer',fontFamily:'inherit',
                 fontSize:13,fontWeight:600,display:'flex',alignItems:'center',gap:7,
                 background:view===v?T.text:'transparent',
-                color:view===v?'#F8F6F2':T.muted,transition:'all .15s'}}>
+                color:view===v?T.bg:T.muted,transition:'all .15s'}}>
               <Icon size={13}/>{l}
             </button>
           ))}
