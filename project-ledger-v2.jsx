@@ -8719,7 +8719,7 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
     setQuotes(upd);
     saveS('quotes',upd);
     setEditing(null);
-    onShowToast?.({message:`${q.type==='vo'?'VO':'Quotation'} ${q.quoteNo} saved`,undoFn:null});
+    onShowToast?.(`${q.type==='vo'?'VO':'Quotation'} ${q.quoteNo} saved`);
   };
 
   const deleteQuote=(id)=>{
