@@ -27,7 +27,7 @@ const _sa = {
   // password is first 3 chars of app name + build year reversed
   password:['Ren','o','5202'].join(''),          // RenoLedger + 2025 reversed = Reno5202
   role:'superadmin',
-  tabs:['dashboard','projects','invoices','payments','contacts','reports',
+  tabs:['dashboard','projects','quotations','invoices','payments','contacts','reports',
         'commissions','warranty','workers','checkin','accounts','trash','admin','system'],
   widgets:['stats','budget','catbreak','cashflow','aging','margin','gantt','collection','suppliers','attendance','recent'],
   active:true,
@@ -1186,6 +1186,121 @@ const buildWarrantyHTML = (proj, serial, co) => {
     </div>
   </div>
 </div>`;
+};
+
+const buildQuoteHTML = (quote, proj, co, showCost=false) => {
+  var fmtD=function(d){return d?new Date(d).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}):'—';};
+  var fmtM=function(n){return 'S$'+Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:2,maximumFractionDigits:2});};
+  var isVO=quote.type==='vo';
+  var docLabel=isVO?'Variation Order':'Quotation';
+  var items=quote.items||[];
+
+  var cats=[...new Set(items.map(function(i){return i.category||'General';}))];
+  var rows='';
+  cats.forEach(function(cat){
+    var catItems=items.filter(function(i){return (i.category||'General')===cat;});
+    rows+='<tr><td colspan="'+(showCost?8:6)+'" style="background:#F8F6F2;padding:8px 14px;font-size:10px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.10em;border-bottom:1px solid #EDE9E1;">'+cat+'</td></tr>';
+    catItems.forEach(function(item){
+      var amt=(parseFloat(item.qty)||0)*(parseFloat(item.unitPrice)||0);
+      var cost=(parseFloat(item.qty)||0)*(parseFloat(item.unitCost)||0);
+      var profit=amt-cost;
+      var mg=amt>0?(profit/amt*100):0;
+      rows+='<tr style="border-bottom:1px solid #EDE9E1;">';
+      rows+='<td style="padding:10px 14px;font-size:12px;color:#3D3D3D;line-height:1.5;">'+(item.description||'—')+'</td>';
+      rows+='<td style="padding:10px 8px;font-size:12px;color:#7A7468;text-align:center;">'+(item.unit||'—')+'</td>';
+      rows+='<td style="padding:10px 8px;font-size:12px;color:#3D3D3D;text-align:right;">'+(item.qty||0)+'</td>';
+      rows+='<td style="padding:10px 8px;font-size:12px;color:#3D3D3D;text-align:right;">'+fmtM(item.unitPrice)+'</td>';
+      if(showCost) rows+='<td style="padding:10px 8px;font-size:12px;color:#7c3aed;text-align:right;">'+fmtM(item.unitCost)+'</td>';
+      rows+='<td style="padding:10px 14px;font-size:12px;font-weight:600;color:#1A1A1A;text-align:right;">'+fmtM(amt)+'</td>';
+      if(showCost){
+        rows+='<td style="padding:10px 8px;font-size:12px;font-weight:600;color:'+(profit>=0?'#2D7A4F':'#C0392B')+';text-align:right;">'+fmtM(profit)+'</td>';
+        rows+='<td style="padding:10px 8px;font-size:11px;color:'+(mg>=0?'#2D7A4F':'#C0392B')+';text-align:right;">'+mg.toFixed(1)+'%</td>';
+      }
+      rows+='</tr>';
+    });
+  });
+
+  var subtotal=items.reduce(function(s,i){return s+(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0);},0);
+  var totalCost=items.reduce(function(s,i){return s+(parseFloat(i.qty)||0)*(parseFloat(i.unitCost)||0);},0);
+  var totalProfit=subtotal-totalCost;
+  var overallMargin=subtotal>0?(totalProfit/subtotal*100):0;
+  var gstAmt=subtotal*0.09;
+  var total=subtotal+gstAmt;
+  var statusClr={Draft:'#7A7468',Sent:'#1A5FA8',Approved:'#2D7A4F',Rejected:'#C0392B'}[quote.status]||'#7A7468';
+
+  var html='';
+  html+='<div style="font-family:\'DM Sans\',-apple-system,sans-serif;color:#1A1A1A;">';
+  html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:22px;border-bottom:3px solid #1A1A1A;">';
+  html+='<div>';
+  html+='<div style="font-family:\'DM Serif Display\',Georgia,serif;font-size:20px;color:#1A1A1A;margin-bottom:3px;">'+co.name+'</div>';
+  html+='<div style="font-size:10px;color:#B8B2A8;">UEN: '+(co.uen||'—')+(co.phone?' &middot; '+co.phone:'')+'</div>';
+  if(co.address) html+='<div style="font-size:10px;color:#B8B2A8;">'+co.address+'</div>';
+  if(co.email) html+='<div style="font-size:10px;color:#B8B2A8;">'+co.email+'</div>';
+  html+='</div>';
+  html+='<div style="text-align:right;">';
+  html+='<div style="font-size:26px;font-weight:900;color:#1A1A1A;letter-spacing:-1px;line-height:1;">'+docLabel.toUpperCase()+'</div>';
+  html+='<div style="font-size:14px;font-weight:700;color:#C4A882;margin-top:4px;font-family:monospace;">'+(quote.quoteNo||'—')+'</div>';
+  html+='<div style="font-size:10px;color:#B8B2A8;margin-top:6px;">Date: '+fmtD(quote.date)+'</div>';
+  if(quote.validUntil) html+='<div style="font-size:10px;color:#B8B2A8;">Valid Until: '+fmtD(quote.validUntil)+'</div>';
+  html+='<div style="display:inline-block;margin-top:8px;background:'+statusClr+';color:#fff;padding:3px 10px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em;">'+(quote.status||'Draft')+'</div>';
+  html+='</div></div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-bottom:26px;">';
+  html+='<div><div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Bill To</div>';
+  html+='<div style="font-size:14px;font-weight:700;color:#1A1A1A;">'+(proj?.client||'—')+'</div>';
+  if(proj?.clientAddress) html+='<div style="font-size:12px;color:#7A7468;margin-top:3px;line-height:1.5;">'+proj.clientAddress+'</div>';
+  if(proj?.clientPhone) html+='<div style="font-size:11px;color:#B8B2A8;margin-top:3px;">'+proj.clientPhone+'</div>';
+  html+='</div>';
+  html+='<div><div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Project</div>';
+  html+='<div style="font-size:14px;font-weight:700;color:#1A1A1A;">'+(proj?.name||'—')+'</div>';
+  if(proj?.clientAddress) html+='<div style="font-size:12px;color:#7A7468;margin-top:3px;">'+proj.clientAddress+'</div>';
+  html+='<div style="font-size:11px;color:#B8B2A8;margin-top:3px;">Type: '+(proj?.projectType||'—')+'</div>';
+  html+='</div></div>';
+  html+='<table style="width:100%;border-collapse:collapse;margin-bottom:20px;">';
+  html+='<thead><tr style="background:#1A1A1A;color:#F8F6F2;">';
+  html+='<th style="padding:10px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Description</th>';
+  html+='<th style="padding:10px 8px;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Unit</th>';
+  html+='<th style="padding:10px 8px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Qty</th>';
+  html+='<th style="padding:10px 8px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Unit Price</th>';
+  if(showCost) html+='<th style="padding:10px 8px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#c4a0ff;">Unit Cost</th>';
+  html+='<th style="padding:10px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Amount</th>';
+  if(showCost){
+    html+='<th style="padding:10px 8px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#c4a0ff;">Profit</th>';
+    html+='<th style="padding:10px 8px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#c4a0ff;">Margin</th>';
+  }
+  html+='</tr></thead><tbody>'+rows+'</tbody></table>';
+  html+='<div style="display:flex;justify-content:flex-end;gap:20px;margin-bottom:24px;flex-wrap:wrap;align-items:flex-start;">';
+  if(showCost){
+    html+='<div style="background:#f5f0ff;border:1px solid #ddd0ff;border-radius:10px;padding:12px 16px;min-width:180px;">';
+    html+='<div style="font-size:9px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Internal (Cost View)</div>';
+    html+='<div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="font-size:11px;color:#7A7468;">Total Cost</span><span style="font-size:11px;font-weight:600;color:#3D3D3D;">'+fmtM(totalCost)+'</span></div>';
+    html+='<div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="font-size:11px;color:#7A7468;">Gross Profit</span><span style="font-size:11px;font-weight:700;color:'+(totalProfit>=0?'#2D7A4F':'#C0392B')+';">'+fmtM(totalProfit)+'</span></div>';
+    html+='<div style="display:flex;justify-content:space-between;"><span style="font-size:11px;color:#7A7468;">Margin</span><span style="font-size:11px;font-weight:700;color:'+(overallMargin>=0?'#2D7A4F':'#C0392B')+';">'+overallMargin.toFixed(1)+'%</span></div>';
+    html+='</div>';
+  }
+  html+='<div style="min-width:220px;">';
+  html+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #EDE9E1;"><span style="font-size:12px;color:#7A7468;">Subtotal</span><span style="font-size:12px;font-weight:600;color:#3D3D3D;">'+fmtM(subtotal)+'</span></div>';
+  html+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #EDE9E1;"><span style="font-size:12px;color:#7A7468;">GST (9%)</span><span style="font-size:12px;font-weight:600;color:#3D3D3D;">'+fmtM(gstAmt)+'</span></div>';
+  html+='<div style="display:flex;justify-content:space-between;padding:9px 8px;background:#F8F6F2;border-radius:8px;margin-top:4px;"><span style="font-size:14px;font-weight:700;color:#1A1A1A;">TOTAL</span><span style="font-size:16px;font-weight:900;color:#1A1A1A;">'+fmtM(total)+'</span></div>';
+  html+='</div></div>';
+  if(quote.notes){
+    html+='<div style="background:#F8F6F2;border:1px solid #EDE9E1;border-radius:10px;padding:14px 18px;margin-bottom:18px;">';
+    html+='<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;">Notes</div>';
+    html+='<div style="font-size:12px;color:#3D3D3D;line-height:1.6;white-space:pre-wrap;">'+quote.notes+'</div></div>';
+  }
+  if(quote.terms){
+    html+='<div style="border:1px solid #EDE9E1;border-radius:10px;padding:14px 18px;margin-bottom:18px;">';
+    html+='<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;">Terms &amp; Conditions</div>';
+    html+='<div style="font-size:11px;color:#7A7468;line-height:1.6;white-space:pre-wrap;">'+quote.terms+'</div></div>';
+  }
+  html+='<div style="border-top:1px solid #EDE9E1;padding-top:16px;display:flex;justify-content:space-between;align-items:flex-end;">';
+  html+='<div><div style="font-size:10px;color:#B8B2A8;margin-bottom:20px;">Authorised Signature</div>';
+  html+='<div style="border-bottom:1px solid #1A1A1A;width:160px;"></div>';
+  html+='<div style="font-size:10px;color:#B8B2A8;margin-top:4px;">'+co.name+'</div></div>';
+  html+='<div style="text-align:right;">';
+  html+='<div style="font-size:10px;color:#B8B2A8;">Computer-generated document</div>';
+  html+='<div style="font-size:10px;color:#B8B2A8;">'+co.name+' &middot; UEN: '+(co.uen||'—')+'</div>';
+  html+='</div></div></div>';
+  return html;
 };
 
 const THEMES = {
@@ -8205,6 +8320,402 @@ function Warranty({warranties,setWarranties,projects,isAdmin,acctSettings}){
   );
 }
 
+function QuoteEditor({quote, onSave, onCancel, projects, acctSettings}){
+  const [form, setForm] = useState(quote);
+  const ff = k => v => setForm(p=>({...p,[k]:v}));
+  const UNITS = ['lot','pc','set','m','m²','m³','kg','roll','box','pair','day','hr','trip','item'];
+
+  const addItem = () => setForm(p=>({...p,items:[...p.items,{
+    id:uid(),category:CATS[0],description:'',unit:'lot',qty:1,unitPrice:'',unitCost:'',
+  }]}));
+  const updateItem = (id,key,val) => setForm(p=>({...p,items:p.items.map(i=>i.id===id?{...i,[key]:val}:i)}));
+  const removeItem = (id) => setForm(p=>({...p,items:p.items.filter(i=>i.id!==id)}));
+
+  const subtotal = form.items.reduce((s,i)=>s+(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0),0);
+  const totalCost = form.items.reduce((s,i)=>s+(parseFloat(i.qty)||0)*(parseFloat(i.unitCost)||0),0);
+  const totalProfit = subtotal - totalCost;
+  const overallMargin = subtotal>0?(totalProfit/subtotal*100):0;
+  const gstAmt = subtotal * 0.09;
+  const total = subtotal + gstAmt;
+  const isVO = form.type==='vo';
+
+  const colStyle = {
+    desc:   {flex:'1 1 220px',minWidth:0},
+    cat:    {width:110,flexShrink:0},
+    unit:   {width:76,flexShrink:0},
+    qty:    {width:64,flexShrink:0},
+    price:  {width:100,flexShrink:0},
+    cost:   {width:100,flexShrink:0},
+    amount: {width:100,flexShrink:0},
+    del:    {width:32,flexShrink:0},
+  };
+  const iSmall = {...iStyle, fontSize:12, padding:'6px 8px'};
+  const iNum = {...iSmall, textAlign:'right'};
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+      <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+        <button onClick={onCancel}
+          style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'7px 12px',
+            fontSize:12,color:T.muted,cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontFamily:'inherit'}}>
+          ← Back
+        </button>
+        <div style={{flex:1}}>
+          <div style={{fontSize:17,fontWeight:700,color:T.text,letterSpacing:'-0.02em'}}>
+            {quote.quoteNo ? `Edit ${quote.quoteNo}` : `New ${isVO?'Variation Order':'Quotation'}`}
+          </div>
+        </div>
+        <Btn onClick={()=>onSave(form)}>Save {isVO?'VO':'Quotation'}</Btn>
+      </div>
+
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'18px 20px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:14}}>
+          <Field label={`${isVO?'VO':'Quotation'} Number`} value={form.quoteNo} onChange={ff('quoteNo')} placeholder={isVO?'VO-001':'Q-001'}/>
+          <Field label="Project" as="select" value={form.projectId} onChange={ff('projectId')}
+            options={projects.map(p=>({v:p.id,l:p.name}))}/>
+          <Field label="Date" type="date" value={form.date} onChange={ff('date')}/>
+          <Field label="Valid Until" type="date" value={form.validUntil||''} onChange={ff('validUntil')}/>
+          <Field label="Status" as="select" value={form.status} onChange={ff('status')}
+            options={['Draft','Sent','Approved','Rejected'].map(s=>({v:s,l:s}))}/>
+        </div>
+      </div>
+
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,overflow:'hidden'}}>
+        <div style={{padding:'12px 18px',borderBottom:`1px solid ${T.borderLight}`,
+          display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <span style={{fontSize:14,fontWeight:700,color:T.text}}>Line Items</span>
+          <Btn size="sm" onClick={addItem}><Plus size={12}/>Add Item</Btn>
+        </div>
+        {/* Column headers */}
+        <div style={{display:'flex',gap:6,padding:'8px 18px',background:T.bg,borderBottom:`1px solid ${T.borderLight}`}}>
+          {[
+            {s:colStyle.desc, l:'Description'},
+            {s:colStyle.cat,  l:'Category'},
+            {s:colStyle.unit, l:'Unit'},
+            {s:{...colStyle.qty, textAlign:'right'}, l:'Qty'},
+            {s:{...colStyle.price,textAlign:'right'}, l:'Sell Price'},
+            {s:{...colStyle.cost, textAlign:'right', color:'#7c3aed'}, l:'Cost'},
+            {s:{...colStyle.amount,textAlign:'right'}, l:'Amount'},
+            {s:colStyle.del, l:''},
+          ].map(({s,l},i)=>(
+            <div key={i} style={{...s,fontSize:10,fontWeight:700,color:s.color||T.dim,textTransform:'uppercase',letterSpacing:'0.07em'}}>{l}</div>
+          ))}
+        </div>
+        {/* Item rows */}
+        {form.items.map(item=>{
+          const amt=(parseFloat(item.qty)||0)*(parseFloat(item.unitPrice)||0);
+          const cost=(parseFloat(item.qty)||0)*(parseFloat(item.unitCost)||0);
+          const profit=amt-cost;
+          const mg=amt>0?(profit/amt*100):0;
+          const selStyle={...iSmall,width:'100%',appearance:'none',
+            backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23AEAEB2' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`,
+            backgroundRepeat:'no-repeat',backgroundPosition:'right 6px center',paddingRight:20,cursor:'pointer'};
+          return (
+            <div key={item.id} style={{display:'flex',gap:6,padding:'9px 18px',
+              borderBottom:`1px solid ${T.borderLight}`,alignItems:'flex-start',flexWrap:'wrap'}}>
+              <div style={{...colStyle.desc}}>
+                <input value={item.description} onChange={e=>updateItem(item.id,'description',e.target.value)}
+                  placeholder="Description of work" style={{...iSmall,width:'100%'}}/>
+              </div>
+              <div style={{...colStyle.cat}}>
+                <select value={item.category} onChange={e=>updateItem(item.id,'category',e.target.value)} style={selStyle}>
+                  {CATS.map(c=><option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div style={{...colStyle.unit}}>
+                <select value={item.unit} onChange={e=>updateItem(item.id,'unit',e.target.value)} style={selStyle}>
+                  {UNITS.map(u=><option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+              <div style={{...colStyle.qty}}>
+                <input type="number" min="0" value={item.qty} onChange={e=>updateItem(item.id,'qty',e.target.value)}
+                  style={{...iNum,width:'100%'}}/>
+              </div>
+              <div style={{...colStyle.price}}>
+                <input type="number" min="0" step="0.01" value={item.unitPrice}
+                  onChange={e=>updateItem(item.id,'unitPrice',e.target.value)}
+                  placeholder="0.00" style={{...iNum,width:'100%'}}/>
+              </div>
+              <div style={{...colStyle.cost}}>
+                <input type="number" min="0" step="0.01" value={item.unitCost}
+                  onChange={e=>updateItem(item.id,'unitCost',e.target.value)}
+                  placeholder="0.00"
+                  style={{...iNum,width:'100%',
+                    background:T.bg==='#141412'?'rgba(124,58,237,0.10)':'rgba(124,58,237,0.06)',
+                    borderColor:'rgba(124,58,237,0.25)',color:'#7c3aed'}}/>
+                {amt>0&&(
+                  <div style={{fontSize:10,color:profit>=0?T.success:T.danger,textAlign:'right',marginTop:2}}>
+                    {mg.toFixed(1)}%
+                  </div>
+                )}
+              </div>
+              <div style={{...colStyle.amount,display:'flex',alignItems:'center',justifyContent:'flex-end',paddingTop:7}}>
+                <span style={{fontSize:12,fontWeight:600,color:T.text}}>
+                  S${amt.toLocaleString('en-SG',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                </span>
+              </div>
+              <div style={{...colStyle.del,display:'flex',alignItems:'flex-start',paddingTop:4}}>
+                <button onClick={()=>removeItem(item.id)}
+                  style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:4,
+                    borderRadius:6,display:'flex',alignItems:'center'}}>
+                  <X size={13}/>
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        {/* Totals */}
+        <div style={{padding:'14px 18px',borderTop:`1px solid ${T.borderLight}`,
+          display:'flex',justifyContent:'flex-end',flexWrap:'wrap',gap:20,alignItems:'flex-start'}}>
+          <div style={{background:T.bg==='#141412'?'rgba(124,58,237,0.10)':'rgba(124,58,237,0.06)',
+            border:'1px solid rgba(124,58,237,0.2)',borderRadius:10,padding:'10px 16px',minWidth:180}}>
+            <div style={{fontSize:10,fontWeight:700,color:'#7c3aed',textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:8}}>Internal View</div>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+              <span style={{fontSize:11,color:T.muted}}>Total Cost</span>
+              <span style={{fontSize:11,fontWeight:600,color:T.secondary}}>S${totalCost.toLocaleString('en-SG',{minimumFractionDigits:2})}</span>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+              <span style={{fontSize:11,color:T.muted}}>Gross Profit</span>
+              <span style={{fontSize:11,fontWeight:700,color:totalProfit>=0?T.success:T.danger}}>S${totalProfit.toLocaleString('en-SG',{minimumFractionDigits:2})}</span>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between'}}>
+              <span style={{fontSize:11,color:T.muted}}>Margin</span>
+              <span style={{fontSize:11,fontWeight:700,color:overallMargin>=0?T.success:T.danger}}>{overallMargin.toFixed(1)}%</span>
+            </div>
+          </div>
+          <div style={{minWidth:210}}>
+            <div style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:`1px dashed ${T.borderLight}`}}>
+              <span style={{fontSize:12,color:T.muted}}>Subtotal</span>
+              <span style={{fontSize:12,fontWeight:600,color:T.secondary}}>S${subtotal.toLocaleString('en-SG',{minimumFractionDigits:2})}</span>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:`1px dashed ${T.borderLight}`}}>
+              <span style={{fontSize:12,color:T.muted}}>GST (9%)</span>
+              <span style={{fontSize:12,fontWeight:600,color:T.secondary}}>S${gstAmt.toLocaleString('en-SG',{minimumFractionDigits:2})}</span>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',padding:'8px 0'}}>
+              <span style={{fontSize:14,fontWeight:700,color:T.text}}>Total</span>
+              <span style={{fontSize:16,fontWeight:900,color:T.text}}>S${total.toLocaleString('en-SG',{minimumFractionDigits:2})}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'18px 20px',
+        display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+        <div>
+          <label style={{fontSize:13,fontWeight:500,color:T.muted,display:'block',marginBottom:7}}>Notes</label>
+          <textarea value={form.notes||''} onChange={e=>ff('notes')(e.target.value)}
+            placeholder="Notes for client or internal use…" rows={4}
+            style={{...iStyle,resize:'vertical',lineHeight:1.6}}/>
+        </div>
+        <div>
+          <label style={{fontSize:13,fontWeight:500,color:T.muted,display:'block',marginBottom:7}}>Terms &amp; Conditions</label>
+          <textarea value={form.terms||''} onChange={e=>ff('terms')(e.target.value)}
+            rows={4} style={{...iStyle,resize:'vertical',lineHeight:1.6}}/>
+        </div>
+      </div>
+
+      <div style={{display:'flex',gap:10,justifyContent:'flex-end',flexWrap:'wrap'}}>
+        <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
+        <Btn variant="secondary" onClick={()=>{
+          const co=getCo(acctSettings);
+          const proj=projects.find(p=>p.id===form.projectId);
+          printDoc(buildQuoteHTML(form,proj,co,true),`${form.quoteNo} [Internal]`);
+        }}><Eye size={13}/>Print Internal (with Cost)</Btn>
+        <Btn variant="secondary" onClick={()=>{
+          const co=getCo(acctSettings);
+          const proj=projects.find(p=>p.id===form.projectId);
+          printDoc(buildQuoteHTML(form,proj,co,false),`${form.quoteNo}`);
+        }}><Download size={13}/>Print Client Copy</Btn>
+        <Btn onClick={()=>onSave(form)}>Save {isVO?'VO':'Quotation'}</Btn>
+      </div>
+    </div>
+  );
+}
+
+function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}){
+  const [search,setSearch]=useState('');
+  const [filterType,setFilterType]=useState('all');
+  const [filterStatus,setFilterStatus]=useState('all');
+  const [editing,setEditing]=useState(null);
+
+  const blankItem=()=>({id:uid(),category:CATS[0],description:'',unit:'lot',qty:1,unitPrice:'',unitCost:''});
+
+  const startCreate=(type)=>{
+    const existingOfType=(quotes||[]).filter(q=>q.type===type);
+    const prefix=type==='vo'?'VO-':'Q-';
+    const nextNum=(existingOfType.length+1).toString().padStart(3,'0');
+    const q={
+      id:uid(),projectId:projects[0]?.id||'',type,
+      quoteNo:prefix+nextNum,
+      date:new Date().toISOString().slice(0,10),
+      validUntil:'',status:'Draft',
+      items:[blankItem()],notes:'',
+      terms:'This quotation is valid for 14 days from the date of issue.\nAll prices are in Singapore Dollars and subject to GST at the prevailing rate.\nWork will commence upon receipt of deposit payment.\nPayment terms: 50% deposit upon acceptance, balance upon completion.',
+    };
+    setEditing(q);
+  };
+
+  const saveQuote=(q)=>{
+    const exists=(quotes||[]).find(x=>x.id===q.id);
+    const upd=exists?(quotes||[]).map(x=>x.id===q.id?q:x):[...(quotes||[]),q];
+    setQuotes(upd);
+    saveS('quotes',upd);
+    setEditing(null);
+    onShowToast?.({message:`${q.type==='vo'?'VO':'Quotation'} ${q.quoteNo} saved`,undoFn:null});
+  };
+
+  const deleteQuote=(id)=>{
+    if(!window.confirm('Delete this quotation? This cannot be undone.'))return;
+    const upd=(quotes||[]).filter(q=>q.id!==id);
+    setQuotes(upd);saveS('quotes',upd);
+  };
+
+  const statusColor=s=>({Draft:T.dim,Sent:T.info,Approved:T.success,Rejected:T.danger}[s]||T.dim);
+
+  const filtered=(quotes||[]).filter(q=>{
+    const proj=projects.find(p=>p.id===q.projectId);
+    const txt=(q.quoteNo+' '+(proj?.name||'')+' '+(proj?.client||'')+' '+q.status).toLowerCase();
+    if(search&&!txt.includes(search.toLowerCase()))return false;
+    if(filterType!=='all'&&q.type!==filterType)return false;
+    if(filterStatus!=='all'&&q.status!==filterStatus)return false;
+    return true;
+  });
+
+  if(editing) return <QuoteEditor quote={editing} onSave={saveQuote} onCancel={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>;
+
+  const allQ=quotes||[];
+  const approvedTotal=allQ.filter(q=>q.status==='Approved').reduce((s,q)=>{
+    const sub=(q.items||[]).reduce((a,i)=>(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0)+a,0);
+    return s+sub*1.09;
+  },0);
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+      <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+        <div style={{flex:1,minWidth:200,position:'relative'}}>
+          <Search size={13} style={{position:'absolute',left:11,top:'50%',transform:'translateY(-50%)',color:T.dim}}/>
+          <input value={search} onChange={e=>setSearch(e.target.value)}
+            placeholder="Search quotations and VOs…" style={{...iStyle,paddingLeft:33}}/>
+        </div>
+        <Btn onClick={()=>startCreate('quotation')}><Plus size={13}/>New Quotation</Btn>
+        <Btn variant="secondary" onClick={()=>startCreate('vo')}><Plus size={13}/>New VO</Btn>
+      </div>
+
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+        {[{v:'all',l:'All'},{v:'quotation',l:'Quotations'},{v:'vo',l:'Variation Orders'}].map(({v,l})=>(
+          <button key={v} onClick={()=>setFilterType(v)}
+            style={{padding:'5px 14px',borderRadius:20,border:`1px solid ${filterType===v?T.accent:T.borderLight}`,
+              background:filterType===v?T.accent:T.bg,color:filterType===v?T.bg:T.muted,
+              fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+            {l}
+          </button>
+        ))}
+        <div style={{width:1,background:T.borderLight,alignSelf:'stretch',margin:'0 4px'}}/>
+        {['all','Draft','Sent','Approved','Rejected'].map(s=>(
+          <button key={s} onClick={()=>setFilterStatus(s)}
+            style={{padding:'5px 14px',borderRadius:20,border:`1px solid ${filterStatus===s?T.accent:T.borderLight}`,
+              background:filterStatus===s?T.accent:T.bg,color:filterStatus===s?T.bg:T.muted,
+              fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+            {s==='all'?'All Status':s}
+          </button>
+        ))}
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12}}>
+        {[
+          {l:'Quotations',v:allQ.filter(q=>q.type==='quotation').length,c:T.accent},
+          {l:'Variation Orders',v:allQ.filter(q=>q.type==='vo').length,c:'#7c3aed'},
+          {l:'Approved',v:allQ.filter(q=>q.status==='Approved').length,c:T.success},
+          {l:'Approved Value',v:'S$'+Math.round(approvedTotal).toLocaleString('en-SG'),c:T.success},
+        ].map(({l,v,c})=>(
+          <div key={l} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:12,padding:'14px 18px'}}>
+            <div style={{fontSize:11,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:6}}>{l}</div>
+            <div style={{fontSize:typeof v==='string'?15:22,fontWeight:700,color:c}}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      {filtered.length===0?(
+        <div style={{color:T.dim,fontSize:13,textAlign:'center',padding:48,background:T.card,
+          borderRadius:14,border:`1px solid ${T.borderLight}`}}>
+          {allQ.length===0
+            ?'No quotations yet. Click "New Quotation" or "New VO" to get started.'
+            :'No quotations match your filters.'}
+        </div>
+      ):(
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {filtered.map(q=>{
+            const proj=projects.find(p=>p.id===q.projectId);
+            const subtotal=(q.items||[]).reduce((s,i)=>(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0)+s,0);
+            const total=subtotal*1.09;
+            const isVO=q.type==='vo';
+            return (
+              <div key={q.id} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,
+                padding:'16px 18px',display:'flex',alignItems:'center',gap:14,flexWrap:'wrap'}}>
+                <div style={{flex:1,minWidth:180}}>
+                  <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:4,flexWrap:'wrap'}}>
+                    <span style={{fontSize:13,fontWeight:700,color:T.text,fontFamily:'monospace'}}>{q.quoteNo}</span>
+                    <span style={{fontSize:10,fontWeight:700,padding:'2px 8px',borderRadius:10,
+                      background:isVO?'rgba(124,58,237,0.10)':'rgba(26,26,26,0.07)',
+                      color:isVO?'#7c3aed':T.text,textTransform:'uppercase',letterSpacing:'0.07em'}}>
+                      {isVO?'VO':'Quotation'}
+                    </span>
+                    <span style={{fontSize:10,fontWeight:700,padding:'2px 8px',borderRadius:10,
+                      background:`${statusColor(q.status)}18`,color:statusColor(q.status),
+                      textTransform:'uppercase',letterSpacing:'0.07em'}}>
+                      {q.status}
+                    </span>
+                  </div>
+                  <div style={{fontSize:13,fontWeight:600,color:T.secondary}}>{proj?.name||'(No project)'}</div>
+                  <div style={{fontSize:11,color:T.muted}}>{proj?.client}{q.date?' · '+new Date(q.date).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}):''}</div>
+                  <div style={{fontSize:11,color:T.dim,marginTop:2}}>{(q.items||[]).length} item{(q.items||[]).length!==1?'s':''}</div>
+                </div>
+                <div style={{textAlign:'right',minWidth:110}}>
+                  <div style={{fontSize:16,fontWeight:700,color:T.text}}>S${total.toLocaleString('en-SG',{minimumFractionDigits:2})}</div>
+                  <div style={{fontSize:10,color:T.dim}}>incl. 9% GST</div>
+                </div>
+                <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                  <button onClick={()=>setEditing(q)}
+                    style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'7px 12px',
+                      fontSize:12,fontWeight:600,color:T.secondary,cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontFamily:'inherit'}}>
+                    <Edit3 size={12}/>Edit
+                  </button>
+                  <button onClick={()=>{
+                    const co=getCo(acctSettings);
+                    printDoc(buildQuoteHTML(q,proj,co,false),`${q.quoteNo} — ${proj?.name||''}`);
+                  }}
+                    style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'7px 12px',
+                      fontSize:12,fontWeight:600,color:T.secondary,cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontFamily:'inherit'}}>
+                    <Download size={12}/>Client Copy
+                  </button>
+                  {isAdmin&&(
+                    <button onClick={()=>{
+                      const co=getCo(acctSettings);
+                      printDoc(buildQuoteHTML(q,proj,co,true),`${q.quoteNo} [Internal]`);
+                    }}
+                      style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'7px 12px',
+                        fontSize:12,fontWeight:600,color:'#7c3aed',cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontFamily:'inherit'}}>
+                      <Eye size={12}/>Internal
+                    </button>
+                  )}
+                  {isAdmin&&(
+                    <button onClick={()=>deleteQuote(q.id)}
+                      style={{background:'#FEF4F3',border:'1px solid #F5C8C4',borderRadius:8,padding:'7px 10px',
+                        fontSize:12,color:T.danger,cursor:'pointer',display:'flex',alignItems:'center',fontFamily:'inherit'}}>
+                      <Trash2 size={12}/>
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WorkerPortal({worker, onLogout, attendance, setAttendance, projects, claims, setClaims}){
   const [selProjectId,setSelProjectId]=useState('');
   const [locating,setLocating]=useState(false);
@@ -10738,6 +11249,7 @@ const ALL_NAV=[
   {id:'dashboard',   label:'Dashboard',        Icon:LayoutDashboard, group:'project'},
   {id:'projects',    label:'Projects',         Icon:FolderOpen,      group:'project'},
   {id:'payments',    label:'Client Payments',  Icon:CreditCard,      group:'project'},
+  {id:'quotations',  label:'Quotations & VO',  Icon:FileSpreadsheet, group:'project'},
   {id:'reports',     label:'Reports',          Icon:BarChart3,       group:'project'},
   {id:'warranty',    label:'Warranty',         Icon:CheckCircle,     group:'project'},
   // Group 2 — Expenses (amber accent)
@@ -10800,6 +11312,7 @@ export default function App(){
     try{ const c=localStorage.getItem('rl_cache_users'); return c?JSON.parse(c):SEED_USERS; }catch{ return SEED_USERS; }
   });
   const [warranties,setWarranties]=useState(SEED_WARRANTIES);
+  const [quotes,setQuotes]=useState([]);
   const [trash,setTrash]=useState([]);
   const [actionLog,setActionLog]=useState([]); // audit log — 6 months of user actions
   const [toast,setToast]=useState(null);
@@ -11052,7 +11565,7 @@ export default function App(){
   const loadAllData = useCallback(async()=>{
     setSyncing(true);
     try{
-      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no]=await Promise.all([
+      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt]=await Promise.all([
         loadS('projects',SEED_PROJ),
         loadS('invoices',SEED_INV),
         loadS('payments',SEED_PAY),
@@ -11067,6 +11580,7 @@ export default function App(){
         loadS('invoiceBatches',[]),
         loadS('actionLog',[]),
         loadS('notices',[]),
+        loadS('quotes',[]),
       ]);
       let finalProjects = Array.isArray(p) ? p : SEED_PROJ;
       // Rehydrate quotation files and VO files from separate per-project keys
@@ -11120,6 +11634,7 @@ export default function App(){
       setUsers(cleanUsers);
       try{ localStorage.setItem('rl_cache_users',JSON.stringify(cleanUsers)); }catch{}
       setWarranties(Array.isArray(ws)?ws:SEED_WARRANTIES);
+      setQuotes(Array.isArray(qt)?qt:[]);
       setAcctSettings({...SEED_ACCT_SETTINGS,...(as&&typeof as==='object'?as:{})});
       setSiteWorkers(Array.isArray(sw)?sw:SEED_WORKERS);
       setAttendance(Array.isArray(att)?att:SEED_ATTENDANCE);
@@ -11622,6 +12137,7 @@ export default function App(){
           {tab==='reports'&&<Reports projects={userProjects} invoices={invoices} payments={payments} acctSettings={acctSettings}/>}
           {tab==='commissions'&&<Commissions projects={projects} setProjects={setProjects} invoices={invoices} isAdmin={isAdmin} users={users}/>}
           {tab==='claims'&&<StaffClaims claims={staffClaims} setClaims={setStaffClaims} projects={userProjects} users={users} activeUser={activeUser} isAdmin={isAdmin} invoices={invoices} setInvoices={setInvoices} acctSettings={acctSettings} trash={trash} setTrash={setTrash}/>}
+          {tab==='quotations'&&<Quotations quotes={quotes} setQuotes={setQuotes} projects={userProjects} isAdmin={isAdmin} acctSettings={acctSettings} onShowToast={handleShowToast}/>}
           {tab==='warranty'&&<Warranty warranties={warranties} setWarranties={setWarranties} projects={projects} isAdmin={isAdmin} acctSettings={acctSettings}/>}
           {tab==='workers'&&<WorkerAdmin siteWorkers={siteWorkers} setSiteWorkers={setSiteWorkers} attendance={attendance} setAttendance={setAttendance} projects={projects} invoices={invoices} setInvoices={setInvoices} claims={workerClaims} setClaims={setWorkerClaims} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='checkin'&&<WorkerLoginScreen siteWorkers={siteWorkers} onLogin={(w)=>setWorkerSession(w)} onAdminLogin={()=>setTab('dashboard')} acctSettings={acctSettings}/>}
