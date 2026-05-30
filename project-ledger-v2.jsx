@@ -35,6 +35,12 @@ const _sa = {
 };
 
 const CATS = ['Preliminaries','Demolition Works','Masonry Works','Plumbing Works','Ceiling & Partition Works','Painting Works','Aircon Works','Carpentry Works','Door Works','Window Works','Floor Works','Miscellaneous','Sprinkler Works','ACMV Works','Electrical Works','Furniture','Appliances','Light Fittings','Labour (VO)','Purchases'];
+const FULL_PAY_CATS = ['Purchases','Light Fittings','Appliances','Furniture','Aircon Works'];
+const PAY_SCHEDULES = [
+  {id:'full_reno',  label:'Full Renovation (10/40/45/5%)',  stages:[{label:'Upon Confirmation',pct:10},{label:'Upon Start Work',pct:40},{label:'Upon Confirmation of Carpentry Details',pct:45},{label:'Upon Handover of Jobsite',pct:5}]},
+  {id:'small_scale',label:'Smaller Scale (50/50%)',         stages:[{label:'Upon Start Work',pct:50},{label:'Upon Completion',pct:50}]},
+  {id:'none',       label:'No Payment Schedule',            stages:[]},
+];
 const PROJ_STATUSES = ['Planning','In Progress','On Hold','Completed','Cancelled'];
 const PROJ_TYPES = ['Residential','Commercial'];
 const INV_STATUSES = ['Pending','Approved','Partial','Paid'];
@@ -1224,8 +1230,8 @@ const buildQuoteHTML = (quote, proj, co, showCost=false) => {
   var totalCost=items.reduce(function(s,i){return s+(parseFloat(i.qty)||0)*(parseFloat(i.unitCost)||0);},0);
   var totalProfit=subtotal-totalCost;
   var overallMargin=subtotal>0?(totalProfit/subtotal*100):0;
-  var gstAmt=subtotal*0.09;
-  var total=subtotal+gstAmt;
+  var progressAmt=items.reduce(function(s,i){return s+(FULL_PAY_CATS.indexOf(i.category||'')>=0?0:(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0));},0);
+  var fullPayAmt=subtotal-progressAmt;
   var statusClr={Draft:'#7A7468',Sent:'#1A5FA8',Approved:'#2D7A4F',Rejected:'#C0392B'}[quote.status]||'#7A7468';
 
   // Resolve client/site info — quotations use inline fields; VOs use linked project
@@ -1286,9 +1292,41 @@ const buildQuoteHTML = (quote, proj, co, showCost=false) => {
   }
   html+='<div style="min-width:220px;">';
   html+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #EDE9E1;"><span style="font-size:12px;color:#7A7468;">Subtotal</span><span style="font-size:12px;font-weight:600;color:#3D3D3D;">'+fmtM(subtotal)+'</span></div>';
-  html+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #EDE9E1;"><span style="font-size:12px;color:#7A7468;">GST (9%)</span><span style="font-size:12px;font-weight:600;color:#3D3D3D;">'+fmtM(gstAmt)+'</span></div>';
-  html+='<div style="display:flex;justify-content:space-between;padding:9px 8px;background:#F8F6F2;border-radius:8px;margin-top:4px;"><span style="font-size:14px;font-weight:700;color:#1A1A1A;">TOTAL</span><span style="font-size:16px;font-weight:900;color:#1A1A1A;">'+fmtM(total)+'</span></div>';
+  html+='<div style="display:flex;justify-content:space-between;padding:9px 8px;background:#F8F6F2;border-radius:8px;margin-top:4px;"><span style="font-size:14px;font-weight:700;color:#1A1A1A;">TOTAL</span><span style="font-size:16px;font-weight:900;color:#1A1A1A;">'+fmtM(subtotal)+'</span></div>';
   html+='</div></div>';
+  var schedObj=null;for(var _si=0;_si<PAY_SCHEDULES.length;_si++){if(PAY_SCHEDULES[_si].id===quote.paySchedule){schedObj=PAY_SCHEDULES[_si];break;}}
+  if((schedObj&&schedObj.stages.length>0)||(fullPayAmt>0)){
+    html+='<div style="margin-bottom:18px;border:1px solid #EDE9E1;border-radius:10px;overflow:hidden;">';
+    html+='<div style="padding:10px 16px;background:#F8F6F2;border-bottom:1px solid #EDE9E1;display:flex;justify-content:space-between;align-items:center;">';
+    html+='<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.12em;">Payment Schedule</div>';
+    if(schedObj) html+='<div style="font-size:10px;color:#7A7468;">'+schedObj.label+'</div>';
+    html+='</div>';
+    html+='<table style="width:100%;border-collapse:collapse;">';
+    html+='<thead><tr style="background:#F0EDE8;">';
+    html+='<th style="padding:7px 14px;text-align:left;font-size:10px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.07em;">Milestone</th>';
+    html+='<th style="padding:7px 8px;text-align:right;font-size:10px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.07em;">%</th>';
+    html+='<th style="padding:7px 14px;text-align:right;font-size:10px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.07em;">Amount</th>';
+    html+='</tr></thead><tbody>';
+    if(schedObj){schedObj.stages.forEach(function(stage){
+      var amt=progressAmt*(stage.pct/100);
+      html+='<tr style="border-bottom:1px solid #EDE9E1;">';
+      html+='<td style="padding:9px 14px;font-size:12px;color:#3D3D3D;">'+stage.label+'</td>';
+      html+='<td style="padding:9px 8px;font-size:12px;color:#7A7468;text-align:right;">'+stage.pct+'%</td>';
+      html+='<td style="padding:9px 14px;font-size:12px;font-weight:600;color:#1A1A1A;text-align:right;">'+fmtM(amt)+'</td>';
+      html+='</tr>';
+    });}
+    if(fullPayAmt>0){
+      html+='<tr style="border-bottom:1px solid #EDE9E1;background:#FFFBF5;">';
+      html+='<td style="padding:9px 14px;font-size:12px;color:#3D3D3D;">Supply Items — Full Payment upon ordering<br><span style="font-size:10px;color:#B8B2A8;">Aircon, Furniture, Appliances, Light Fittings, Purchases</span></td>';
+      html+='<td style="padding:9px 8px;font-size:12px;color:#7A7468;text-align:right;">100%</td>';
+      html+='<td style="padding:9px 14px;font-size:12px;font-weight:600;color:#1A1A1A;text-align:right;">'+fmtM(fullPayAmt)+'</td>';
+      html+='</tr>';
+    }
+    html+='<tr style="background:#F8F6F2;">';
+    html+='<td colspan="2" style="padding:10px 14px;font-size:13px;font-weight:700;color:#1A1A1A;">Total</td>';
+    html+='<td style="padding:10px 14px;font-size:14px;font-weight:900;color:#1A1A1A;text-align:right;">'+fmtM(subtotal)+'</td>';
+    html+='</tr></tbody></table></div>';
+  }
   if(quote.notes){
     html+='<div style="background:#F8F6F2;border:1px solid #EDE9E1;border-radius:10px;padding:14px 18px;margin-bottom:18px;">';
     html+='<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;">Notes</div>';
@@ -8375,8 +8413,9 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
   const totalCost = form.items.reduce((s,i)=>s+(parseFloat(i.qty)||0)*(parseFloat(i.unitCost)||0),0);
   const totalProfit = subtotal - totalCost;
   const overallMargin = subtotal>0?(totalProfit/subtotal*100):0;
-  const gstAmt = subtotal * 0.09;
-  const total = subtotal + gstAmt;
+  const progressTotal = form.items.reduce((s,i)=>s+(FULL_PAY_CATS.includes(i.category)?0:(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0)),0);
+  const fullPayTotal = subtotal - progressTotal;
+  const schedObj = PAY_SCHEDULES.find(s=>s.id===form.paySchedule);
 
   const colStyle = {
     desc:   {flex:'1 1 220px',minWidth:0},
@@ -8638,16 +8677,70 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
               <span style={{fontSize:12,color:T.muted}}>Subtotal</span>
               <span style={{fontSize:12,fontWeight:600,color:T.secondary}}>S${subtotal.toLocaleString('en-SG',{minimumFractionDigits:2})}</span>
             </div>
-            <div style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:`1px dashed ${T.borderLight}`}}>
-              <span style={{fontSize:12,color:T.muted}}>GST (9%)</span>
-              <span style={{fontSize:12,fontWeight:600,color:T.secondary}}>S${gstAmt.toLocaleString('en-SG',{minimumFractionDigits:2})}</span>
-            </div>
             <div style={{display:'flex',justifyContent:'space-between',padding:'8px 0'}}>
               <span style={{fontSize:14,fontWeight:700,color:T.text}}>Total</span>
-              <span style={{fontSize:16,fontWeight:900,color:T.text}}>S${total.toLocaleString('en-SG',{minimumFractionDigits:2})}</span>
+              <span style={{fontSize:16,fontWeight:900,color:T.text}}>S${subtotal.toLocaleString('en-SG',{minimumFractionDigits:2})}</span>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Payment Schedule */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'18px 20px'}}>
+        <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:14}}>
+          Payment Schedule
+        </div>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14}}>
+          {PAY_SCHEDULES.map(s=>(
+            <button key={s.id} onClick={()=>ff('paySchedule')(s.id)}
+              style={{padding:'7px 14px',borderRadius:8,fontSize:12,fontFamily:'inherit',cursor:'pointer',
+                background:form.paySchedule===s.id?T.accent:'transparent',
+                color:form.paySchedule===s.id?T.bg:T.muted,
+                border:`1.5px solid ${form.paySchedule===s.id?T.accent:T.borderLight}`,
+                fontWeight:form.paySchedule===s.id?700:400}}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+        {schedObj&&schedObj.stages.length>0&&subtotal>0&&(
+          <div style={{borderRadius:8,overflow:'hidden',border:`1px solid ${T.borderLight}`}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr style={{background:T.bg}}>
+                  <th style={{padding:'8px 14px',textAlign:'left',fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em'}}>Milestone</th>
+                  <th style={{padding:'8px 10px',textAlign:'right',fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em'}}>%</th>
+                  <th style={{padding:'8px 14px',textAlign:'right',fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em'}}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {schedObj.stages.map((stage,si)=>{
+                  const amt=progressTotal*(stage.pct/100);
+                  return(
+                    <tr key={si} style={{borderTop:`1px solid ${T.borderLight}`}}>
+                      <td style={{padding:'9px 14px',fontSize:12,color:T.secondary}}>{stage.label}</td>
+                      <td style={{padding:'9px 10px',fontSize:12,color:T.muted,textAlign:'right'}}>{stage.pct}%</td>
+                      <td style={{padding:'9px 14px',fontSize:12,fontWeight:600,color:T.text,textAlign:'right'}}>S${amt.toLocaleString('en-SG',{minimumFractionDigits:2})}</td>
+                    </tr>
+                  );
+                })}
+                {fullPayTotal>0&&(
+                  <tr style={{borderTop:`1px solid ${T.borderLight}`,background:T.bg==='#141412'?'rgba(196,168,130,0.06)':'rgba(250,245,235,0.8)'}}>
+                    <td style={{padding:'9px 14px',fontSize:12,color:T.secondary}}>
+                      Supply Items — Full Payment upon ordering
+                      <div style={{fontSize:10,color:T.dim,marginTop:2}}>Aircon, Furniture, Appliances, Light Fittings, Purchases</div>
+                    </td>
+                    <td style={{padding:'9px 10px',fontSize:12,color:T.muted,textAlign:'right'}}>100%</td>
+                    <td style={{padding:'9px 14px',fontSize:12,fontWeight:600,color:T.text,textAlign:'right'}}>S${fullPayTotal.toLocaleString('en-SG',{minimumFractionDigits:2})}</td>
+                  </tr>
+                )}
+                <tr style={{borderTop:`2px solid ${T.borderLight}`,background:T.bg}}>
+                  <td colSpan={2} style={{padding:'10px 14px',fontSize:13,fontWeight:700,color:T.text}}>Total</td>
+                  <td style={{padding:'10px 14px',fontSize:14,fontWeight:900,color:T.text,textAlign:'right'}}>S${subtotal.toLocaleString('en-SG',{minimumFractionDigits:2})}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Notes + Terms */}
@@ -8709,7 +8802,8 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
       // vo: link to project
       projectId:projects.filter(p=>!p.archived&&p.status!=='Cancelled').slice(0,1)[0]?.id||'',
       items:[blankItem()],notes:'',
-      terms:'This quotation is valid for 14 days from the date of issue.\nAll prices are in Singapore Dollars and subject to GST at the prevailing rate.\nWork will commence upon receipt of deposit payment.\nPayment terms: 50% deposit upon acceptance, balance upon completion.',
+      paySchedule:type==='vo'?'small_scale':'full_reno',
+      terms:'This quotation is valid for 14 days from the date of issue.\nAll prices are in Singapore Dollars (SGD).\nWork will commence upon receipt of deposit payment.',
     };
     setEditing(q);
   };
