@@ -1252,15 +1252,14 @@ const buildQuoteHTML = (quote, proj, co, showCost=false) => {
   html+='<div style="display:inline-block;margin-top:8px;background:'+statusClr+';color:#fff;padding:3px 10px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em;">'+(quote.status||'Draft')+'</div>';
   html+='</div></div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-bottom:26px;">';
+  // Bill To — client name only, no phone/email/address
   html+='<div><div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Bill To</div>';
   html+='<div style="font-size:14px;font-weight:700;color:#1A1A1A;">'+clientName+'</div>';
-  if(clientPhone) html+='<div style="font-size:11px;color:#7A7468;margin-top:3px;">'+clientPhone+'</div>';
-  if(clientEmail) html+='<div style="font-size:11px;color:#7A7468;">'+clientEmail+'</div>';
-  if(siteAddr) html+='<div style="font-size:12px;color:#7A7468;margin-top:3px;line-height:1.5;">'+siteAddr+'</div>';
   html+='</div>';
+  // Site / Project — address bold, then project/site name below
   html+='<div><div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Site / Project</div>';
-  html+='<div style="font-size:14px;font-weight:700;color:#1A1A1A;">'+siteName+'</div>';
-  if(siteAddr&&isVO) html+='<div style="font-size:12px;color:#7A7468;margin-top:3px;">'+siteAddr+'</div>';
+  if(siteAddr) html+='<div style="font-size:13px;font-weight:700;color:#1A1A1A;line-height:1.5;">'+siteAddr+'</div>';
+  if(siteName) html+='<div style="font-size:12px;color:#7A7468;margin-top:4px;line-height:1.5;">'+siteName+'</div>';
   if(proj?.projectType) html+='<div style="font-size:11px;color:#B8B2A8;margin-top:3px;">Type: '+proj.projectType+'</div>';
   html+='</div></div>';
   html+='<table style="width:100%;border-collapse:collapse;margin-bottom:20px;">';
@@ -1300,10 +1299,12 @@ const buildQuoteHTML = (quote, proj, co, showCost=false) => {
     html+='<div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;">Terms &amp; Conditions</div>';
     html+='<div style="font-size:11px;color:#7A7468;line-height:1.6;white-space:pre-wrap;">'+quote.terms+'</div></div>';
   }
-  html+='<div style="border-top:1px solid #EDE9E1;padding-top:16px;display:flex;justify-content:space-between;align-items:flex-end;">';
-  html+='<div><div style="font-size:10px;color:#B8B2A8;margin-bottom:20px;">Authorised Signature</div>';
-  html+='<div style="border-bottom:1px solid #1A1A1A;width:160px;"></div>';
-  html+='<div style="font-size:10px;color:#B8B2A8;margin-top:4px;">'+co.name+'</div></div>';
+  html+='<div style="border-top:1px solid #EDE9E1;padding-top:20px;display:flex;justify-content:space-between;align-items:flex-end;">';
+  html+='<div style="min-width:240px;">';
+  html+='<div style="font-size:10px;color:#B8B2A8;margin-bottom:64px;">Authorised Signature</div>';
+  html+='<div style="border-bottom:1.5px solid #1A1A1A;width:220px;"></div>';
+  html+='<div style="font-size:11px;font-weight:600;color:#1A1A1A;margin-top:6px;">'+co.name+'</div>';
+  html+='</div>';
   html+='<div style="text-align:right;">';
   html+='<div style="font-size:10px;color:#B8B2A8;">Computer-generated document</div>';
   html+='<div style="font-size:10px;color:#B8B2A8;">'+co.name+' &middot; UEN: '+(co.uen||'—')+'</div>';
