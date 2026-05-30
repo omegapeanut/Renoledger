@@ -34,7 +34,7 @@ const _sa = {
   assignedProjects:[],
 };
 
-const CATS = ['Carpentry','Electrical','Plumbing','Painting','Lighting','Furniture','Appliances','Aircon','Preliminaries','Labour (VO)','Miscellaneous'];
+const CATS = ['Preliminaries','Demolition Works','Masonry Works','Plumbing Works','Ceiling & Partition Works','Painting Works','Aircon Works','Carpentry Works','Door Works','Window Works','Floor Works','Miscellaneous','Sprinkler Works','ACMV Works','Electrical Works','Furniture','Appliances','Light Fittings','Labour (VO)','Purchases'];
 const PROJ_STATUSES = ['Planning','In Progress','On Hold','Completed','Cancelled'];
 const PROJ_TYPES = ['Residential','Commercial'];
 const INV_STATUSES = ['Pending','Approved','Partial','Paid'];
