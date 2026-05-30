@@ -1246,9 +1246,8 @@ const buildQuoteHTML = (quote, proj, co, showCost=false) => {
   html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:22px;border-bottom:3px solid #1A1A1A;">';
   html+='<div>';
   html+='<div style="font-family:\'DM Serif Display\',Georgia,serif;font-size:20px;color:#1A1A1A;margin-bottom:3px;">'+co.name+'</div>';
-  html+='<div style="font-size:10px;color:#B8B2A8;">UEN: '+(co.uen||'—')+(co.phone?' &middot; '+co.phone:'')+'</div>';
+  html+='<div style="font-size:10px;color:#B8B2A8;">UEN: '+(co.uen||'—')+'</div>';
   if(co.address) html+='<div style="font-size:10px;color:#B8B2A8;">'+co.address+'</div>';
-  if(co.email) html+='<div style="font-size:10px;color:#B8B2A8;">'+co.email+'</div>';
   html+='</div>';
   html+='<div style="text-align:right;">';
   html+='<div style="font-size:26px;font-weight:900;color:#1A1A1A;letter-spacing:-1px;line-height:1;">'+docLabel.toUpperCase()+'</div>';
