@@ -1228,6 +1228,13 @@ const buildQuoteHTML = (quote, proj, co, showCost=false) => {
   var total=subtotal+gstAmt;
   var statusClr={Draft:'#7A7468',Sent:'#1A5FA8',Approved:'#2D7A4F',Rejected:'#C0392B'}[quote.status]||'#7A7468';
 
+  // Resolve client/site info — quotations use inline fields; VOs use linked project
+  var clientName=isVO?(proj?.client||'—'):(quote.clientName||'—');
+  var siteName=isVO?(proj?.name||'—'):(quote.prospectName||'—');
+  var siteAddr=isVO?(proj?.clientAddress||''):(quote.clientAddress||'');
+  var clientPhone=isVO?(proj?.clientPhone||''):(quote.clientPhone||'');
+  var clientEmail=isVO?'':(quote.clientEmail||'');
+
   var html='';
   html+='<div style="font-family:\'DM Sans\',-apple-system,sans-serif;color:#1A1A1A;">';
   html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:22px;border-bottom:3px solid #1A1A1A;">';
@@ -1246,14 +1253,15 @@ const buildQuoteHTML = (quote, proj, co, showCost=false) => {
   html+='</div></div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-bottom:26px;">';
   html+='<div><div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Bill To</div>';
-  html+='<div style="font-size:14px;font-weight:700;color:#1A1A1A;">'+(proj?.client||'—')+'</div>';
-  if(proj?.clientAddress) html+='<div style="font-size:12px;color:#7A7468;margin-top:3px;line-height:1.5;">'+proj.clientAddress+'</div>';
-  if(proj?.clientPhone) html+='<div style="font-size:11px;color:#B8B2A8;margin-top:3px;">'+proj.clientPhone+'</div>';
+  html+='<div style="font-size:14px;font-weight:700;color:#1A1A1A;">'+clientName+'</div>';
+  if(clientPhone) html+='<div style="font-size:11px;color:#7A7468;margin-top:3px;">'+clientPhone+'</div>';
+  if(clientEmail) html+='<div style="font-size:11px;color:#7A7468;">'+clientEmail+'</div>';
+  if(siteAddr) html+='<div style="font-size:12px;color:#7A7468;margin-top:3px;line-height:1.5;">'+siteAddr+'</div>';
   html+='</div>';
-  html+='<div><div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Project</div>';
-  html+='<div style="font-size:14px;font-weight:700;color:#1A1A1A;">'+(proj?.name||'—')+'</div>';
-  if(proj?.clientAddress) html+='<div style="font-size:12px;color:#7A7468;margin-top:3px;">'+proj.clientAddress+'</div>';
-  html+='<div style="font-size:11px;color:#B8B2A8;margin-top:3px;">Type: '+(proj?.projectType||'—')+'</div>';
+  html+='<div><div style="font-size:9px;font-weight:700;color:#B8B2A8;text-transform:uppercase;letter-spacing:0.14em;margin-bottom:8px;">Site / Project</div>';
+  html+='<div style="font-size:14px;font-weight:700;color:#1A1A1A;">'+siteName+'</div>';
+  if(siteAddr&&isVO) html+='<div style="font-size:12px;color:#7A7468;margin-top:3px;">'+siteAddr+'</div>';
+  if(proj?.projectType) html+='<div style="font-size:11px;color:#B8B2A8;margin-top:3px;">Type: '+proj.projectType+'</div>';
   html+='</div></div>';
   html+='<table style="width:100%;border-collapse:collapse;margin-bottom:20px;">';
   html+='<thead><tr style="background:#1A1A1A;color:#F8F6F2;">';
@@ -8320,10 +8328,41 @@ function Warranty({warranties,setWarranties,projects,isAdmin,acctSettings}){
   );
 }
 
-function QuoteEditor({quote, onSave, onCancel, projects, acctSettings}){
-  const [form, setForm] = useState(quote);
+const assembleQuoteNo=(type,date,clientCode,sequence)=>{
+  const d=new Date(date||Date.now());
+  const yy=String(d.getFullYear()).slice(-2);
+  const mm=String(d.getMonth()+1).padStart(2,'0');
+  const code=(clientCode||'XX').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,3)||'XX';
+  const seq=String(sequence||1).padStart(2,'0');
+  return `${type==='vo'?'VO':'Q'}-${yy}${mm}-${code}-${seq}`;
+};
+
+function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes=[]}){
+  const [form, setForm] = useState(()=>({...quote,
+    quoteNo: quote.quoteNo || assembleQuoteNo(quote.type, quote.date, quote.clientCode||'', quote.sequence||1),
+  }));
   const ff = k => v => setForm(p=>({...p,[k]:v}));
   const UNITS = ['lot','pc','set','m','m²','m³','kg','roll','box','pair','day','hr','trip','item'];
+  const isVO = form.type==='vo';
+
+  // Recompute quoteNo whenever date, clientCode, or sequence changes
+  const updateNumberPart = (key, val) => {
+    setForm(p=>{
+      const next={...p,[key]:val};
+      next.quoteNo=assembleQuoteNo(next.type,next.date,next.clientCode||'',next.sequence||1);
+      return next;
+    });
+  };
+  // When date changes also update validUntil to date+14 if validUntil was auto-set
+  const updateDate = val => {
+    setForm(p=>{
+      const d=new Date(val);d.setDate(d.getDate()+14);
+      const autoValid=d.toISOString().slice(0,10);
+      const next={...p,date:val,validUntil:autoValid};
+      next.quoteNo=assembleQuoteNo(next.type,val,next.clientCode||'',next.sequence||1);
+      return next;
+    });
+  };
 
   const addItem = () => setForm(p=>({...p,items:[...p.items,{
     id:uid(),category:CATS[0],description:'',unit:'lot',qty:1,unitPrice:'',unitCost:'',
@@ -8337,7 +8376,6 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings}){
   const overallMargin = subtotal>0?(totalProfit/subtotal*100):0;
   const gstAmt = subtotal * 0.09;
   const total = subtotal + gstAmt;
-  const isVO = form.type==='vo';
 
   const colStyle = {
     desc:   {flex:'1 1 220px',minWidth:0},
@@ -8351,9 +8389,15 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings}){
   };
   const iSmall = {...iStyle, fontSize:12, padding:'6px 8px'};
   const iNum = {...iSmall, textAlign:'right'};
+  const selStyle={...iSmall,width:'100%',appearance:'none',
+    backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23AEAEB2' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`,
+    backgroundRepeat:'no-repeat',backgroundPosition:'right 6px center',paddingRight:20,cursor:'pointer'};
+
+  const activeProjects=projects.filter(p=>!p.archived&&p.status!=='Cancelled'&&p.status!=='Completed');
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:16}}>
+      {/* Header */}
       <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
         <button onClick={onCancel}
           style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'7px 12px',
@@ -8368,25 +8412,139 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings}){
         <Btn onClick={()=>onSave(form)}>Save {isVO?'VO':'Quotation'}</Btn>
       </div>
 
+      {/* Quote Number Builder */}
       <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'18px 20px'}}>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:14}}>
-          <Field label={`${isVO?'VO':'Quotation'} Number`} value={form.quoteNo} onChange={ff('quoteNo')} placeholder={isVO?'VO-001':'Q-001'}/>
-          <Field label="Project" as="select" value={form.projectId} onChange={ff('projectId')}
-            options={projects.map(p=>({v:p.id,l:p.name}))}/>
-          <Field label="Date" type="date" value={form.date} onChange={ff('date')}/>
-          <Field label="Valid Until" type="date" value={form.validUntil||''} onChange={ff('validUntil')}/>
-          <Field label="Status" as="select" value={form.status} onChange={ff('status')}
-            options={['Draft','Sent','Approved','Rejected'].map(s=>({v:s,l:s}))}/>
+        <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:14}}>
+          {isVO?'VO':'Quotation'} Reference Number
+        </div>
+        <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap',marginBottom:10}}>
+          {/* Prefix (read-only) */}
+          <div style={{width:40}}>
+            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Type</div>
+            <div style={{...iSmall,background:T.bg,color:T.muted,borderRadius:8,
+              border:`1px solid ${T.borderLight}`,textAlign:'center',fontWeight:700,lineHeight:'1.8'}}>
+              {isVO?'VO':'Q'}
+            </div>
+          </div>
+          {/* YYMM — derived from date */}
+          <div style={{width:64}}>
+            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>YY MM</div>
+            <div style={{...iSmall,background:T.bg,color:T.muted,borderRadius:8,
+              border:`1px solid ${T.borderLight}`,textAlign:'center',fontFamily:'monospace',lineHeight:'1.8'}}>
+              {(()=>{const d=new Date(form.date||Date.now());return String(d.getFullYear()).slice(-2)+String(d.getMonth()+1).padStart(2,'0');})()}
+            </div>
+          </div>
+          {/* Client Code */}
+          <div style={{width:80}}>
+            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Client Code (2–3 letters)</div>
+            <input value={form.clientCode||''} maxLength={3}
+              onChange={e=>updateNumberPart('clientCode',e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,''))}
+              placeholder="EJ"
+              style={{...iSmall,width:'100%',fontFamily:'monospace',fontWeight:700,
+                textTransform:'uppercase',letterSpacing:'0.1em'}}/>
+            <div style={{fontSize:10,color:T.dim,marginTop:3}}>initials from client/address</div>
+          </div>
+          {/* Sequence */}
+          <div style={{width:64}}>
+            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Seq.</div>
+            <input type="number" min={1} max={99} value={form.sequence||1}
+              onChange={e=>updateNumberPart('sequence',parseInt(e.target.value)||1)}
+              style={{...iNum,width:'100%'}}/>
+            <div style={{fontSize:10,color:T.dim,marginTop:3}}>01, 02, 03…</div>
+          </div>
+          {/* Assembled result */}
+          <div style={{flex:1,minWidth:160}}>
+            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Generated Number</div>
+            <div style={{...iSmall,background:T.bg,borderRadius:8,border:`2px solid ${T.accent}`,
+              fontFamily:'monospace',fontWeight:900,fontSize:15,color:T.text,letterSpacing:'0.05em',
+              padding:'7px 12px',lineHeight:'1.5'}}>
+              {form.quoteNo}
+            </div>
+          </div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginTop:6}}>
+          <div>
+            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Date</div>
+            <input type="date" value={form.date} onChange={e=>updateDate(e.target.value)}
+              style={{...iSmall,width:'100%'}}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Valid Until (auto 14 days)</div>
+            <input type="date" value={form.validUntil||''} onChange={e=>ff('validUntil')(e.target.value)}
+              style={{...iSmall,width:'100%'}}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Status</div>
+            <select value={form.status} onChange={e=>ff('status')(e.target.value)} style={selStyle}>
+              {['Draft','Sent','Approved','Rejected'].map(s=><option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
         </div>
       </div>
 
+      {/* Client / Project Info */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'18px 20px'}}>
+        <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:14}}>
+          {isVO ? 'Linked Project (VO)' : 'Client & Site Details'}
+        </div>
+        {isVO ? (
+          // VO: must link to existing project
+          <div>
+            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Select Project</div>
+            <select value={form.projectId||''} onChange={e=>ff('projectId')(e.target.value)} style={{...selStyle,width:'100%',maxWidth:400}}>
+              <option value="">— Select project —</option>
+              {activeProjects.map(p=><option key={p.id} value={p.id}>{p.name} — {p.client} ({p.status})</option>)}
+            </select>
+            {form.projectId&&(()=>{
+              const p=projects.find(x=>x.id===form.projectId);
+              return p?(
+                <div style={{marginTop:10,padding:'10px 14px',background:T.bg,borderRadius:8,
+                  border:`1px solid ${T.borderLight}`,fontSize:12,color:T.secondary,lineHeight:1.7}}>
+                  <strong>{p.name}</strong> · {p.client}<br/>
+                  {p.clientAddress&&<span style={{color:T.muted}}>{p.clientAddress}</span>}
+                </div>
+              ):null;
+            })()}
+          </div>
+        ) : (
+          // Quotation: inline prospect fields
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            <div>
+              <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Project / Site Name</div>
+              <input value={form.prospectName||''} onChange={e=>ff('prospectName')(e.target.value)}
+                placeholder="e.g. Renovation at Bishan St 22" style={{...iSmall,width:'100%'}}/>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Client Name</div>
+              <input value={form.clientName||''} onChange={e=>ff('clientName')(e.target.value)}
+                placeholder="e.g. Mr. Eric Johnson" style={{...iSmall,width:'100%'}}/>
+            </div>
+            <div style={{gridColumn:'1/-1'}}>
+              <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Site Address</div>
+              <input value={form.clientAddress||''} onChange={e=>ff('clientAddress')(e.target.value)}
+                placeholder="e.g. 123 Bishan Street 22, #05-01, Singapore 570123" style={{...iSmall,width:'100%'}}/>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Contact Number</div>
+              <input value={form.clientPhone||''} onChange={e=>ff('clientPhone')(e.target.value)}
+                placeholder="+65 9123 4567" style={{...iSmall,width:'100%'}}/>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Email</div>
+              <input value={form.clientEmail||''} onChange={e=>ff('clientEmail')(e.target.value)}
+                placeholder="client@email.com" style={{...iSmall,width:'100%'}}/>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Line Items */}
       <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,overflow:'hidden'}}>
         <div style={{padding:'12px 18px',borderBottom:`1px solid ${T.borderLight}`,
           display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <span style={{fontSize:14,fontWeight:700,color:T.text}}>Line Items</span>
           <Btn size="sm" onClick={addItem}><Plus size={12}/>Add Item</Btn>
         </div>
-        {/* Column headers */}
         <div style={{display:'flex',gap:6,padding:'8px 18px',background:T.bg,borderBottom:`1px solid ${T.borderLight}`}}>
           {[
             {s:colStyle.desc, l:'Description'},
@@ -8401,15 +8559,11 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings}){
             <div key={i} style={{...s,fontSize:10,fontWeight:700,color:s.color||T.dim,textTransform:'uppercase',letterSpacing:'0.07em'}}>{l}</div>
           ))}
         </div>
-        {/* Item rows */}
         {form.items.map(item=>{
           const amt=(parseFloat(item.qty)||0)*(parseFloat(item.unitPrice)||0);
           const cost=(parseFloat(item.qty)||0)*(parseFloat(item.unitCost)||0);
           const profit=amt-cost;
           const mg=amt>0?(profit/amt*100):0;
-          const selStyle={...iSmall,width:'100%',appearance:'none',
-            backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23AEAEB2' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`,
-            backgroundRepeat:'no-repeat',backgroundPosition:'right 6px center',paddingRight:20,cursor:'pointer'};
           return (
             <div key={item.id} style={{display:'flex',gap:6,padding:'9px 18px',
               borderBottom:`1px solid ${T.borderLight}`,alignItems:'flex-start',flexWrap:'wrap'}}>
@@ -8443,11 +8597,7 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings}){
                   style={{...iNum,width:'100%',
                     background:T.bg==='#141412'?'rgba(124,58,237,0.10)':'rgba(124,58,237,0.06)',
                     borderColor:'rgba(124,58,237,0.25)',color:'#7c3aed'}}/>
-                {amt>0&&(
-                  <div style={{fontSize:10,color:profit>=0?T.success:T.danger,textAlign:'right',marginTop:2}}>
-                    {mg.toFixed(1)}%
-                  </div>
-                )}
+                {amt>0&&<div style={{fontSize:10,color:profit>=0?T.success:T.danger,textAlign:'right',marginTop:2}}>{mg.toFixed(1)}%</div>}
               </div>
               <div style={{...colStyle.amount,display:'flex',alignItems:'center',justifyContent:'flex-end',paddingTop:7}}>
                 <span style={{fontSize:12,fontWeight:600,color:T.text}}>
@@ -8456,8 +8606,7 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings}){
               </div>
               <div style={{...colStyle.del,display:'flex',alignItems:'flex-start',paddingTop:4}}>
                 <button onClick={()=>removeItem(item.id)}
-                  style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:4,
-                    borderRadius:6,display:'flex',alignItems:'center'}}>
+                  style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:4,borderRadius:6,display:'flex',alignItems:'center'}}>
                   <X size={13}/>
                 </button>
               </div>
@@ -8500,6 +8649,7 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings}){
         </div>
       </div>
 
+      {/* Notes + Terms */}
       <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'18px 20px',
         display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
         <div>
@@ -8515,16 +8665,17 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings}){
         </div>
       </div>
 
+      {/* Actions */}
       <div style={{display:'flex',gap:10,justifyContent:'flex-end',flexWrap:'wrap'}}>
         <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
         <Btn variant="secondary" onClick={()=>{
           const co=getCo(acctSettings);
-          const proj=projects.find(p=>p.id===form.projectId);
+          const proj=isVO?projects.find(p=>p.id===form.projectId):null;
           printDoc(buildQuoteHTML(form,proj,co,true),`${form.quoteNo} [Internal]`);
         }}><Eye size={13}/>Print Internal (with Cost)</Btn>
         <Btn variant="secondary" onClick={()=>{
           const co=getCo(acctSettings);
-          const proj=projects.find(p=>p.id===form.projectId);
+          const proj=isVO?projects.find(p=>p.id===form.projectId):null;
           printDoc(buildQuoteHTML(form,proj,co,false),`${form.quoteNo}`);
         }}><Download size={13}/>Print Client Copy</Btn>
         <Btn onClick={()=>onSave(form)}>Save {isVO?'VO':'Quotation'}</Btn>
@@ -8542,14 +8693,20 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
   const blankItem=()=>({id:uid(),category:CATS[0],description:'',unit:'lot',qty:1,unitPrice:'',unitCost:''});
 
   const startCreate=(type)=>{
-    const existingOfType=(quotes||[]).filter(q=>q.type===type);
-    const prefix=type==='vo'?'VO-':'Q-';
-    const nextNum=(existingOfType.length+1).toString().padStart(3,'0');
+    const today=new Date().toISOString().slice(0,10);
+    const valid14=new Date();valid14.setDate(valid14.getDate()+14);
+    const sequence=((quotes||[]).filter(q=>q.type===type).length)+1;
     const q={
-      id:uid(),projectId:projects[0]?.id||'',type,
-      quoteNo:prefix+nextNum,
-      date:new Date().toISOString().slice(0,10),
-      validUntil:'',status:'Draft',
+      id:uid(),type,
+      clientCode:'',sequence,
+      quoteNo:assembleQuoteNo(type,today,'',sequence),
+      date:today,
+      validUntil:valid14.toISOString().slice(0,10),
+      status:'Draft',
+      // quotation: inline prospect fields
+      prospectName:'',clientName:'',clientAddress:'',clientPhone:'',clientEmail:'',
+      // vo: link to project
+      projectId:projects.filter(p=>!p.archived&&p.status!=='Cancelled').slice(0,1)[0]?.id||'',
       items:[blankItem()],notes:'',
       terms:'This quotation is valid for 14 days from the date of issue.\nAll prices are in Singapore Dollars and subject to GST at the prevailing rate.\nWork will commence upon receipt of deposit payment.\nPayment terms: 50% deposit upon acceptance, balance upon completion.',
     };
@@ -8574,15 +8731,15 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
   const statusColor=s=>({Draft:T.dim,Sent:T.info,Approved:T.success,Rejected:T.danger}[s]||T.dim);
 
   const filtered=(quotes||[]).filter(q=>{
-    const proj=projects.find(p=>p.id===q.projectId);
-    const txt=(q.quoteNo+' '+(proj?.name||'')+' '+(proj?.client||'')+' '+q.status).toLowerCase();
+    const proj=q.type==='vo'?projects.find(p=>p.id===q.projectId):null;
+    const txt=(q.quoteNo+' '+(proj?.name||q.prospectName||'')+' '+(proj?.client||q.clientName||'')+' '+q.status).toLowerCase();
     if(search&&!txt.includes(search.toLowerCase()))return false;
     if(filterType!=='all'&&q.type!==filterType)return false;
     if(filterStatus!=='all'&&q.status!==filterStatus)return false;
     return true;
   });
 
-  if(editing) return <QuoteEditor quote={editing} onSave={saveQuote} onCancel={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>;
+  if(editing) return <QuoteEditor quote={editing} allQuotes={quotes||[]} onSave={saveQuote} onCancel={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>;
 
   const allQ=quotes||[];
   const approvedTotal=allQ.filter(q=>q.status==='Approved').reduce((s,q)=>{
@@ -8646,7 +8803,9 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
       ):(
         <div style={{display:'flex',flexDirection:'column',gap:10}}>
           {filtered.map(q=>{
-            const proj=projects.find(p=>p.id===q.projectId);
+            const proj=q.type==='vo'?projects.find(p=>p.id===q.projectId):null;
+            const displayName=q.type==='vo'?(proj?.name||'(No project)'):(q.prospectName||'(No site name)');
+            const displayClient=q.type==='vo'?(proj?.client||''):(q.clientName||'');
             const subtotal=(q.items||[]).reduce((s,i)=>(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0)+s,0);
             const total=subtotal*1.09;
             const isVO=q.type==='vo';
@@ -8667,8 +8826,8 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
                       {q.status}
                     </span>
                   </div>
-                  <div style={{fontSize:13,fontWeight:600,color:T.secondary}}>{proj?.name||'(No project)'}</div>
-                  <div style={{fontSize:11,color:T.muted}}>{proj?.client}{q.date?' · '+new Date(q.date).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}):''}</div>
+                  <div style={{fontSize:13,fontWeight:600,color:T.secondary}}>{displayName}</div>
+                  <div style={{fontSize:11,color:T.muted}}>{displayClient}{q.date?' · '+new Date(q.date).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}):''}</div>
                   <div style={{fontSize:11,color:T.dim,marginTop:2}}>{(q.items||[]).length} item{(q.items||[]).length!==1?'s':''}</div>
                 </div>
                 <div style={{textAlign:'right',minWidth:110}}>
@@ -8683,7 +8842,7 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
                   </button>
                   <button onClick={()=>{
                     const co=getCo(acctSettings);
-                    printDoc(buildQuoteHTML(q,proj,co,false),`${q.quoteNo} — ${proj?.name||''}`);
+                    printDoc(buildQuoteHTML(q,proj,co,false),`${q.quoteNo} — ${displayName}`);
                   }}
                     style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'7px 12px',
                       fontSize:12,fontWeight:600,color:T.secondary,cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontFamily:'inherit'}}>
