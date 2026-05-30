@@ -8366,6 +8366,253 @@ function Warranty({warranties,setWarranties,projects,isAdmin,acctSettings}){
   );
 }
 
+const _ACCEPT_TOKEN = typeof window!=='undefined' ? new URLSearchParams(window.location.search).get('accept') : null;
+
+function QuoteAcceptancePage({token}){
+  const [loading,setLoading]=useState(true);
+  const [quote,setQuote]=useState(null);
+  const [projects,setProjects]=useState([]);
+  const [acctSettings,setAcctSettings]=useState(null);
+  const [error,setError]=useState('');
+  const [signerName,setSignerName]=useState('');
+  const [accepted,setAccepted]=useState(false);
+  const [saving,setSaving]=useState(false);
+
+  useEffect(()=>{
+    Promise.all([loadS('quotes',[]),loadS('acctSettings',null),loadS('projects',[])]).then(([qs,settings,projs])=>{
+      setAcctSettings(settings);
+      setProjects(Array.isArray(projs)?projs:[]);
+      const found=(Array.isArray(qs)?qs:[]).find(q=>q.acceptToken===token);
+      if(!found){setError('This quotation link was not found or may have expired.');setLoading(false);return;}
+      setQuote(found);
+      if(found.acceptedAt) setAccepted(true);
+      setLoading(false);
+    });
+  },[]);
+
+  const handleAccept=async()=>{
+    if(!signerName.trim()||saving) return;
+    setSaving(true);
+    const allQ=await loadS('quotes',[]);
+    const now=new Date().toISOString();
+    const updated=(Array.isArray(allQ)?allQ:[]).map(q=>
+      q.id===quote.id?{...q,status:'Approved',acceptedBy:signerName.trim(),acceptedAt:now}:q
+    );
+    await saveS('quotes',updated);
+    setQuote(prev=>({...prev,status:'Approved',acceptedBy:signerName.trim(),acceptedAt:now}));
+    setAccepted(true);
+    setSaving(false);
+  };
+
+  const co=getCo(acctSettings);
+  const fmtM=n=>'S$'+Number(n||0).toLocaleString('en-SG',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmtD=d=>d?new Date(d).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}):'—';
+
+  if(loading) return(
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',
+      background:'#F8F6F2',fontFamily:'"DM Sans",-apple-system,sans-serif'}}>
+      <div style={{fontSize:14,color:'#7A7468'}}>Loading quotation…</div>
+    </div>
+  );
+  if(error) return(
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',
+      background:'#F8F6F2',fontFamily:'"DM Sans",-apple-system,sans-serif',padding:24}}>
+      <div style={{textAlign:'center'}}>
+        <div style={{fontSize:42,marginBottom:16}}>🔗</div>
+        <div style={{fontSize:18,fontWeight:700,color:'#1A1A1A',marginBottom:8}}>Link Not Found</div>
+        <div style={{fontSize:14,color:'#7A7468'}}>{error}</div>
+        <div style={{fontSize:12,color:'#B8B2A8',marginTop:8}}>Please contact {co.name} for a new link.</div>
+      </div>
+    </div>
+  );
+
+  const isVO=quote.type==='vo';
+  const proj=isVO?projects.find(p=>p.id===quote.projectId):null;
+  const clientName=isVO?(proj?.client||quote.clientName||'—'):(quote.clientName||'—');
+  const siteName=isVO?(proj?.name||'—'):(quote.prospectName||'—');
+  const siteAddr=isVO?(proj?.clientAddress||''):(quote.clientAddress||'');
+  const items=quote.items||[];
+  const subtotal=items.reduce((s,i)=>(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0)+s,0);
+  const progressAmt=items.reduce((s,i)=>s+(FULL_PAY_CATS.indexOf(i.category||'')>=0?0:(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0)),0);
+  const fullPayAmt=subtotal-progressAmt;
+  const schedObj=PAY_SCHEDULES.find(s=>s.id===quote.paySchedule);
+  const card={background:'#fff',borderRadius:16,border:'1px solid #EDE9E1',padding:'20px 22px',marginBottom:14};
+  const cats=[...new Set(items.map(i=>i.category||'General'))];
+
+  return(
+    <div style={{minHeight:'100vh',background:'#F8F6F2',fontFamily:'"DM Sans",-apple-system,sans-serif',padding:'28px 16px 48px'}}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;900&family=DM+Serif+Display&display=swap');*{box-sizing:border-box;margin:0;padding:0;}`}</style>
+      <div style={{maxWidth:640,margin:'0 auto'}}>
+
+        {/* Company header */}
+        <div style={{textAlign:'center',marginBottom:24}}>
+          <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:22,color:'#1A1A1A',marginBottom:3}}>{co.name}</div>
+          <div style={{fontSize:11,color:'#B8B2A8'}}>UEN: {co.uen||'—'}</div>
+          {co.address&&<div style={{fontSize:11,color:'#B8B2A8'}}>{co.address}</div>}
+        </div>
+
+        {/* Quote header */}
+        <div style={card}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',
+            gap:12,marginBottom:18,paddingBottom:18,borderBottom:'1px solid #EDE9E1'}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',
+                letterSpacing:'0.12em',marginBottom:4}}>{isVO?'Variation Order':'Quotation'}</div>
+              <div style={{fontSize:22,fontWeight:900,color:'#1A1A1A',fontFamily:'monospace',letterSpacing:'0.02em'}}>{quote.quoteNo}</div>
+              <div style={{fontSize:12,color:'#7A7468',marginTop:4}}>
+                Date: {fmtD(quote.date)}{quote.validUntil?' · Valid until: '+fmtD(quote.validUntil):''}
+              </div>
+            </div>
+            <div style={{background:accepted?'#F0FBF4':'#F8F6F2',
+              border:`1.5px solid ${accepted?'#2D7A4F':'#EDE9E1'}`,borderRadius:10,padding:'10px 16px',textAlign:'right'}}>
+              <div style={{fontSize:10,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:2}}>Total</div>
+              <div style={{fontSize:21,fontWeight:900,color:accepted?'#2D7A4F':'#1A1A1A'}}>{fmtM(subtotal)}</div>
+            </div>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+            <div>
+              <div style={{fontSize:9,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:6}}>Bill To</div>
+              <div style={{fontSize:14,fontWeight:700,color:'#1A1A1A'}}>{clientName}</div>
+            </div>
+            <div>
+              <div style={{fontSize:9,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:6}}>Site / Project</div>
+              {siteAddr&&<div style={{fontSize:13,fontWeight:700,color:'#1A1A1A',lineHeight:1.5}}>{siteAddr}</div>}
+              <div style={{fontSize:12,color:'#7A7468',lineHeight:1.5}}>{siteName}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Line items */}
+        <div style={card}>
+          <div style={{fontSize:11,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:14}}>Scope of Works</div>
+          {cats.map(cat=>{
+            const catItems=items.filter(i=>(i.category||'General')===cat);
+            return(
+              <div key={cat} style={{marginBottom:8}}>
+                <div style={{fontSize:10,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',
+                  letterSpacing:'0.09em',padding:'4px 0',borderBottom:'1px solid #EDE9E1',marginBottom:6}}>{cat}</div>
+                {catItems.map((item,ii)=>{
+                  const amt=(parseFloat(item.qty)||0)*(parseFloat(item.unitPrice)||0);
+                  return(
+                    <div key={ii} style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',
+                      padding:'6px 0',borderBottom:'1px dotted #F0EDE8',gap:12}}>
+                      <div style={{flex:1,fontSize:13,color:'#3D3D3D',lineHeight:1.4}}>
+                        {item.description||'—'}
+                        <span style={{fontSize:11,color:'#B8B2A8',marginLeft:6}}>{item.qty} {item.unit}</span>
+                      </div>
+                      <div style={{fontSize:13,fontWeight:600,color:'#1A1A1A',flexShrink:0}}>{fmtM(amt)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+          <div style={{borderTop:'2px solid #1A1A1A',marginTop:14,paddingTop:12,
+            display:'flex',justifyContent:'space-between',alignItems:'baseline'}}>
+            <span style={{fontSize:14,fontWeight:700,color:'#1A1A1A'}}>Total</span>
+            <span style={{fontSize:20,fontWeight:900,color:'#1A1A1A'}}>{fmtM(subtotal)}</span>
+          </div>
+        </div>
+
+        {/* Payment schedule */}
+        {((schedObj&&schedObj.stages.length>0)||fullPayAmt>0)&&(
+          <div style={card}>
+            <div style={{fontSize:11,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:14}}>
+              Payment Schedule{schedObj?` — ${schedObj.label}`:''}
+            </div>
+            {schedObj&&schedObj.stages.map((stage,i)=>(
+              <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+                padding:'10px 0',borderBottom:'1px solid #EDE9E1'}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,color:'#1A1A1A'}}>{stage.label}</div>
+                  <div style={{fontSize:11,color:'#B8B2A8'}}>{stage.pct}% of progress works</div>
+                </div>
+                <div style={{fontSize:15,fontWeight:700,color:'#1A1A1A'}}>{fmtM(progressAmt*(stage.pct/100))}</div>
+              </div>
+            ))}
+            {fullPayAmt>0&&(
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+                padding:'10px 0',borderBottom:'1px solid #EDE9E1',background:'rgba(196,168,130,0.05)',
+                margin:'0 -4px',padding:'10px 4px'}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,color:'#1A1A1A'}}>Supply Items — Full Payment upon ordering</div>
+                  <div style={{fontSize:11,color:'#B8B2A8'}}>Aircon, Furniture, Appliances, Light Fittings, Purchases</div>
+                </div>
+                <div style={{fontSize:15,fontWeight:700,color:'#1A1A1A'}}>{fmtM(fullPayAmt)}</div>
+              </div>
+            )}
+            <div style={{display:'flex',justifyContent:'space-between',paddingTop:10,marginTop:4}}>
+              <span style={{fontSize:13,fontWeight:700,color:'#1A1A1A'}}>Total</span>
+              <span style={{fontSize:18,fontWeight:900,color:'#1A1A1A'}}>{fmtM(subtotal)}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Terms */}
+        {quote.terms&&(
+          <div style={{...card,background:'#FAFAF8'}}>
+            <div style={{fontSize:10,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:10}}>Terms &amp; Conditions</div>
+            <div style={{fontSize:12,color:'#7A7468',lineHeight:1.7,whiteSpace:'pre-wrap'}}>{quote.terms}</div>
+          </div>
+        )}
+
+        {/* Acceptance */}
+        {accepted?(
+          <div style={{background:'#F0FBF4',border:'2px solid #2D7A4F',borderRadius:16,
+            padding:'32px 24px',textAlign:'center',marginBottom:16}}>
+            <div style={{fontSize:52,lineHeight:1,marginBottom:14}}>✓</div>
+            <div style={{fontSize:22,fontWeight:700,color:'#2D7A4F',marginBottom:10}}>Quotation Accepted</div>
+            <div style={{fontSize:14,color:'#3D3D3D',marginBottom:4}}>Accepted by <strong>{quote.acceptedBy}</strong></div>
+            <div style={{fontSize:12,color:'#7A7468',marginBottom:18}}>
+              {new Date(quote.acceptedAt).toLocaleString('en-SG',{dateStyle:'long',timeStyle:'short'})}
+            </div>
+            <div style={{fontSize:11,color:'#2D7A4F',padding:'10px',background:'rgba(45,122,79,0.06)',borderRadius:8}}>
+              Reference: {quote.quoteNo} · {fmtM(subtotal)}
+            </div>
+            <div style={{marginTop:14,fontSize:12,color:'#7A7468'}}>
+              {co.name} will be in touch shortly to confirm next steps.
+            </div>
+          </div>
+        ):(
+          <div style={card}>
+            <div style={{fontSize:16,fontWeight:700,color:'#1A1A1A',marginBottom:6}}>
+              Accept this {isVO?'Variation Order':'Quotation'}
+            </div>
+            <p style={{fontSize:13,color:'#7A7468',lineHeight:1.65,marginBottom:20}}>
+              By typing your full name and clicking <strong>"I Accept"</strong>, you confirm that you have read
+              and agree to the scope of works and terms stated in this {isVO?'variation order':'quotation'} <strong>{quote.quoteNo}</strong> for a total of <strong>{fmtM(subtotal)}</strong>.
+            </p>
+            <label style={{fontSize:12,fontWeight:600,color:'#3D3D3D',display:'block',marginBottom:8}}>
+              Full Name <span style={{color:'#C0392B'}}>*</span>
+            </label>
+            <input value={signerName} onChange={e=>setSignerName(e.target.value)}
+              placeholder="Type your full legal name here"
+              onKeyDown={e=>{if(e.key==='Enter'&&signerName.trim())handleAccept();}}
+              style={{width:'100%',padding:'13px 16px',border:'1.5px solid #EDE9E1',borderRadius:10,
+                fontSize:15,fontFamily:'inherit',outline:'none',marginBottom:8,
+                background:'#FAFAF8',color:'#1A1A1A'}}/>
+            <div style={{fontSize:11,color:'#B8B2A8',marginBottom:20}}>
+              Today's date: {new Date().toLocaleDateString('en-SG',{dateStyle:'long'})}
+            </div>
+            <button onClick={handleAccept} disabled={!signerName.trim()||saving}
+              style={{width:'100%',padding:'16px',
+                background:!signerName.trim()||saving?'#D0CEC9':'#1A1A1A',
+                color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,
+                cursor:!signerName.trim()||saving?'not-allowed':'pointer',
+                fontFamily:'inherit',letterSpacing:'-0.01em'}}>
+              {saving?'Recording acceptance…':'✓  I Accept this '+(isVO?'Variation Order':'Quotation')}
+            </button>
+          </div>
+        )}
+
+        <div style={{textAlign:'center',marginTop:20,fontSize:11,color:'#C8C4BC'}}>
+          Digital {isVO?'variation order':'quotation'} issued by {co.name} · UEN {co.uen||'—'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const assembleQuoteNo=(type,date,clientCode,sequence)=>{
   const d=new Date(date||Date.now());
   const yy=String(d.getFullYear()).slice(-2);
@@ -8782,6 +9029,22 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
   const [filterType,setFilterType]=useState('all');
   const [filterStatus,setFilterStatus]=useState('all');
   const [editing,setEditing]=useState(null);
+  const [acceptModal,setAcceptModal]=useState(null); // {quote, link}
+
+  const sendForAcceptance=(q)=>{
+    const token=q.acceptToken||uid();
+    const base=window.location.href.split('?')[0];
+    const link=base+'?accept='+token;
+    if(!q.acceptToken){
+      const updated={...q,acceptToken:token,status:q.status==='Draft'?'Sent':q.status};
+      const all=(quotes||[]).map(x=>x.id===q.id?updated:x);
+      setQuotes(all);
+      saveS('quotes',all);
+      setAcceptModal({quote:updated,link});
+    } else {
+      setAcceptModal({quote:q,link});
+    }
+  };
 
   const blankItem=()=>({id:uid(),category:CATS[0],description:'',unit:'lot',qty:1,unitPrice:'',unitCost:''});
 
@@ -8838,7 +9101,7 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
   const allQ=quotes||[];
   const approvedTotal=allQ.filter(q=>q.status==='Approved').reduce((s,q)=>{
     const sub=(q.items||[]).reduce((a,i)=>(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0)+a,0);
-    return s+sub*1.09;
+    return s+sub;
   },0);
 
   return (
@@ -8901,7 +9164,6 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
             const displayName=q.type==='vo'?(proj?.name||'(No project)'):(q.prospectName||'(No site name)');
             const displayClient=q.type==='vo'?(proj?.client||''):(q.clientName||'');
             const subtotal=(q.items||[]).reduce((s,i)=>(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0)+s,0);
-            const total=subtotal*1.09;
             const isVO=q.type==='vo';
             return (
               <div key={q.id} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,
@@ -8925,14 +9187,23 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
                   <div style={{fontSize:11,color:T.dim,marginTop:2}}>{(q.items||[]).length} item{(q.items||[]).length!==1?'s':''}</div>
                 </div>
                 <div style={{textAlign:'right',minWidth:110}}>
-                  <div style={{fontSize:16,fontWeight:700,color:T.text}}>S${total.toLocaleString('en-SG',{minimumFractionDigits:2})}</div>
-                  <div style={{fontSize:10,color:T.dim}}>incl. 9% GST</div>
+                  <div style={{fontSize:16,fontWeight:700,color:T.text}}>S${subtotal.toLocaleString('en-SG',{minimumFractionDigits:2})}</div>
+                  {q.acceptedAt&&<div style={{fontSize:10,color:T.success,fontWeight:600,marginTop:2}}>✓ Accepted</div>}
+                  {q.acceptToken&&!q.acceptedAt&&<div style={{fontSize:10,color:T.info,marginTop:2}}>Link sent</div>}
                 </div>
                 <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                   <button onClick={()=>setEditing(q)}
                     style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'7px 12px',
                       fontSize:12,fontWeight:600,color:T.secondary,cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontFamily:'inherit'}}>
                     <Edit3 size={12}/>Edit
+                  </button>
+                  <button onClick={()=>sendForAcceptance(q)}
+                    style={{background:q.acceptedAt?'rgba(45,122,79,0.08)':q.acceptToken?'rgba(26,130,190,0.08)':'rgba(26,26,26,0.06)',
+                      border:`1px solid ${q.acceptedAt?'rgba(45,122,79,0.3)':q.acceptToken?'rgba(26,130,190,0.3)':T.borderLight}`,
+                      borderRadius:8,padding:'7px 12px',fontSize:12,fontWeight:600,
+                      color:q.acceptedAt?T.success:q.acceptToken?T.info:T.secondary,
+                      cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontFamily:'inherit'}}>
+                    {q.acceptedAt?'✓ Accepted':q.acceptToken?'Resend Link':'Send for Acceptance'}
                   </button>
                   <button onClick={()=>{
                     const co=getCo(acctSettings);
@@ -8963,6 +9234,56 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Accept link modal */}
+      {acceptModal&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,
+          display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:T.card,borderRadius:18,padding:'28px 24px',maxWidth:480,width:'100%',
+            boxShadow:'0 20px 60px rgba(0,0,0,0.25)'}}>
+            <div style={{fontSize:17,fontWeight:700,color:T.text,marginBottom:4}}>
+              Share Acceptance Link
+            </div>
+            <div style={{fontSize:13,color:T.muted,marginBottom:20}}>
+              {acceptModal.quote.quoteNo} · {acceptModal.quote.type==='vo'
+                ?(projects.find(p=>p.id===acceptModal.quote.projectId)?.client||'—')
+                :(acceptModal.quote.clientName||'—')}
+            </div>
+            {acceptModal.quote.acceptedAt&&(
+              <div style={{background:'rgba(45,122,79,0.08)',border:'1px solid rgba(45,122,79,0.3)',
+                borderRadius:8,padding:'10px 14px',fontSize:12,color:T.success,marginBottom:14,fontWeight:600}}>
+                ✓ Accepted by {acceptModal.quote.acceptedBy} · {new Date(acceptModal.quote.acceptedAt).toLocaleDateString('en-SG',{dateStyle:'medium'})}
+              </div>
+            )}
+            <div style={{padding:'12px 14px',background:T.bg,border:`1px solid ${T.borderLight}`,
+              borderRadius:10,fontSize:12,color:T.secondary,fontFamily:'monospace',wordBreak:'break-all',
+              lineHeight:1.6,marginBottom:14,userSelect:'all'}}>
+              {acceptModal.link}
+            </div>
+            <div style={{display:'flex',gap:8,marginBottom:20,flexWrap:'wrap'}}>
+              <button onClick={()=>{navigator.clipboard.writeText(acceptModal.link);onShowToast?.('Link copied!');}}
+                style={{flex:1,padding:'10px 16px',background:T.accent,color:T.bg,border:'none',
+                  borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                Copy Link
+              </button>
+              <button onClick={()=>{
+                const co=getCo(acctSettings);
+                const msg=`Hi, please review and accept your ${acceptModal.quote.type==='vo'?'Variation Order':'Quotation'} ${acceptModal.quote.quoteNo} from ${co.name}.\n\nClick the link below to view details and confirm your acceptance:\n${acceptModal.link}`;
+                window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');
+              }}
+                style={{flex:1,padding:'10px 16px',background:'#25D366',color:'#fff',border:'none',
+                  borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                💬 WhatsApp
+              </button>
+            </div>
+            <button onClick={()=>setAcceptModal(null)}
+              style={{width:'100%',padding:'10px',background:'transparent',border:`1px solid ${T.borderLight}`,
+                borderRadius:8,fontSize:13,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>
+              Close
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -12015,6 +12336,9 @@ export default function App(){
       />
     </div>
   );
+
+  // Digital acceptance link — bypass login entirely
+  if(_ACCEPT_TOKEN) return <QuoteAcceptancePage token={_ACCEPT_TOKEN}/>;
 
   // Not logged in — show main login screen
   if(!activeUserId) return (
