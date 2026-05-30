@@ -76,10 +76,10 @@ const ROLE_LABEL = {admin:'Admin',accounts:'Accounts',designer:'Designer',pm:'Pr
 const ROLE_CLR = {admin:'#ef4444',accounts:'#3b82f6',designer:'#7c3aed',pm:'#0891b2',expense_entry:'#059669',superadmin:'#6d28d9'};
 
 const ROLE_DEFAULT_TABS = {
-  admin:       ['dashboard','projects','payments','reports','warranty','invoices','claims','commissions','admin','workers','checkin','accounts','contacts','trash'],
+  admin:       ['dashboard','projects','quotations','payments','reports','warranty','invoices','claims','commissions','admin','workers','checkin','accounts','contacts','trash'],
   accounts:    ['dashboard','payments','reports','invoices'],
-  designer:    ['dashboard','projects','claims'],
-  pm:          ['dashboard','projects','payments','warranty','invoices','claims','workers'],
+  designer:    ['dashboard','projects','quotations','claims'],
+  pm:          ['dashboard','projects','quotations','payments','warranty','invoices','claims','workers'],
   expense_entry:['invoices','claims'],
   site_worker: ['checkin'],
 };
@@ -11630,7 +11630,13 @@ export default function App(){
       setPayments(rawPay);
       try{ localStorage.setItem('rl_cache_payments',JSON.stringify(rawPay)); }catch{}
       const rawUsers=Array.isArray(us)&&us.length>0?us:SEED_USERS;
-      const cleanUsers=rawUsers.map(u=>(!u.photo||u.photo.length<=66666)?u:{...u,photo:''});
+      // Migration: auto-add any new role-default tabs missing from existing Firestore users
+      const migratedUsers=rawUsers.map(u=>{
+        const roleDef=ROLE_DEFAULT_TABS[u.role]||[];
+        const missingTabs=roleDef.filter(t=>!(u.tabs||[]).includes(t));
+        return missingTabs.length>0?{...u,tabs:[...(u.tabs||[]),...missingTabs]}:u;
+      });
+      const cleanUsers=migratedUsers.map(u=>(!u.photo||u.photo.length<=66666)?u:{...u,photo:''});
       setUsers(cleanUsers);
       try{ localStorage.setItem('rl_cache_users',JSON.stringify(cleanUsers)); }catch{}
       setWarranties(Array.isArray(ws)?ws:SEED_WARRANTIES);
