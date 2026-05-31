@@ -1867,10 +1867,10 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
   const [filter,setFilter]=useState('All');
   const [confirmPerm,setConfirmPerm]=useState(null);
   const daysLeft=d=>Math.max(0,Math.ceil((new Date(d).getTime()+365*24*60*60*1000-Date.now())/864e5));
-  const TL={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim'};
-  const TI={project:FolderOpen,invoice:Receipt,payment:CreditCard,user:Users,staffClaim:DollarSign};
-  const TC={project:T.info,invoice:T.warning,payment:T.success,user:T.danger,staffClaim:'#7c3aed'};
-  const counts={All:trash.length,project:0,invoice:0,payment:0,user:0,staffClaim:0};
+  const TL={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting'};
+  const TI={project:FolderOpen,invoice:Receipt,payment:CreditCard,user:Users,staffClaim:DollarSign,quote:FileSpreadsheet,sitereport:ClipboardList};
+  const TC={project:T.info,invoice:T.warning,payment:T.success,user:T.danger,staffClaim:'#7c3aed',quote:T.accent,sitereport:'#0891b2'};
+  const counts={All:trash.length,project:0,invoice:0,payment:0,user:0,staffClaim:0,quote:0,sitereport:0};
   trash.forEach(t=>{if(counts[t._trashType]!==undefined)counts[t._trashType]++;});
   const shown=[...(filter==='All'?trash:trash.filter(t=>t._trashType===filter))].sort((a,b)=>new Date(b._deletedAt)-new Date(a._deletedAt));
 
@@ -1890,7 +1890,7 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
         </div>
       )}
       <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-        {['All','project','invoice','payment','staffClaim','user'].map(f=>(
+        {['All','project','quote','sitereport','invoice','payment','staffClaim','user'].map(f=>(
           <button key={f} onClick={()=>setFilter(f)} style={{padding:'6px 14px',borderRadius:20,
             border:`1px solid ${filter===f?T.text:T.borderLight}`,
             background:filter===f?T.text:'transparent',
@@ -1905,8 +1905,8 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
           const t=item._trashType,Icon=TI[t]||Trash,color=TC[t]||T.dim;
           const left=daysLeft(item._deletedAt);
           const urgent=left<=30;
-          const label=t==='staffClaim'?`${item.submittedBy} — ${item.type||'Claim'}`:item.name||item.invoiceNo||`${item.type} Payment`||item.email||item.id;
-          const sub=t==='project'?`Client: ${item.client}`:t==='invoice'?`${item.supplier} · ${fmtSGD(item.total)}`:t==='payment'?`${item.type} · ${fmtSGD(item.amount)}`:t==='staffClaim'?`${fmtSGD(item.amount)} · ${fmtDate(item.date)}`:item.email;
+          const label=t==='staffClaim'?`${item.submittedBy} — ${item.type||'Claim'}`:t==='quote'?(item.quoteNo||(item.type==='vo'?'VO':'Quotation')):t==='sitereport'?(item.title||'Site Meeting'):item.name||item.invoiceNo||`${item.type} Payment`||item.email||item.id;
+          const sub=t==='project'?`Client: ${item.client}`:t==='invoice'?`${item.supplier} · ${fmtSGD(item.total)}`:t==='payment'?`${item.type} · ${fmtSGD(item.amount)}`:t==='staffClaim'?`${fmtSGD(item.amount)} · ${fmtDate(item.date)}`:t==='quote'?`${item.type==='vo'?'Variation Order':'Quotation'} · ${item.status||'Draft'}`:t==='sitereport'?`${fmtDate(item.date)} · ${item.status||'Draft'}`:item.email;
           return(
             <div key={item.id} style={{background:T.card,border:`1px solid ${urgent?'#FECACA':T.borderLight}`,borderRadius:14,padding:'14px 18px',boxShadow:T.shadow,display:'flex',alignItems:'center',gap:14}}>
               <div style={{width:38,height:38,borderRadius:12,background:`${color}12`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><Icon size={16} style={{color}}/></div>
@@ -2597,7 +2597,7 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
   );
 }
 
-function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,onShowToast,users,acctSettings,logAction=()=>{},activeUser=null}){
+function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,onShowToast,users,acctSettings,logAction=()=>{},activeUser=null,siteReports=[]}){
   const [modal,setModal]=useState(null);
   const [search,setSearch]=useState('');
   const [sfilt,setSfilt]=useState('Active');
@@ -2624,6 +2624,8 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
     projectType:'Residential',createdAt:new Date().toISOString(),archived:false};
   const [form,setForm]=useState(blank);
   const ff=k=>v=>setForm(p=>({...p,[k]:v}));
+
+  const [meetingOpenProj,setMeetingOpenProj]=useState(null); // project id whose meetings are expanded
 
   const [handoverTarget,setHandoverTarget]=useState(null); // project being handed over
   const [handoverForm,setHandoverForm]=useState({
@@ -2999,6 +3001,53 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                       {designerComm>0&&<span>D: <span style={{color:T.accent,fontWeight:600}}>{fmtSGD(designerComm)}</span></span>}
                       {pmComm>0&&<span>PM: <span style={{color:T.info,fontWeight:600}}>{fmtSGD(pmComm)}</span></span>}
                     </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Acknowledged Site Meetings ── */}
+              {(()=>{
+                const ackMeetings=(siteReports||[]).filter(r=>r.projectId===p.id&&r.status==='Acknowledged').sort((a,b)=>new Date(b.date)-new Date(a.date));
+                if(ackMeetings.length===0) return null;
+                const isOpen=meetingOpenProj===p.id;
+                return (
+                  <div style={{marginBottom:12,border:`1px solid rgba(8,145,178,0.25)`,borderRadius:10,overflow:'hidden'}}>
+                    <button onClick={()=>setMeetingOpenProj(isOpen?null:p.id)}
+                      style={{width:'100%',background:'rgba(8,145,178,0.06)',border:'none',borderBottom:isOpen?`1px solid rgba(8,145,178,0.2)`:'none',
+                        padding:'9px 14px',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',fontFamily:'inherit'}}>
+                      <span style={{display:'flex',alignItems:'center',gap:7,fontSize:12,fontWeight:700,color:'#0891b2'}}>
+                        <ClipboardList size={13}/>Site Meetings ({ackMeetings.length} acknowledged)
+                      </span>
+                      <span style={{fontSize:11,color:'#0891b2'}}>{isOpen?'▲':'▼'}</span>
+                    </button>
+                    {isOpen&&(
+                      <div style={{padding:'10px 14px',display:'flex',flexDirection:'column',gap:10,background:T.card}}>
+                        {ackMeetings.map(r=>(
+                          <div key={r.id} style={{borderLeft:'3px solid #0891b2',paddingLeft:12}}>
+                            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
+                              <span style={{fontSize:13,fontWeight:700,color:T.text}}>{r.title}</span>
+                              <span style={{fontSize:11,color:T.dim}}>{fmtDate(r.date)}</span>
+                            </div>
+                            {r.attendees&&<div style={{fontSize:11,color:T.muted,marginBottom:5}}>Present: {r.attendees}</div>}
+                            {(r.notes||'').split('\n').filter(Boolean).length>0&&(
+                              <ul style={{margin:'0 0 4px 0',paddingLeft:16,listStyle:'disc'}}>
+                                {(r.notes||'').split('\n').filter(l=>l.trim()).map((l,i)=>(
+                                  <li key={i} style={{fontSize:11,color:T.secondary,marginBottom:2}}>{l.replace(/^[•·\-]\s*/,'')}</li>
+                                ))}
+                              </ul>
+                            )}
+                            {r.actionItems&&(
+                              <div style={{fontSize:11,color:T.muted,marginTop:2}}>Actions: {r.actionItems}</div>
+                            )}
+                            {r.acknowledgedBy&&(
+                              <div style={{fontSize:10,color:T.success,marginTop:4}}>
+                                ✓ Acknowledged by {r.acknowledgedBy} · {fmtDate(r.acknowledgedAt)}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -9239,7 +9288,7 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
   );
 }
 
-function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}){
+function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast,onSoftDelete}){
   const [search,setSearch]=useState('');
   const [filterType,setFilterType]=useState('all');
   const [filterStatus,setFilterStatus]=useState('all');
@@ -9295,9 +9344,13 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
   };
 
   const deleteQuote=(id)=>{
-    if(!window.confirm('Delete this quotation? This cannot be undone.'))return;
-    const upd=(quotes||[]).filter(q=>q.id!==id);
+    if(!window.confirm('Move this quotation to Trash?'))return;
+    const q=(quotes||[]).find(x=>x.id===id);
+    if(!q)return;
+    onSoftDelete?.({...q,_trashType:'quote',_deletedAt:new Date().toISOString()});
+    const upd=(quotes||[]).filter(x=>x.id!==id);
     setQuotes(upd);saveS('quotes',upd);
+    onShowToast?.(`${q.type==='vo'?'VO':'Quotation'} moved to Trash`);
   };
 
   const statusColor=s=>({Draft:T.dim,Sent:T.info,Approved:T.success,Rejected:T.danger}[s]||T.dim);
@@ -9758,7 +9811,7 @@ function SiteReportEditor({report, onSave, onCancel, projects, allReports, users
   );
 }
 
-function SiteReports({reports,setReports,projects,acctSettings,isAdmin,activeUser,onShowToast,users}){
+function SiteReports({reports,setReports,projects,acctSettings,isAdmin,activeUser,onShowToast,users,onSoftDelete}){
   const [editing,setEditing]=useState(null);
   const [filterProj,setFilterProj]=useState('all');
   const [search,setSearch]=useState('');
@@ -9772,9 +9825,13 @@ function SiteReports({reports,setReports,projects,acctSettings,isAdmin,activeUse
   };
 
   const deleteReport=id=>{
-    if(!window.confirm('Delete this report? This cannot be undone.'))return;
-    const upd=(reports||[]).filter(r=>r.id!==id);
+    if(!window.confirm('Move this meeting to Trash?'))return;
+    const r=(reports||[]).find(x=>x.id===id);
+    if(!r)return;
+    onSoftDelete?.({...r,_trashType:'sitereport',_deletedAt:new Date().toISOString()});
+    const upd=(reports||[]).filter(x=>x.id!==id);
     setReports(upd);saveS('siteReports',upd);
+    onShowToast?.(`Meeting moved to Trash`);
   };
 
   const sendForAck=r=>{
@@ -12775,8 +12832,8 @@ export default function App(){
 
   const handleSoftDelete = useCallback((item)=>{
     setTrash(prev=>{const upd=[...prev,item];saveS('trash',upd);return upd;});
-    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim'}[item._trashType]||item._trashType;
-    const label=item.name||item.invoiceNo||item.email||item.id;
+    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting'}[item._trashType]||item._trashType;
+    const label=item.name||item.invoiceNo||item.quoteNo||item.title||item.email||item.id;
     logAction(`DELETE_${(item._trashType||'').toUpperCase()}`, `Deleted ${typeName}: ${label}`, item);
   },[logAction]);
 
@@ -12804,9 +12861,11 @@ export default function App(){
         return prev;
       });
     }
+    else if(_trashType==='quote'){setQuotes(p=>{const u=[...p,orig];saveS('quotes',u);return u;});}
+    else if(_trashType==='sitereport'){setSiteReports(p=>{const u=[...p,orig];saveS('siteReports',u);return u;});}
     setTrash(prev=>{const upd=prev.filter(t=>t.id!==item.id);saveS('trash',upd);return upd;});
-    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim'}[_trashType]||_trashType;
-    const label=orig.name||orig.invoiceNo||orig.email||orig.id;
+    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting'}[_trashType]||_trashType;
+    const label=orig.name||orig.invoiceNo||orig.quoteNo||orig.title||orig.email||orig.id;
     logAction(`RESTORE_${(_trashType||'').toUpperCase()}`, `Restored ${typeName}: ${label}`, orig);
   },[logAction]);
 
@@ -12814,8 +12873,8 @@ export default function App(){
     setTrash(prev=>{
       const item=prev.find(t=>t.id===id);
       if(item){
-        const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim'}[item._trashType]||item._trashType;
-        logAction('PERMANENT_DELETE', `Permanently deleted ${typeName}: ${item.name||item.invoiceNo||item.email||id}`, item);
+        const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting'}[item._trashType]||item._trashType;
+        logAction('PERMANENT_DELETE', `Permanently deleted ${typeName}: ${item.name||item.invoiceNo||item.quoteNo||item.title||item.email||id}`, item);
       }
       const upd=prev.filter(t=>t.id!==id);saveS('trash',upd);return upd;
     });
@@ -13404,15 +13463,15 @@ export default function App(){
             const mergedWidgets=[...userWidgets, ...allIds.filter(id=>!userWidgets.includes(id))];
             return <Dashboard projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments.filter(py=>userProjects.some(p=>p.id===py.projectId))} widgets={mergedWidgets} siteWorkers={siteWorkers} onlinePresence={onlinePresence} activeUserId={activeUserId} notices={notices} setNotices={(n)=>{setNotices(n);saveNotices(n);}} isAdmin={isAdmin} attendance={attendance}/>;
           })()}
-          {tab==='projects'&&<Projects projects={userProjects} setProjects={setProjects} invoices={invoices} payments={payments} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} users={users} acctSettings={acctSettings} logAction={logAction} activeUser={activeUser}/>}
+          {tab==='projects'&&<Projects projects={userProjects} setProjects={setProjects} invoices={invoices} payments={payments} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} users={users} acctSettings={acctSettings} logAction={logAction} activeUser={activeUser} siteReports={siteReports}/>}
           {tab==='invoices'&&<Invoices invoices={invoices} setInvoices={setInvoices} projects={userProjects} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} invoiceBatches={invoiceBatches} setInvoiceBatches={setInvoiceBatches} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='payments'&&<Payments payments={payments} setPayments={setPayments} projects={userProjects} invoices={invoices} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='contacts'&&<Contacts projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments}/>}
           {tab==='reports'&&<Reports projects={userProjects} invoices={invoices} payments={payments} acctSettings={acctSettings}/>}
           {tab==='commissions'&&<Commissions projects={projects} setProjects={setProjects} invoices={invoices} isAdmin={isAdmin} users={users}/>}
           {tab==='claims'&&<StaffClaims claims={staffClaims} setClaims={setStaffClaims} projects={userProjects} users={users} activeUser={activeUser} isAdmin={isAdmin} invoices={invoices} setInvoices={setInvoices} acctSettings={acctSettings} trash={trash} setTrash={setTrash}/>}
-          {tab==='quotations'&&<Quotations quotes={quotes} setQuotes={setQuotes} projects={userProjects} isAdmin={isAdmin} acctSettings={acctSettings} onShowToast={handleShowToast}/>}
-          {tab==='sitereports'&&<SiteReports reports={siteReports} setReports={setSiteReports} projects={userProjects} acctSettings={acctSettings} isAdmin={isAdmin} activeUser={activeUser} onShowToast={handleShowToast} users={users}/>}
+          {tab==='quotations'&&<Quotations quotes={quotes} setQuotes={setQuotes} projects={userProjects} isAdmin={isAdmin} acctSettings={acctSettings} onShowToast={handleShowToast} onSoftDelete={handleSoftDelete}/>}
+          {tab==='sitereports'&&<SiteReports reports={siteReports} setReports={setSiteReports} projects={userProjects} acctSettings={acctSettings} isAdmin={isAdmin} activeUser={activeUser} onShowToast={handleShowToast} users={users} onSoftDelete={handleSoftDelete}/>}
           {tab==='warranty'&&<Warranty warranties={warranties} setWarranties={setWarranties} projects={projects} isAdmin={isAdmin} acctSettings={acctSettings}/>}
           {tab==='workers'&&<WorkerAdmin siteWorkers={siteWorkers} setSiteWorkers={setSiteWorkers} attendance={attendance} setAttendance={setAttendance} projects={projects} invoices={invoices} setInvoices={setInvoices} claims={workerClaims} setClaims={setWorkerClaims} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='checkin'&&<WorkerLoginScreen siteWorkers={siteWorkers} onLogin={(w)=>setWorkerSession(w)} onAdminLogin={()=>setTab('dashboard')} acctSettings={acctSettings}/>}
