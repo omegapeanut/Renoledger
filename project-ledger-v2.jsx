@@ -7,7 +7,7 @@ import {
   BookUser, Building2, Home, ZoomIn, Phone, Mail, MapPin,
   RotateCcw, Trash, AlertCircle, Info,
   Building, FileSpreadsheet, Calendar, Download, Settings,
-  LogIn, LogOut, Star, Terminal, Database, RefreshCw
+  LogIn, LogOut, Star, Terminal, Database, RefreshCw, ClipboardList
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -27,7 +27,7 @@ const _sa = {
   // password is first 3 chars of app name + build year reversed
   password:['Ren','o','5202'].join(''),          // RenoLedger + 2025 reversed = Reno5202
   role:'superadmin',
-  tabs:['dashboard','projects','quotations','invoices','payments','contacts','reports',
+  tabs:['dashboard','projects','quotations','sitereports','invoices','payments','contacts','reports',
         'commissions','warranty','workers','checkin','accounts','trash','admin','system'],
   widgets:['stats','budget','catbreak','cashflow','aging','margin','gantt','collection','suppliers','attendance','recent'],
   active:true,
@@ -82,10 +82,10 @@ const ROLE_LABEL = {admin:'Admin',accounts:'Accounts',designer:'Designer',pm:'Pr
 const ROLE_CLR = {admin:'#ef4444',accounts:'#3b82f6',designer:'#7c3aed',pm:'#0891b2',expense_entry:'#059669',superadmin:'#6d28d9'};
 
 const ROLE_DEFAULT_TABS = {
-  admin:       ['dashboard','projects','quotations','payments','reports','warranty','invoices','claims','commissions','admin','workers','checkin','accounts','contacts','trash'],
+  admin:       ['dashboard','projects','quotations','sitereports','payments','reports','warranty','invoices','claims','commissions','admin','workers','checkin','accounts','contacts','trash'],
   accounts:    ['dashboard','payments','reports','invoices'],
-  designer:    ['dashboard','projects','quotations','claims'],
-  pm:          ['dashboard','projects','quotations','payments','warranty','invoices','claims','workers'],
+  designer:    ['dashboard','projects','quotations','sitereports','claims'],
+  pm:          ['dashboard','projects','quotations','sitereports','payments','warranty','invoices','claims','workers'],
   expense_entry:['invoices','claims'],
   site_worker: ['checkin'],
 };
@@ -8613,6 +8613,221 @@ function QuoteAcceptancePage({token}){
   );
 }
 
+const _ACK_TOKEN = typeof window!=='undefined' ? new URLSearchParams(window.location.search).get('ack') : null;
+
+function SiteReportAckPage({token}){
+  const [loading,setLoading]=useState(true);
+  const [report,setReport]=useState(null);
+  const [proj,setProj]=useState(null);
+  const [co,setCo]=useState({name:'',uen:'',address:''});
+  const [error,setError]=useState('');
+  const [signerName,setSignerName]=useState('');
+  const [acknowledged,setAcknowledged]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [lightboxUrl,setLightboxUrl]=useState(null);
+
+  useEffect(()=>{
+    Promise.all([loadS('siteReports',[]),loadS('acctSettings',null),loadS('projects',[])]).then(([rpts,settings,projs])=>{
+      setCo(getCo(settings));
+      const found=(Array.isArray(rpts)?rpts:[]).find(r=>r.ackToken===token);
+      if(!found){setError('This report link was not found or may have expired.');setLoading(false);return;}
+      setReport(found);
+      setProj((Array.isArray(projs)?projs:[]).find(p=>p.id===found.projectId)||null);
+      if(found.acknowledgedAt) setAcknowledged(true);
+      setLoading(false);
+    });
+  },[]);
+
+  const handleAck=async()=>{
+    if(!signerName.trim()||saving) return;
+    setSaving(true);
+    const allR=await loadS('siteReports',[]);
+    const now=new Date().toISOString();
+    const updated=(Array.isArray(allR)?allR:[]).map(r=>
+      r.id===report.id?{...r,status:'Acknowledged',acknowledgedBy:signerName.trim(),acknowledgedAt:now}:r
+    );
+    await saveS('siteReports',updated);
+    setReport(prev=>({...prev,status:'Acknowledged',acknowledgedBy:signerName.trim(),acknowledgedAt:now}));
+    setAcknowledged(true);
+    setSaving(false);
+  };
+
+  const fmtD=d=>d?new Date(d).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}):'—';
+  const S={
+    wrap:{minHeight:'100vh',background:'#F8F6F2',fontFamily:'"DM Sans",-apple-system,sans-serif',padding:'28px 16px 48px'},
+    card:{background:'#fff',borderRadius:16,border:'1px solid #EDE9E1',padding:'20px 22px',marginBottom:14},
+  };
+  const bullets=txt=>(txt||'').split('\n').filter(l=>l.trim()).map((l,i)=>(
+    <div key={i} style={{display:'flex',gap:10,padding:'6px 0',borderBottom:'1px dotted #F0EDE8',alignItems:'flex-start'}}>
+      <span style={{color:'#C4A882',fontWeight:700,flexShrink:0,marginTop:1}}>•</span>
+      <span style={{fontSize:13,color:'#3D3D3D',lineHeight:1.55}}>{l.replace(/^[-•·]\s*/,'')}</span>
+    </div>
+  ));
+  const actions=txt=>(txt||'').split('\n').filter(l=>l.trim()).map((l,i)=>(
+    <div key={i} style={{display:'flex',gap:10,padding:'6px 0',borderBottom:'1px dotted #F0EDE8',alignItems:'flex-start'}}>
+      <span style={{color:'#B8B2A8',flexShrink:0,fontSize:16,marginTop:-1}}>□</span>
+      <span style={{fontSize:13,color:'#3D3D3D',lineHeight:1.55}}>{l.replace(/^[-•·□✓]\s*/,'')}</span>
+    </div>
+  ));
+
+  if(loading) return(
+    <div style={{...S.wrap,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div style={{fontSize:14,color:'#7A7468'}}>Loading report…</div>
+    </div>
+  );
+  if(error) return(
+    <div style={{...S.wrap,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{textAlign:'center'}}>
+        <div style={{fontSize:40,marginBottom:12}}>📋</div>
+        <div style={{fontSize:18,fontWeight:700,color:'#1A1A1A',marginBottom:8}}>Report Not Found</div>
+        <div style={{fontSize:14,color:'#7A7468'}}>{error}</div>
+        <div style={{fontSize:12,color:'#B8B2A8',marginTop:6}}>Please contact {co.name} for assistance.</div>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={S.wrap}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;900&family=DM+Serif+Display&display=swap');*{box-sizing:border-box;margin:0;padding:0;}`}</style>
+      <div style={{maxWidth:640,margin:'0 auto'}}>
+
+        {/* Company header */}
+        <div style={{textAlign:'center',marginBottom:24}}>
+          <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:22,color:'#1A1A1A',marginBottom:3}}>{co.name}</div>
+          <div style={{fontSize:11,color:'#B8B2A8'}}>UEN: {co.uen||'—'}</div>
+          {co.address&&<div style={{fontSize:11,color:'#B8B2A8'}}>{co.address}</div>}
+          <div style={{marginTop:10,display:'inline-block',background:'#F0EDE8',padding:'4px 14px',borderRadius:20,
+            fontSize:11,fontWeight:700,color:'#7A7468',textTransform:'uppercase',letterSpacing:'0.1em'}}>
+            Site Visit Report
+          </div>
+        </div>
+
+        {/* Report header */}
+        <div style={S.card}>
+          <div style={{marginBottom:14,paddingBottom:14,borderBottom:'1px solid #EDE9E1'}}>
+            <div style={{fontSize:20,fontWeight:700,color:'#1A1A1A',marginBottom:4,lineHeight:1.3}}>{report.title}</div>
+            <div style={{fontSize:12,color:'#7A7468'}}>
+              {fmtD(report.date)}{report.time?' at '+report.time:''}
+              {report.createdBy?' · Prepared by '+report.createdBy:''}
+            </div>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            {proj&&(
+              <div>
+                <div style={{fontSize:9,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:5}}>Project</div>
+                <div style={{fontSize:13,fontWeight:700,color:'#1A1A1A'}}>{proj.name}</div>
+                {proj.clientAddress&&<div style={{fontSize:11,color:'#7A7468',marginTop:2}}>{proj.clientAddress}</div>}
+              </div>
+            )}
+            {report.attendees&&(
+              <div>
+                <div style={{fontSize:9,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:5}}>Present at Meeting</div>
+                <div style={{fontSize:12,color:'#3D3D3D',lineHeight:1.6}}>{report.attendees}</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Discussion points */}
+        {report.discussionNotes&&(
+          <div style={S.card}>
+            <div style={{fontSize:11,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:12}}>Discussion Points</div>
+            {bullets(report.discussionNotes)}
+          </div>
+        )}
+
+        {/* Action items */}
+        {report.actionItems&&(
+          <div style={S.card}>
+            <div style={{fontSize:11,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:12}}>Action Items</div>
+            {actions(report.actionItems)}
+          </div>
+        )}
+
+        {/* Photos */}
+        {(report.photos||[]).length>0&&(
+          <div style={S.card}>
+            <div style={{fontSize:11,fontWeight:700,color:'#B8B2A8',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:14}}>
+              Site Photos ({report.photos.length})
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:10}}>
+              {report.photos.map((ph,i)=>(
+                <div key={i}>
+                  <img src={ph.url} onClick={()=>setLightboxUrl(ph.url)}
+                    style={{width:'100%',height:150,objectFit:'cover',borderRadius:10,cursor:'pointer',
+                      display:'block',border:'1px solid #EDE9E1'}}/>
+                  {ph.caption&&<div style={{fontSize:11,color:'#7A7468',marginTop:5,lineHeight:1.4}}>{ph.caption}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Acknowledgement */}
+        {acknowledged?(
+          <div style={{background:'#F0FBF4',border:'2px solid #2D7A4F',borderRadius:16,
+            padding:'32px 24px',textAlign:'center',marginBottom:16}}>
+            <div style={{fontSize:48,lineHeight:1,marginBottom:14}}>✓</div>
+            <div style={{fontSize:22,fontWeight:700,color:'#2D7A4F',marginBottom:10}}>Report Acknowledged</div>
+            <div style={{fontSize:14,color:'#3D3D3D',marginBottom:4}}>Acknowledged by <strong>{report.acknowledgedBy}</strong></div>
+            <div style={{fontSize:12,color:'#7A7468',marginBottom:16}}>
+              {new Date(report.acknowledgedAt).toLocaleString('en-SG',{dateStyle:'long',timeStyle:'short'})}
+            </div>
+            <div style={{fontSize:11,color:'#2D7A4F',padding:'10px 14px',background:'rgba(45,122,79,0.06)',borderRadius:8}}>
+              {report.title} · {fmtD(report.date)}
+            </div>
+          </div>
+        ):(
+          <div style={S.card}>
+            <div style={{fontSize:16,fontWeight:700,color:'#1A1A1A',marginBottom:6}}>Acknowledge this Report</div>
+            <p style={{fontSize:13,color:'#7A7468',lineHeight:1.65,marginBottom:20}}>
+              By typing your full name and clicking <strong>"I Acknowledge"</strong>, you confirm that the discussion points
+              and action items above accurately reflect what was discussed during the site visit on{' '}
+              <strong>{fmtD(report.date)}</strong>.
+            </p>
+            <label style={{fontSize:12,fontWeight:600,color:'#3D3D3D',display:'block',marginBottom:8}}>
+              Full Name <span style={{color:'#C0392B'}}>*</span>
+            </label>
+            <input value={signerName} onChange={e=>setSignerName(e.target.value)}
+              placeholder="Type your full legal name here"
+              onKeyDown={e=>{if(e.key==='Enter'&&signerName.trim())handleAck();}}
+              style={{width:'100%',padding:'13px 16px',border:'1.5px solid #EDE9E1',borderRadius:10,
+                fontSize:15,fontFamily:'inherit',outline:'none',marginBottom:8,
+                background:'#FAFAF8',color:'#1A1A1A'}}/>
+            <div style={{fontSize:11,color:'#B8B2A8',marginBottom:20}}>
+              Today's date: {new Date().toLocaleDateString('en-SG',{dateStyle:'long'})}
+            </div>
+            <button onClick={handleAck} disabled={!signerName.trim()||saving}
+              style={{width:'100%',padding:'16px',
+                background:!signerName.trim()||saving?'#D0CEC9':'#1A1A1A',
+                color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,
+                cursor:!signerName.trim()||saving?'not-allowed':'pointer',
+                fontFamily:'inherit',letterSpacing:'-0.01em'}}>
+              {saving?'Saving…':'✓  I Acknowledge this Report'}
+            </button>
+          </div>
+        )}
+
+        <div style={{textAlign:'center',marginTop:20,fontSize:11,color:'#C8C4BC'}}>
+          Site Visit Report issued by {co.name} · UEN {co.uen||'—'}
+        </div>
+      </div>
+
+      {lightboxUrl&&(
+        <div onClick={()=>setLightboxUrl(null)}
+          style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:2000,
+            display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',padding:20}}>
+          <img src={lightboxUrl} style={{maxWidth:'100%',maxHeight:'90vh',objectFit:'contain',borderRadius:10}}/>
+          <button onClick={e=>{e.stopPropagation();setLightboxUrl(null);}}
+            style={{position:'absolute',top:16,right:16,background:'rgba(255,255,255,0.18)',
+              border:'none',borderRadius:50,width:38,height:38,color:'#fff',
+              fontSize:20,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>×</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const assembleQuoteNo=(type,date,clientCode,sequence)=>{
   const d=new Date(date||Date.now());
   const yy=String(d.getFullYear()).slice(-2);
@@ -9279,6 +9494,386 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
               </button>
             </div>
             <button onClick={()=>setAcceptModal(null)}
+              style={{width:'100%',padding:'10px',background:'transparent',border:`1px solid ${T.borderLight}`,
+                borderRadius:8,fontSize:13,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SiteReportEditor({report, onSave, onCancel, projects, allReports}){
+  const [form,setForm]=useState({...report});
+  const [uploading,setUploading]=useState(false);
+  const photoRef=useRef();
+  const ff=k=>v=>setForm(p=>({...p,[k]:v}));
+
+  const handlePhotos=async(files)=>{
+    setUploading(true);
+    const newPhotos=[];
+    for(const f of Array.from(files)){
+      const url=await uploadToCloudinary(f);
+      if(url) newPhotos.push({url,caption:''});
+    }
+    setForm(p=>({...p,photos:[...(p.photos||[]),...newPhotos]}));
+    setUploading(false);
+  };
+
+  const activeProjects=projects.filter(p=>!p.archived&&p.status!=='Cancelled');
+  const iSm={...iStyle,fontSize:13,padding:'8px 12px'};
+  const selSm={...iSm,width:'100%',appearance:'none',
+    backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23AEAEB2' stroke-width='1.5' stroke-linecap='round' fill='none'/%3E%3C/svg%3E")`,
+    backgroundRepeat:'no-repeat',backgroundPosition:'right 8px center',paddingRight:24,cursor:'pointer'};
+  const lbl={fontSize:11,fontWeight:600,color:T.muted,display:'block',marginBottom:6};
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+        <button onClick={onCancel}
+          style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'7px 12px',
+            fontSize:12,color:T.muted,cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontFamily:'inherit'}}>
+          ← Back
+        </button>
+        <div style={{flex:1}}>
+          <div style={{fontSize:17,fontWeight:700,color:T.text,letterSpacing:'-0.02em'}}>
+            {report.id?'Edit Report':'New Site Report'}
+          </div>
+        </div>
+        <Btn onClick={()=>onSave(form)}>Save Report</Btn>
+      </div>
+
+      {/* Details */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'18px 20px'}}>
+        <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:14}}>Report Details</div>
+        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:12,marginBottom:12}}>
+          <div>
+            <label style={lbl}>Project</label>
+            <select value={form.projectId||''} onChange={e=>{
+              const newPid=e.target.value;
+              const n=((allReports||[]).filter(r=>r.projectId===newPid).length)+(form.projectId===newPid?0:1);
+              setForm(p=>({...p,projectId:newPid,
+                title:(!p.title||/^Site Visit #\d+/.test(p.title))?`Site Visit #${n}`:p.title}));
+            }} style={selSm}>
+              <option value="">— Select project —</option>
+              {activeProjects.map(p=><option key={p.id} value={p.id}>{p.name} ({p.status})</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Date</label>
+            <input type="date" value={form.date||''} onChange={e=>ff('date')(e.target.value)} style={{...iSm,width:'100%'}}/>
+          </div>
+          <div>
+            <label style={lbl}>Time (optional)</label>
+            <input type="time" value={form.time||''} onChange={e=>ff('time')(e.target.value)} style={{...iSm,width:'100%'}}/>
+          </div>
+        </div>
+        <div style={{marginBottom:12}}>
+          <label style={lbl}>Report Title</label>
+          <input value={form.title||''} onChange={e=>ff('title')(e.target.value)}
+            placeholder="e.g. Site Visit #1 — Carpentry Discussion" style={{...iSm,width:'100%'}}/>
+        </div>
+        <div>
+          <label style={lbl}>Present at Meeting</label>
+          <input value={form.attendees||''} onChange={e=>ff('attendees')(e.target.value)}
+            placeholder="e.g. Mr. Eric Johnson (Client), John Tan (TDI Workspace)"
+            style={{...iSm,width:'100%'}}/>
+        </div>
+      </div>
+
+      {/* Notes */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'18px 20px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+          <div>
+            <label style={lbl}>Discussion Points</label>
+            <div style={{fontSize:11,color:T.dim,marginBottom:8}}>One point per line — each becomes a bullet • in the report</div>
+            <textarea value={form.discussionNotes||''} onChange={e=>ff('discussionNotes')(e.target.value)}
+              rows={9} placeholder={'Confirmed kitchen layout per approved drawings\nClient requested sliding door for master bedroom\nAircon positions to be finalised by next week'}
+              style={{...iStyle,resize:'vertical',lineHeight:1.65,width:'100%'}}/>
+          </div>
+          <div>
+            <label style={lbl}>Action Items</label>
+            <div style={{fontSize:11,color:T.dim,marginBottom:8}}>One item per line — shown as □ checkboxes to client</div>
+            <textarea value={form.actionItems||''} onChange={e=>ff('actionItems')(e.target.value)}
+              rows={9} placeholder={'TDI: Provide updated door quotation by 3 Jun\nClient: Confirm aircon brand preference by 5 Jun\nTDI: Submit revised layout drawing'}
+              style={{...iStyle,resize:'vertical',lineHeight:1.65,width:'100%'}}/>
+          </div>
+        </div>
+      </div>
+
+      {/* Photos */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'18px 20px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+          <div>
+            <span style={{fontSize:14,fontWeight:700,color:T.text}}>Site Photos</span>
+            <span style={{fontSize:12,color:T.dim,marginLeft:8}}>{(form.photos||[]).length} added</span>
+          </div>
+          <button onClick={()=>photoRef.current.click()}
+            style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'7px 14px',
+              fontSize:12,fontWeight:600,color:T.secondary,cursor:'pointer',
+              display:'flex',alignItems:'center',gap:6,fontFamily:'inherit'}}>
+            <Camera size={13}/>{uploading?'Uploading…':'Add Photos'}
+          </button>
+        </div>
+        <input ref={photoRef} type="file" accept="image/*" multiple style={{display:'none'}}
+          onChange={e=>{if(e.target.files.length)handlePhotos(e.target.files);e.target.value='';}}/>
+        {uploading&&(
+          <div style={{display:'flex',alignItems:'center',gap:8,padding:'10px',background:T.bg,
+            borderRadius:8,fontSize:12,color:T.muted,marginBottom:10}}>
+            <Loader2 size={13} style={{animation:'spin 1s linear infinite'}}/>
+            Uploading photos to cloud…
+          </div>
+        )}
+        {(form.photos||[]).length>0?(
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:12}}>
+            {form.photos.map((ph,i)=>(
+              <div key={i}>
+                <div style={{position:'relative',borderRadius:10,overflow:'hidden'}}>
+                  <img src={ph.url} style={{width:'100%',height:130,objectFit:'cover',display:'block'}}/>
+                  <button onClick={()=>setForm(p=>({...p,photos:p.photos.filter((_,ii)=>ii!==i)}))}
+                    style={{position:'absolute',top:6,right:6,background:'rgba(0,0,0,0.55)',border:'none',
+                      borderRadius:50,width:24,height:24,color:'#fff',fontSize:13,cursor:'pointer',
+                      display:'flex',alignItems:'center',justifyContent:'center'}}>×</button>
+                </div>
+                <input value={ph.caption||''} onChange={e=>{
+                  const photos=[...(form.photos||[])];
+                  photos[i]={...photos[i],caption:e.target.value};
+                  setForm(p=>({...p,photos}));
+                }} placeholder="Caption (optional)"
+                  style={{...iSm,width:'100%',marginTop:6,fontSize:11}}/>
+              </div>
+            ))}
+          </div>
+        ):(
+          <div onClick={()=>photoRef.current.click()}
+            style={{border:`2px dashed ${T.borderLight}`,borderRadius:12,padding:'32px',
+              textAlign:'center',cursor:'pointer',color:T.dim}}>
+            <Camera size={28} style={{margin:'0 auto 10px',display:'block',opacity:0.4}}/>
+            <div style={{fontSize:13,fontWeight:600}}>Tap to add site photos</div>
+            <div style={{fontSize:11,marginTop:4}}>JPG, PNG — multiple files allowed</div>
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div style={{display:'flex',gap:10,justifyContent:'flex-end',flexWrap:'wrap'}}>
+        <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
+        <Btn onClick={()=>onSave(form)}>Save Report</Btn>
+      </div>
+    </div>
+  );
+}
+
+function SiteReports({reports,setReports,projects,acctSettings,isAdmin,activeUser,onShowToast}){
+  const [editing,setEditing]=useState(null);
+  const [filterProj,setFilterProj]=useState('all');
+  const [search,setSearch]=useState('');
+  const [ackModal,setAckModal]=useState(null);
+
+  const saveReport=r=>{
+    const exists=(reports||[]).find(x=>x.id===r.id);
+    const upd=exists?(reports||[]).map(x=>x.id===r.id?r:x):[...(reports||[]),r];
+    setReports(upd);saveS('siteReports',upd);setEditing(null);
+    onShowToast?.(`Report "${r.title}" saved`);
+  };
+
+  const deleteReport=id=>{
+    if(!window.confirm('Delete this report? This cannot be undone.'))return;
+    const upd=(reports||[]).filter(r=>r.id!==id);
+    setReports(upd);saveS('siteReports',upd);
+  };
+
+  const sendForAck=r=>{
+    const token=r.ackToken||uid();
+    const link=window.location.href.split('?')[0]+'?ack='+token;
+    if(!r.ackToken){
+      const upd={...r,ackToken:token,status:r.status==='Draft'?'Sent':r.status};
+      const all=(reports||[]).map(x=>x.id===r.id?upd:x);
+      setReports(all);saveS('siteReports',all);
+      setAckModal({report:upd,link});
+    } else {
+      setAckModal({report:r,link});
+    }
+  };
+
+  const startCreate=()=>{
+    const today=new Date().toISOString().slice(0,10);
+    const projId=projects.filter(p=>!p.archived&&p.status==='In Progress').slice(0,1)[0]?.id||'';
+    const n=((reports||[]).filter(r=>r.projectId===projId).length)+1;
+    setEditing({
+      id:uid(),projectId:projId,title:`Site Visit #${n}`,
+      date:today,time:'',attendees:'',
+      discussionNotes:'',actionItems:'',
+      photos:[],status:'Draft',
+      ackToken:null,acknowledgedBy:null,acknowledgedAt:null,
+      createdBy:activeUser?.name||'',
+    });
+  };
+
+  if(editing) return <SiteReportEditor report={editing} onSave={saveReport} onCancel={()=>setEditing(null)} projects={projects} allReports={reports||[]}/>;
+
+  const statusColor=s=>({Draft:T.dim,Sent:T.info,Acknowledged:T.success}[s]||T.dim);
+  const allR=reports||[];
+
+  const projsWithReports=[...new Set(allR.map(r=>r.projectId))].map(pid=>projects.find(p=>p.id===pid)).filter(Boolean);
+
+  const filtered=allR.filter(r=>{
+    const proj=projects.find(p=>p.id===r.projectId);
+    const txt=(r.title+' '+(proj?.name||'')+' '+(r.attendees||'')+' '+r.status).toLowerCase();
+    if(search&&!txt.includes(search.toLowerCase()))return false;
+    if(filterProj!=='all'&&r.projectId!==filterProj)return false;
+    return true;
+  }).sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+      {/* Toolbar */}
+      <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+        <div style={{flex:1,minWidth:200,position:'relative'}}>
+          <Search size={13} style={{position:'absolute',left:11,top:'50%',transform:'translateY(-50%)',color:T.dim}}/>
+          <input value={search} onChange={e=>setSearch(e.target.value)}
+            placeholder="Search reports…" style={{...iStyle,paddingLeft:33}}/>
+        </div>
+        <Btn onClick={startCreate}><Plus size={13}/>New Report</Btn>
+      </div>
+
+      {/* Project filter */}
+      {projsWithReports.length>0&&(
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+          {[{id:'all',name:'All Projects'},...projsWithReports].map(p=>(
+            <button key={p.id} onClick={()=>setFilterProj(p.id)}
+              style={{padding:'5px 14px',borderRadius:20,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit',
+                border:`1px solid ${filterProj===p.id?T.accent:T.borderLight}`,
+                background:filterProj===p.id?T.accent:T.bg,
+                color:filterProj===p.id?T.bg:T.muted}}>
+              {p.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Stats */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>
+        {[
+          {l:'Total Reports',v:allR.length,c:T.accent},
+          {l:'Sent to Client',v:allR.filter(r=>r.status==='Sent').length,c:T.info},
+          {l:'Acknowledged',v:allR.filter(r=>r.status==='Acknowledged').length,c:T.success},
+        ].map(({l,v,c})=>(
+          <div key={l} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:12,padding:'14px 16px'}}>
+            <div style={{fontSize:26,fontWeight:900,color:c,lineHeight:1,marginBottom:4}}>{v}</div>
+            <div style={{fontSize:11,color:T.dim}}>{l}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* List */}
+      {filtered.length===0?(
+        <div style={{textAlign:'center',padding:'40px 20px',color:T.dim}}>
+          <ClipboardList size={32} style={{margin:'0 auto 12px',display:'block',opacity:0.3}}/>
+          <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>No reports yet</div>
+          <div style={{fontSize:12}}>Create a site report after each client visit to keep a record of discussions.</div>
+        </div>
+      ):(
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {filtered.map(r=>{
+            const proj=projects.find(p=>p.id===r.projectId);
+            const photoCount=(r.photos||[]).length;
+            const bulletCount=(r.discussionNotes||'').split('\n').filter(l=>l.trim()).length;
+            const actionCount=(r.actionItems||'').split('\n').filter(l=>l.trim()).length;
+            const fmtD=d=>d?new Date(d).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}):'—';
+            return(
+              <div key={r.id} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,
+                padding:'16px 18px',display:'flex',alignItems:'flex-start',gap:14,flexWrap:'wrap'}}>
+                <div style={{flex:1,minWidth:200}}>
+                  <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:4,flexWrap:'wrap'}}>
+                    <span style={{fontSize:13,fontWeight:700,color:T.text}}>{r.title}</span>
+                    <span style={{fontSize:10,fontWeight:700,padding:'2px 8px',borderRadius:10,
+                      background:`${statusColor(r.status)}18`,color:statusColor(r.status),
+                      textTransform:'uppercase',letterSpacing:'0.07em'}}>
+                      {r.status}
+                    </span>
+                    {r.acknowledgedAt&&<span style={{fontSize:10,fontWeight:700,color:T.success}}>✓ Ack'd</span>}
+                  </div>
+                  <div style={{fontSize:13,fontWeight:600,color:T.secondary}}>{proj?.name||'—'}</div>
+                  <div style={{fontSize:11,color:T.muted}}>
+                    {fmtD(r.date)}{r.time?' · '+r.time:''}
+                    {r.attendees?' · '+r.attendees:''}
+                  </div>
+                  <div style={{fontSize:11,color:T.dim,marginTop:2,display:'flex',gap:10}}>
+                    {bulletCount>0&&<span>{bulletCount} discussion point{bulletCount!==1?'s':''}</span>}
+                    {actionCount>0&&<span>{actionCount} action item{actionCount!==1?'s':''}</span>}
+                    {photoCount>0&&<span>{photoCount} photo{photoCount!==1?'s':''}</span>}
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:6,flexWrap:'wrap',flexShrink:0}}>
+                  <button onClick={()=>setEditing(r)}
+                    style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'7px 12px',
+                      fontSize:12,fontWeight:600,color:T.secondary,cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontFamily:'inherit'}}>
+                    <Edit3 size={12}/>Edit
+                  </button>
+                  <button onClick={()=>sendForAck(r)}
+                    style={{background:r.acknowledgedAt?'rgba(45,122,79,0.08)':r.ackToken?'rgba(26,130,190,0.08)':'rgba(26,26,26,0.06)',
+                      border:`1px solid ${r.acknowledgedAt?'rgba(45,122,79,0.3)':r.ackToken?'rgba(26,130,190,0.3)':T.borderLight}`,
+                      borderRadius:8,padding:'7px 12px',fontSize:12,fontWeight:600,
+                      color:r.acknowledgedAt?T.success:r.ackToken?T.info:T.secondary,
+                      cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontFamily:'inherit'}}>
+                    {r.acknowledgedAt?'✓ Acknowledged':r.ackToken?'Resend Link':'Send to Client'}
+                  </button>
+                  {isAdmin&&(
+                    <button onClick={()=>deleteReport(r.id)}
+                      style={{background:'#FEF4F3',border:'1px solid #F5C8C4',borderRadius:8,padding:'7px 10px',
+                        fontSize:12,color:T.danger,cursor:'pointer',display:'flex',alignItems:'center',fontFamily:'inherit'}}>
+                      <Trash2 size={12}/>
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Ack modal */}
+      {ackModal&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,
+          display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:T.card,borderRadius:18,padding:'28px 24px',maxWidth:480,width:'100%',
+            boxShadow:'0 20px 60px rgba(0,0,0,0.25)'}}>
+            <div style={{fontSize:17,fontWeight:700,color:T.text,marginBottom:4}}>Share Report Link</div>
+            <div style={{fontSize:13,color:T.muted,marginBottom:20}}>
+              {ackModal.report.title} · {ackModal.report.date&&new Date(ackModal.report.date).toLocaleDateString('en-SG',{dateStyle:'medium'})}
+            </div>
+            {ackModal.report.acknowledgedAt&&(
+              <div style={{background:'rgba(45,122,79,0.08)',border:'1px solid rgba(45,122,79,0.3)',
+                borderRadius:8,padding:'10px 14px',fontSize:12,color:T.success,marginBottom:14,fontWeight:600}}>
+                ✓ Acknowledged by {ackModal.report.acknowledgedBy} · {new Date(ackModal.report.acknowledgedAt).toLocaleDateString('en-SG',{dateStyle:'medium'})}
+              </div>
+            )}
+            <div style={{padding:'12px 14px',background:T.bg,border:`1px solid ${T.borderLight}`,
+              borderRadius:10,fontSize:12,color:T.secondary,fontFamily:'monospace',wordBreak:'break-all',
+              lineHeight:1.6,marginBottom:14,userSelect:'all'}}>
+              {ackModal.link}
+            </div>
+            <div style={{display:'flex',gap:8,marginBottom:20,flexWrap:'wrap'}}>
+              <button onClick={()=>{navigator.clipboard.writeText(ackModal.link);onShowToast?.('Link copied!');}}
+                style={{flex:1,padding:'10px 16px',background:T.accent,color:T.bg,border:'none',
+                  borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                Copy Link
+              </button>
+              <button onClick={()=>{
+                const co=getCo(acctSettings);
+                const msg=`Hi, please find the site visit report for ${ackModal.report.title} from ${co.name}.\n\nClick the link below to review the discussion points, action items and photos — then confirm your acknowledgement:\n${ackModal.link}`;
+                window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');
+              }}
+                style={{flex:1,padding:'10px 16px',background:'#25D366',color:'#fff',border:'none',
+                  borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>
+                💬 WhatsApp
+              </button>
+            </div>
+            <button onClick={()=>setAckModal(null)}
               style={{width:'100%',padding:'10px',background:'transparent',border:`1px solid ${T.borderLight}`,
                 borderRadius:8,fontSize:13,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>
               Close
@@ -11824,6 +12419,7 @@ const ALL_NAV=[
   {id:'projects',    label:'Projects',         Icon:FolderOpen,      group:'project'},
   {id:'payments',    label:'Client Payments',  Icon:CreditCard,      group:'project'},
   {id:'quotations',  label:'Quotations & VO',  Icon:FileSpreadsheet, group:'project'},
+  {id:'sitereports', label:'Site Reports',     Icon:ClipboardList,   group:'project'},
   {id:'reports',     label:'Reports',          Icon:BarChart3,       group:'project'},
   {id:'warranty',    label:'Warranty',         Icon:CheckCircle,     group:'project'},
   // Group 2 — Expenses (amber accent)
@@ -11887,6 +12483,7 @@ export default function App(){
   });
   const [warranties,setWarranties]=useState(SEED_WARRANTIES);
   const [quotes,setQuotes]=useState([]);
+  const [siteReports,setSiteReports]=useState([]);
   const [trash,setTrash]=useState([]);
   const [actionLog,setActionLog]=useState([]); // audit log — 6 months of user actions
   const [toast,setToast]=useState(null);
@@ -12139,7 +12736,7 @@ export default function App(){
   const loadAllData = useCallback(async()=>{
     setSyncing(true);
     try{
-      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt]=await Promise.all([
+      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt,sr]=await Promise.all([
         loadS('projects',SEED_PROJ),
         loadS('invoices',SEED_INV),
         loadS('payments',SEED_PAY),
@@ -12155,6 +12752,7 @@ export default function App(){
         loadS('actionLog',[]),
         loadS('notices',[]),
         loadS('quotes',[]),
+        loadS('siteReports',[]),
       ]);
       let finalProjects = Array.isArray(p) ? p : SEED_PROJ;
       // Rehydrate quotation files and VO files from separate per-project keys
@@ -12215,6 +12813,7 @@ export default function App(){
       try{ localStorage.setItem('rl_cache_users',JSON.stringify(cleanUsers)); }catch{}
       setWarranties(Array.isArray(ws)?ws:SEED_WARRANTIES);
       setQuotes(Array.isArray(qt)?qt:[]);
+      setSiteReports(Array.isArray(sr)?sr:[]);
       setAcctSettings({...SEED_ACCT_SETTINGS,...(as&&typeof as==='object'?as:{})});
       setSiteWorkers(Array.isArray(sw)?sw:SEED_WORKERS);
       setAttendance(Array.isArray(att)?att:SEED_ATTENDANCE);
@@ -12337,7 +12936,8 @@ export default function App(){
     </div>
   );
 
-  // Digital acceptance link — bypass login entirely
+  // Digital acknowledgement links — bypass login entirely
+  if(_ACK_TOKEN) return <SiteReportAckPage token={_ACK_TOKEN}/>;
   if(_ACCEPT_TOKEN) return <QuoteAcceptancePage token={_ACCEPT_TOKEN}/>;
 
   // Not logged in — show main login screen
@@ -12721,6 +13321,7 @@ export default function App(){
           {tab==='commissions'&&<Commissions projects={projects} setProjects={setProjects} invoices={invoices} isAdmin={isAdmin} users={users}/>}
           {tab==='claims'&&<StaffClaims claims={staffClaims} setClaims={setStaffClaims} projects={userProjects} users={users} activeUser={activeUser} isAdmin={isAdmin} invoices={invoices} setInvoices={setInvoices} acctSettings={acctSettings} trash={trash} setTrash={setTrash}/>}
           {tab==='quotations'&&<Quotations quotes={quotes} setQuotes={setQuotes} projects={userProjects} isAdmin={isAdmin} acctSettings={acctSettings} onShowToast={handleShowToast}/>}
+          {tab==='sitereports'&&<SiteReports reports={siteReports} setReports={setSiteReports} projects={userProjects} acctSettings={acctSettings} isAdmin={isAdmin} activeUser={activeUser} onShowToast={handleShowToast}/>}
           {tab==='warranty'&&<Warranty warranties={warranties} setWarranties={setWarranties} projects={projects} isAdmin={isAdmin} acctSettings={acctSettings}/>}
           {tab==='workers'&&<WorkerAdmin siteWorkers={siteWorkers} setSiteWorkers={setSiteWorkers} attendance={attendance} setAttendance={setAttendance} projects={projects} invoices={invoices} setInvoices={setInvoices} claims={workerClaims} setClaims={setWorkerClaims} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='checkin'&&<WorkerLoginScreen siteWorkers={siteWorkers} onLogin={(w)=>setWorkerSession(w)} onAdminLogin={()=>setTab('dashboard')} acctSettings={acctSettings}/>}
