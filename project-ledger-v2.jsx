@@ -7250,7 +7250,7 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
     {id:'invoices',label:'Invoices'},
     {id:'payments',label:'Payments'},
     {id:'contacts',label:'Contacts'},
-    {id:'reports',label:'Reports'},
+    {id:'reports',label:'Project Report'},
     {id:'commissions',label:'Commissions'},
     {id:'warranty',label:'Warranty'},
     {id:'workers',label:'Site Workers'},
@@ -8698,7 +8698,7 @@ function SiteReportAckPage({token}){
           {co.address&&<div style={{fontSize:11,color:'#B8B2A8'}}>{co.address}</div>}
           <div style={{marginTop:10,display:'inline-block',background:'#F0EDE8',padding:'4px 14px',borderRadius:20,
             fontSize:11,fontWeight:700,color:'#7A7468',textTransform:'uppercase',letterSpacing:'0.1em'}}>
-            Site Visit Report
+            Site Meeting
           </div>
         </div>
 
@@ -8809,7 +8809,7 @@ function SiteReportAckPage({token}){
         )}
 
         <div style={{textAlign:'center',marginTop:20,fontSize:11,color:'#C8C4BC'}}>
-          Site Visit Report issued by {co.name} · UEN {co.uen||'—'}
+          Site Meeting issued by {co.name} · UEN {co.uen||'—'}
         </div>
       </div>
 
@@ -9505,11 +9505,57 @@ function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast}
   );
 }
 
-function SiteReportEditor({report, onSave, onCancel, projects, allReports}){
+function SiteReportEditor({report, onSave, onCancel, projects, allReports, users}){
   const [form,setForm]=useState({...report});
   const [uploading,setUploading]=useState(false);
   const photoRef=useRef();
   const ff=k=>v=>setForm(p=>({...p,[k]:v}));
+
+  // Attendees — checkbox system
+  const [selectedNames,setSelectedNames]=useState(()=>
+    (report.attendees||'').split(/,\s*/).map(s=>s.trim()).filter(Boolean)
+  );
+  const [addText,setAddText]=useState('');
+
+  const selProj=useMemo(()=>projects.find(p=>p.id===form.projectId),[form.projectId,projects]);
+
+  const suggestions=useMemo(()=>{
+    const list=[];
+    if(selProj?.client) list.push({name:selProj.client,role:'Client'});
+    (users||[]).filter(u=>u.active&&(u.role==='designer'||u.role==='pm')&&u.id!=='__sa__')
+      .forEach(u=>list.push({name:u.name,role:u.role==='designer'?'Designer':'Project Manager'}));
+    const prevNames=new Set();
+    (allReports||[]).filter(r=>r.projectId===form.projectId&&r.id!==report.id)
+      .forEach(r=>(r.attendees||'').split(/,\s*/).map(s=>s.trim()).filter(Boolean)
+        .forEach(n=>{if(!list.find(l=>l.name===n))prevNames.add(n);}));
+    prevNames.forEach(n=>list.push({name:n,role:'From previous meeting'}));
+    return list;
+  },[selProj,users,allReports,form.projectId,report.id]);
+
+  // Names in selectedNames but not in suggestions appear as custom checkboxes
+  const allCheckboxEntries=[
+    ...suggestions,
+    ...selectedNames.filter(n=>!suggestions.find(s=>s.name===n)).map(n=>({name:n,role:'Added'})),
+  ];
+
+  const toggleName=name=>{
+    setSelectedNames(prev=>{
+      const next=prev.includes(name)?prev.filter(n=>n!==name):[...prev,name];
+      setForm(p=>({...p,attendees:next.join(', ')}));
+      return next;
+    });
+  };
+
+  const addPerson=()=>{
+    if(!addText.trim()) return;
+    const names=addText.split(',').map(s=>s.trim()).filter(n=>n&&!selectedNames.includes(n));
+    setSelectedNames(prev=>{
+      const next=[...prev,...names];
+      setForm(p=>({...p,attendees:next.join(', ')}));
+      return next;
+    });
+    setAddText('');
+  };
 
   const handlePhotos=async(files)=>{
     setUploading(true);
@@ -9540,10 +9586,10 @@ function SiteReportEditor({report, onSave, onCancel, projects, allReports}){
         </button>
         <div style={{flex:1}}>
           <div style={{fontSize:17,fontWeight:700,color:T.text,letterSpacing:'-0.02em'}}>
-            {report.id?'Edit Report':'New Site Report'}
+            {report.id?'Edit Meeting':'New Site Meeting'}
           </div>
         </div>
-        <Btn onClick={()=>onSave(form)}>Save Report</Btn>
+        <Btn onClick={()=>onSave(form)}>Save Meeting</Btn>
       </div>
 
       {/* Details */}
@@ -9576,12 +9622,57 @@ function SiteReportEditor({report, onSave, onCancel, projects, allReports}){
           <input value={form.title||''} onChange={e=>ff('title')(e.target.value)}
             placeholder="e.g. Site Visit #1 — Carpentry Discussion" style={{...iSm,width:'100%'}}/>
         </div>
-        <div>
-          <label style={lbl}>Present at Meeting</label>
-          <input value={form.attendees||''} onChange={e=>ff('attendees')(e.target.value)}
-            placeholder="e.g. Mr. Eric Johnson (Client), John Tan (TDI Workspace)"
-            style={{...iSm,width:'100%'}}/>
+      </div>
+
+      {/* Present at meeting */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'18px 20px'}}>
+        <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:14}}>
+          Present at Meeting
         </div>
+        {allCheckboxEntries.length>0&&(
+          <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:14}}>
+            {allCheckboxEntries.map((s,i)=>{
+              const checked=selectedNames.includes(s.name);
+              const roleColor={Client:T.success,'Designer':'#7c3aed','Project Manager':T.info,'From previous meeting':T.muted,Added:T.dim}[s.role]||T.dim;
+              return(
+                <label key={i} onClick={()=>toggleName(s.name)}
+                  style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',
+                    borderRadius:10,cursor:'pointer',userSelect:'none',
+                    background:checked?(T.bg==='#141412'?'rgba(26,26,26,0.5)':T.accentLight):'transparent',
+                    border:`1.5px solid ${checked?T.accent:T.borderLight}`,
+                    transition:'all 0.12s'}}>
+                  <div style={{width:18,height:18,borderRadius:5,flexShrink:0,
+                    border:`2px solid ${checked?T.accent:T.dim}`,
+                    background:checked?T.accent:'transparent',
+                    display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    {checked&&<span style={{color:T.bg,fontSize:11,fontWeight:900,lineHeight:1}}>✓</span>}
+                  </div>
+                  <span style={{fontSize:13,fontWeight:600,color:T.text,flex:1}}>{s.name}</span>
+                  <span style={{fontSize:10,fontWeight:600,color:roleColor,background:`${roleColor}18`,
+                    padding:'2px 8px',borderRadius:8,flexShrink:0}}>{s.role}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <input value={addText} onChange={e=>setAddText(e.target.value)}
+            onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();addPerson();}}}
+            placeholder="Add another person… (Enter or click Add)"
+            style={{...iSm,flex:1}}/>
+          <button onClick={addPerson}
+            style={{padding:'8px 16px',background:T.accent,color:T.bg,border:'none',
+              borderRadius:8,fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit',whiteSpace:'nowrap'}}>
+            + Add
+          </button>
+        </div>
+        {selectedNames.length>0&&(
+          <div style={{marginTop:12,padding:'10px 14px',background:T.bg,borderRadius:8,
+            border:`1px solid ${T.borderLight}`,fontSize:12,color:T.secondary,lineHeight:1.6}}>
+            <span style={{color:T.dim,fontSize:11,marginRight:6}}>Present:</span>
+            {selectedNames.join(' · ')}
+          </div>
+        )}
       </div>
 
       {/* Notes */}
@@ -9661,13 +9752,13 @@ function SiteReportEditor({report, onSave, onCancel, projects, allReports}){
       {/* Actions */}
       <div style={{display:'flex',gap:10,justifyContent:'flex-end',flexWrap:'wrap'}}>
         <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
-        <Btn onClick={()=>onSave(form)}>Save Report</Btn>
+        <Btn onClick={()=>onSave(form)}>Save Meeting</Btn>
       </div>
     </div>
   );
 }
 
-function SiteReports({reports,setReports,projects,acctSettings,isAdmin,activeUser,onShowToast}){
+function SiteReports({reports,setReports,projects,acctSettings,isAdmin,activeUser,onShowToast,users}){
   const [editing,setEditing]=useState(null);
   const [filterProj,setFilterProj]=useState('all');
   const [search,setSearch]=useState('');
@@ -9713,7 +9804,7 @@ function SiteReports({reports,setReports,projects,acctSettings,isAdmin,activeUse
     });
   };
 
-  if(editing) return <SiteReportEditor report={editing} onSave={saveReport} onCancel={()=>setEditing(null)} projects={projects} allReports={reports||[]}/>;
+  if(editing) return <SiteReportEditor report={editing} onSave={saveReport} onCancel={()=>setEditing(null)} projects={projects} allReports={reports||[]} users={users}/>;
 
   const statusColor=s=>({Draft:T.dim,Sent:T.info,Acknowledged:T.success}[s]||T.dim);
   const allR=reports||[];
@@ -9737,7 +9828,7 @@ function SiteReports({reports,setReports,projects,acctSettings,isAdmin,activeUse
           <input value={search} onChange={e=>setSearch(e.target.value)}
             placeholder="Search reports…" style={{...iStyle,paddingLeft:33}}/>
         </div>
-        <Btn onClick={startCreate}><Plus size={13}/>New Report</Btn>
+        <Btn onClick={startCreate}><Plus size={13}/>New Meeting</Btn>
       </div>
 
       {/* Project filter */}
@@ -9773,8 +9864,8 @@ function SiteReports({reports,setReports,projects,acctSettings,isAdmin,activeUse
       {filtered.length===0?(
         <div style={{textAlign:'center',padding:'40px 20px',color:T.dim}}>
           <ClipboardList size={32} style={{margin:'0 auto 12px',display:'block',opacity:0.3}}/>
-          <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>No reports yet</div>
-          <div style={{fontSize:12}}>Create a site report after each client visit to keep a record of discussions.</div>
+          <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>No meetings yet</div>
+          <div style={{fontSize:12}}>Create a site meeting record after each client visit to keep a record of discussions.</div>
         </div>
       ):(
         <div style={{display:'flex',flexDirection:'column',gap:10}}>
@@ -12419,8 +12510,8 @@ const ALL_NAV=[
   {id:'projects',    label:'Projects',         Icon:FolderOpen,      group:'project'},
   {id:'payments',    label:'Client Payments',  Icon:CreditCard,      group:'project'},
   {id:'quotations',  label:'Quotations & VO',  Icon:FileSpreadsheet, group:'project'},
-  {id:'sitereports', label:'Site Reports',     Icon:ClipboardList,   group:'project'},
-  {id:'reports',     label:'Reports',          Icon:BarChart3,       group:'project'},
+  {id:'sitereports', label:'Site Meeting',     Icon:ClipboardList,   group:'project'},
+  {id:'reports',     label:'Project Report',   Icon:BarChart3,       group:'project'},
   {id:'warranty',    label:'Warranty',         Icon:CheckCircle,     group:'project'},
   // Group 2 — Expenses (amber accent)
   {id:'invoices',    label:'Supplier Invoices',Icon:Receipt,         group:'expenses'},
@@ -13321,7 +13412,7 @@ export default function App(){
           {tab==='commissions'&&<Commissions projects={projects} setProjects={setProjects} invoices={invoices} isAdmin={isAdmin} users={users}/>}
           {tab==='claims'&&<StaffClaims claims={staffClaims} setClaims={setStaffClaims} projects={userProjects} users={users} activeUser={activeUser} isAdmin={isAdmin} invoices={invoices} setInvoices={setInvoices} acctSettings={acctSettings} trash={trash} setTrash={setTrash}/>}
           {tab==='quotations'&&<Quotations quotes={quotes} setQuotes={setQuotes} projects={userProjects} isAdmin={isAdmin} acctSettings={acctSettings} onShowToast={handleShowToast}/>}
-          {tab==='sitereports'&&<SiteReports reports={siteReports} setReports={setSiteReports} projects={userProjects} acctSettings={acctSettings} isAdmin={isAdmin} activeUser={activeUser} onShowToast={handleShowToast}/>}
+          {tab==='sitereports'&&<SiteReports reports={siteReports} setReports={setSiteReports} projects={userProjects} acctSettings={acctSettings} isAdmin={isAdmin} activeUser={activeUser} onShowToast={handleShowToast} users={users}/>}
           {tab==='warranty'&&<Warranty warranties={warranties} setWarranties={setWarranties} projects={projects} isAdmin={isAdmin} acctSettings={acctSettings}/>}
           {tab==='workers'&&<WorkerAdmin siteWorkers={siteWorkers} setSiteWorkers={setSiteWorkers} attendance={attendance} setAttendance={setAttendance} projects={projects} invoices={invoices} setInvoices={setInvoices} claims={workerClaims} setClaims={setWorkerClaims} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='checkin'&&<WorkerLoginScreen siteWorkers={siteWorkers} onLogin={(w)=>setWorkerSession(w)} onAdminLogin={()=>setTab('dashboard')} acctSettings={acctSettings}/>}
