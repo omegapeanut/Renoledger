@@ -8967,50 +8967,56 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
         <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:14}}>
           {isVO?'VO':'Quotation'} Reference Number
         </div>
-        <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap',marginBottom:10}}>
-          {/* Prefix (read-only) */}
-          <div style={{width:40}}>
-            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Type</div>
-            <div style={{...iSmall,background:T.bg,color:T.muted,borderRadius:8,
-              border:`1px solid ${T.borderLight}`,textAlign:'center',fontWeight:700,lineHeight:'1.8'}}>
+        {/* Visual segment builder */}
+        <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap',marginBottom:14}}>
+          {/* Type chip */}
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+            <div style={{fontSize:9,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em'}}>Type</div>
+            <div style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,
+              padding:'6px 12px',fontFamily:'monospace',fontWeight:800,fontSize:14,color:T.muted,minWidth:40,textAlign:'center'}}>
               {isVO?'VO':'Q'}
             </div>
           </div>
-          {/* YYMM — derived from date */}
-          <div style={{width:64}}>
-            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>YY MM</div>
-            <div style={{...iSmall,background:T.bg,color:T.muted,borderRadius:8,
-              border:`1px solid ${T.borderLight}`,textAlign:'center',fontFamily:'monospace',lineHeight:'1.8'}}>
+          <span style={{color:T.dim,fontSize:18,fontWeight:300,marginTop:14}}>–</span>
+          {/* YYMM chip */}
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+            <div style={{fontSize:9,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em'}}>Year/Month</div>
+            <div style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,
+              padding:'6px 12px',fontFamily:'monospace',fontWeight:700,fontSize:14,color:T.muted,minWidth:52,textAlign:'center'}}>
               {(()=>{const d=new Date(form.date||Date.now());return String(d.getFullYear()).slice(-2)+String(d.getMonth()+1).padStart(2,'0');})()}
             </div>
           </div>
-          {/* Client Code */}
-          <div style={{width:80}}>
-            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Client Code (2–3 letters)</div>
+          <span style={{color:T.dim,fontSize:18,fontWeight:300,marginTop:14}}>–</span>
+          {/* Client Code — editable */}
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+            <div style={{fontSize:9,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em'}}>Client Code</div>
             <input value={form.clientCode||''} maxLength={3}
               onChange={e=>updateNumberPart('clientCode',e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,''))}
-              placeholder="EJ"
-              style={{...iSmall,width:'100%',fontFamily:'monospace',fontWeight:700,
-                textTransform:'uppercase',letterSpacing:'0.1em'}}/>
-            <div style={{fontSize:10,color:T.dim,marginTop:3}}>initials from client/address</div>
+              placeholder="XX"
+              style={{...iSmall,width:60,fontFamily:'monospace',fontWeight:800,fontSize:14,
+                textTransform:'uppercase',letterSpacing:'0.12em',textAlign:'center',padding:'6px 8px'}}/>
           </div>
-          {/* Sequence */}
-          <div style={{width:64}}>
-            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Seq.</div>
+          <span style={{color:T.dim,fontSize:18,fontWeight:300,marginTop:14}}>–</span>
+          {/* Sequence — editable */}
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+            <div style={{fontSize:9,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em'}}>Seq.</div>
             <input type="number" min={1} max={99} value={form.sequence||1}
               onChange={e=>updateNumberPart('sequence',parseInt(e.target.value)||1)}
-              style={{...iNum,width:'100%'}}/>
-            <div style={{fontSize:10,color:T.dim,marginTop:3}}>01, 02, 03…</div>
+              style={{...iNum,width:58,textAlign:'center',padding:'6px 8px',fontSize:14,fontFamily:'monospace',fontWeight:800}}/>
           </div>
-          {/* Assembled result */}
-          <div style={{flex:1,minWidth:160}}>
-            <div style={{fontSize:11,color:T.dim,marginBottom:5}}>Generated Number</div>
-            <div style={{...iSmall,background:T.bg,borderRadius:8,border:`2px solid ${T.accent}`,
-              fontFamily:'monospace',fontWeight:900,fontSize:15,color:T.text,letterSpacing:'0.05em',
-              padding:'7px 12px',lineHeight:'1.5'}}>
+          {/* Arrow + Result */}
+          <span style={{color:T.dim,fontSize:18,fontWeight:300,marginTop:14}}>→</span>
+          <div style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:4}}>
+            <div style={{fontSize:9,color:T.dim,textTransform:'uppercase',letterSpacing:'0.08em'}}>Generated</div>
+            <div style={{background:T.accentLight,border:`2px solid ${T.accent}`,borderRadius:10,
+              padding:'6px 16px',fontFamily:'monospace',fontWeight:900,fontSize:16,color:T.text,
+              letterSpacing:'0.06em',whiteSpace:'nowrap'}}>
               {form.quoteNo}
             </div>
           </div>
+        </div>
+        <div style={{fontSize:11,color:T.dim,marginBottom:10}}>
+          Client Code: 2–3 letter initials from client name or address
         </div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginTop:6}}>
           <div>
