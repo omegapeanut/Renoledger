@@ -12814,6 +12814,23 @@ export default function App(){
     setTab('dashboard');
   },[activeUserId]);
 
+  // Auto-logout after 6 hours on the same tab (resets on every tab switch or login)
+  const lastTabChangeRef = useRef(Date.now());
+  useEffect(()=>{ lastTabChangeRef.current = Date.now(); },[tab, activeUserId]);
+  useEffect(()=>{
+    if(!activeUserId || isSuperAdmin) return;
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+    const check = setInterval(()=>{
+      if(Date.now() - lastTabChangeRef.current >= SIX_HOURS){
+        if(activeUserId && !isSuperAdmin) clearS(safePresenceKey(activeUserId));
+        setActiveUserId(null);
+        setTab('dashboard');
+        setToast({message:'Session expired — you were logged out after 6 hours of inactivity.'});
+      }
+    }, 60000);
+    return ()=>clearInterval(check);
+  },[activeUserId, isSuperAdmin]);
+
 
   // Log a user action — kept 6 months, saved to Firebase
   const logAction = useCallback((action, detail, snapshot=null)=>{
