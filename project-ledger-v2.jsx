@@ -8,7 +8,7 @@ import {
   RotateCcw, Trash, AlertCircle, Info,
   Building, FileSpreadsheet, Calendar, Download, Settings,
   LogIn, LogOut, Star, Terminal, Database, RefreshCw, ClipboardList,
-  Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine
+  Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine, Link2
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -9548,8 +9548,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   });
   const [symSize,setSymSize]=useState(takeoff?.symSize||20);
   const [activeTool,setActiveTool]=useState('LP');
-  const [mode,setMode]=useState('place'); // 'place' | 'select'
+  const [mode,setMode]=useState('place'); // 'place' | 'select' | 'link'
   const [selectedIds,setSelectedIds]=useState(new Set());
+  const [links,setLinks]=useState(takeoff?.links||[]); // [{id,fromId,toId,page}]
+  const [linkStartId,setLinkStartId]=useState(null); // pending link source markerId
   const [currentPage,setCurrentPage]=useState(1);
   const [totalPages,setTotalPages]=useState(0);
   const [scale,setScale]=useState(1.5);
@@ -9606,7 +9608,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   const deleteSelected=useCallback(()=>{
     if(!selectedIds.size) return;
     pushHistory(markers.filter(m=>!selectedIds.has(m.id)));
+    setLinks(prev=>prev.filter(l=>!selectedIds.has(l.fromId)&&!selectedIds.has(l.toId)));
     setSelectedIds(new Set());
+    setLinkStartId(null);
   },[markers,selectedIds,pushHistory]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
@@ -9693,7 +9697,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   },[markers]);
 
   // ── Overlay ───────────────────────────────────────────────────────────────
-  useEffect(()=>{drawOverlay();},[markers,selectedIds,cursorPos,currentPage,activeTool,mode,prefixes,scale,symSize,legendPos,counts]);
+  useEffect(()=>{drawOverlay();},[markers,selectedIds,cursorPos,currentPage,activeTool,mode,prefixes,scale,symSize,legendPos,counts,links,linkStartId]);
 
   const drawOverlay=()=>{
     const canvas=overlayRef.current; if(!canvas) return;
@@ -9710,7 +9714,41 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
       }
       drawTakeoffSymbol(ctx,m.type,cx,cy,sz,color);
       drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes),cx,cy,sz,color);
+      // Highlight link start
+      if(mode==='link'&&m.id===linkStartId){
+        ctx.save(); ctx.strokeStyle='#f97316'; ctx.lineWidth=2.5; ctx.setLineDash([3,2]);
+        ctx.beginPath(); ctx.arc(cx,cy,sz/2+8,0,Math.PI*2); ctx.stroke(); ctx.restore();
+      }
     });
+    // ── Switch leg lines ──────────────────────────────────────────────────────
+    links.filter(l=>l.page===currentPage).forEach(l=>{
+      const fm=markers.find(m=>m.id===l.fromId), tm=markers.find(m=>m.id===l.toId);
+      if(!fm||!tm) return;
+      const x1=fm.x*canvas.width, y1=fm.y*canvas.height;
+      const x2=tm.x*canvas.width, y2=tm.y*canvas.height;
+      ctx.save();
+      ctx.strokeStyle='#16a34a'; ctx.lineWidth=1.8; ctx.setLineDash([6,4]);
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      // Midpoint badge
+      const mx=(x1+x2)/2, my=(y1+y2)/2;
+      ctx.setLineDash([]); ctx.fillStyle='#16a34a';
+      ctx.beginPath(); ctx.arc(mx,my,7,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.font='bold 8px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('SW',mx,my);
+      ctx.restore();
+    });
+    // Ghost line from linkStart to cursor in link mode
+    if(mode==='link'&&linkStartId&&cursorPos){
+      const sm=markers.find(m=>m.id===linkStartId);
+      if(sm){
+        ctx.save();
+        ctx.strokeStyle='#f97316'; ctx.lineWidth=1.5; ctx.setLineDash([5,4]);
+        ctx.beginPath();
+        ctx.moveTo(sm.x*canvas.width,sm.y*canvas.height);
+        ctx.lineTo(cursorPos.x*canvas.width,cursorPos.y*canvas.height);
+        ctx.stroke(); ctx.restore();
+      }
+    }
     if(cursorPos&&mode==='place'){
       const cx=cursorPos.x*canvas.width, cy=cursorPos.y*canvas.height;
       const tt=TAKEOFF_TYPES.find(t=>t.id===activeTool);
@@ -9810,12 +9848,22 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
     const canvas=overlayRef.current; if(!canvas) return;
     const rect=canvas.getBoundingClientRect();
     const nx=(e.clientX-rect.left)/canvas.width, ny=(e.clientY-rect.top)/canvas.height;
+    const sz=Math.round(symSize*Math.max(0.6,scale/1.5));
+    const thr=(sz/canvas.width)*1.6;
+    const hit=markers.filter(m=>m.page===currentPage).find(m=>Math.abs(m.x-nx)<thr&&Math.abs(m.y-ny)<thr);
     if(mode==='place'){
       pushHistory([...markers,{id:uid(),page:currentPage,x:nx,y:ny,type:activeTool}]);
+    } else if(mode==='link'){
+      if(!hit){setLinkStartId(null);return;} // click empty → cancel
+      if(!linkStartId){setLinkStartId(hit.id);return;} // first click → set start
+      if(hit.id===linkStartId){setLinkStartId(null);return;} // click same → cancel
+      // Toggle link between linkStartId and hit.id
+      const exists=links.find(l=>
+        (l.fromId===linkStartId&&l.toId===hit.id)||(l.fromId===hit.id&&l.toId===linkStartId));
+      if(exists){setLinks(prev=>prev.filter(l=>l.id!==exists.id));}
+      else{setLinks(prev=>[...prev,{id:uid(),fromId:linkStartId,toId:hit.id,page:currentPage}]);}
+      setLinkStartId(null);
     } else {
-      const sz=Math.round(symSize*Math.max(0.6,scale/1.5));
-      const thr=(sz/canvas.width)*1.6;
-      const hit=markers.filter(m=>m.page===currentPage).find(m=>Math.abs(m.x-nx)<thr&&Math.abs(m.y-ny)<thr);
       if(e.shiftKey){
         setSelectedIds(prev=>{const n=new Set(prev);if(hit){if(n.has(hit.id))n.delete(hit.id);else n.add(hit.id);}return n;});
       } else {
@@ -9847,7 +9895,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
       const url=await pdfUploadRef.current;
       if(url) finalPdfUrl=url;
     }
-    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,markers,prefixes,symSize,legendPos,
+    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,markers,links,prefixes,symSize,legendPos,
       updatedAt:new Date().toISOString(),createdAt:takeoff?.createdAt||new Date().toISOString()});
     setSaving(false);
   };
@@ -9887,6 +9935,23 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
             default:   dR(); break;
           }
           page.drawText(getTakeoffLabel(m,markers,prefixes),{x:px+h+2,y:py-3,size:Math.max(5,symSzPt*0.55),font,color:col});
+        });
+      });
+      // ── Switch leg lines ───────────────────────────────────────────────────
+      const linksByPage={};
+      links.forEach(l=>{(linksByPage[l.page]||(linksByPage[l.page]=[])).push(l);});
+      Object.entries(linksByPage).forEach(([pg,lList])=>{
+        const page=pages[parseInt(pg)-1]; if(!page) return;
+        const pw=page.getWidth(), ph=page.getHeight();
+        lList.forEach(l=>{
+          const fm=markers.find(m=>m.id===l.fromId), tm=markers.find(m=>m.id===l.toId);
+          if(!fm||!tm) return;
+          const x1=fm.x*pw, y1=ph-fm.y*ph, x2=tm.x*pw, y2=ph-tm.y*ph;
+          page.drawLine({start:{x:x1,y:y1},end:{x:x2,y:y2},color:rgb(0.09,0.64,0.26),thickness:1,dashArray:[6,4],dashPhase:0});
+          // Midpoint badge
+          const mx=(x1+x2)/2, my=(y1+y2)/2;
+          page.drawCircle({x:mx,y:my,size:5,color:rgb(0.09,0.64,0.26),borderColor:rgb(0.09,0.64,0.26),borderWidth:0.5});
+          page.drawText('SW',{x:mx-4,y:my-3,size:5,font,color:rgb(1,1,1)});
         });
       });
       // ── Legend (bottom-right, page 1) ──────────────────────────────────────
@@ -9956,14 +10021,20 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
         </button>
         {/* Mode */}
         <div style={{display:'flex',border:`1px solid ${T.borderLight}`,borderRadius:8,overflow:'hidden'}}>
-          {[['place','Place',PenLine],['select','Select',MousePointer]].map(([m,l,Icon])=>(
-            <button key={m} onClick={()=>{setMode(m);if(m==='place')setSelectedIds(new Set());}}
+          {[['place','Place',PenLine],['select','Select',MousePointer],['link','Switch Leg',Link2]].map(([m,l,Icon])=>(
+            <button key={m} onClick={()=>{setMode(m);setSelectedIds(new Set());setLinkStartId(null);}}
               style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
                 background:mode===m?T.text:'transparent',color:mode===m?T.bg:T.muted,transition:'all 0.15s'}}>
               <Icon size={11}/>{l}
             </button>
           ))}
         </div>
+        {/* Link mode instructions */}
+        {mode==='link'&&(
+          <span style={{fontSize:11,color:T.muted,fontStyle:'italic'}}>
+            {linkStartId?'Click another point to link, or same point to cancel':'Click a point to start a switch leg'}
+          </span>
+        )}
         {/* Multi-select actions */}
         {mode==='select'&&selCount>0&&(
           <>
