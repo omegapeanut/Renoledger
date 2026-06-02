@@ -9911,15 +9911,19 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       if(pts.length<1) return;
       ctx.save();
       ctx.globalAlpha=alpha;
-      ctx.strokeStyle=color; ctx.lineWidth=Math.max(2,sz/10); ctx.setLineDash([10,6]); ctx.lineCap='round'; ctx.lineJoin='round';
+      ctx.strokeStyle=color; ctx.lineWidth=Math.max(2,sz/10); ctx.setLineDash([]); ctx.lineCap='round'; ctx.lineJoin='round';
       ctx.beginPath();
       pts.forEach((pt,i)=>{
         if(i===0) ctx.moveTo(pt.x*canvas.width,pt.y*canvas.height);
         else ctx.lineTo(pt.x*canvas.width,pt.y*canvas.height);
       });
       ctx.stroke();
-      ctx.setLineDash([]); ctx.fillStyle=color;
-      pts.forEach(pt=>{ctx.beginPath();ctx.arc(pt.x*canvas.width,pt.y*canvas.height,3,0,Math.PI*2);ctx.fill();});
+      // Junction dots at each vertex
+      ctx.fillStyle='#fff'; ctx.setLineDash([]); ctx.lineWidth=1.5; ctx.strokeStyle=color;
+      pts.forEach(pt=>{
+        ctx.beginPath();ctx.arc(pt.x*canvas.width,pt.y*canvas.height,3.5,0,Math.PI*2);
+        ctx.fill(); ctx.stroke();
+      });
       ctx.restore();
     };
     pipes.filter(p=>p.page===currentPage).forEach(p=>{
@@ -9965,8 +9969,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         const row=usedForLegend.length+i;
         const ry=ly+16+row*rowH+rowH/2;
         ctx.save();
-        ctx.strokeStyle=pt.color; ctx.lineWidth=2; ctx.setLineDash([6,3]); ctx.lineCap='round';
+        ctx.strokeStyle=pt.color; ctx.lineWidth=2; ctx.setLineDash([]); ctx.lineCap='round';
         ctx.beginPath(); ctx.moveTo(lx+padX,ry); ctx.lineTo(lx+padX+14,ry); ctx.stroke();
+        ctx.fillStyle='#fff'; ctx.strokeStyle=pt.color; ctx.lineWidth=1.2;
+        ctx.beginPath(); ctx.arc(lx+padX+7,ry,2.5,0,Math.PI*2); ctx.fill(); ctx.stroke();
         ctx.restore();
         ctx.fillStyle='#222'; ctx.font='9px sans-serif';
         ctx.fillText(pt.label,lx+padX+18,ry+3);
@@ -10199,14 +10205,13 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           for(let i=0;i<p.points.length-1;i++){
             const x1=p.points[i].x*pw, y1=ph-p.points[i].y*ph;
             const x2=p.points[i+1].x*pw, y2=ph-p.points[i+1].y*ph;
-            const dx=x2-x1, dy=y2-y1, len=Math.sqrt(dx*dx+dy*dy)||1;
-            let pos=0;
-            while(pos<len){
-              const s=pos/len, e=Math.min((pos+10)/len,1);
-              page.drawLine({start:{x:x1+dx*s,y:y1+dy*s},end:{x:x1+dx*e,y:y1+dy*e},color:col,thickness:1.5});
-              pos+=16; // 10 dash + 6 gap
-            }
+            page.drawLine({start:{x:x1,y:y1},end:{x:x2,y:y2},color:col,thickness:1.5});
           }
+          // Junction dots at each vertex
+          p.points.forEach(pt=>{
+            const px2=pt.x*pw, py2=ph-pt.y*ph;
+            page.drawCircle({x:px2,y:py2,size:2.5,borderColor:col,borderWidth:1,color:rgb(1,1,1)});
+          });
         });
       });
       // ── Legend (bottom-right, page 1) ──────────────────────────────────────
@@ -10261,8 +10266,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           const ry=ly+legendH-padY-15-(row+1)*rowH;
           const [pr2,pg3,pb2]=hexToRgbF(pt.color); const pcol=rgb(pr2,pg3,pb2);
           const sx=lx+padX+1, sy=ry+rowH/2;
-          for(let seg=0;seg<3;seg++) lp.drawLine({start:{x:sx+seg*4,y:sy},end:{x:sx+seg*4+2.5,y:sy},color:pcol,thickness:1.5});
-          lp.drawText(`${pt.label}`,{x:lx+padX+14,y:ry+1,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15)});
+          lp.drawLine({start:{x:sx,y:sy},end:{x:sx+12,y:sy},color:pcol,thickness:1.5});
+          lp.drawCircle({x:sx+6,y:sy,size:2,borderColor:pcol,borderWidth:0.8,color:rgb(1,1,1)});
+          lp.drawText(`${pt.label}`,{x:lx+padX+16,y:ry+1,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15)});
         });
         // total row
         lp.drawLine({start:{x:lx,y:ly+3+rowH},end:{x:lx+legendW,y:ly+3+rowH},color:rgb(0.75,0.75,0.75),thickness:0.5});
@@ -10448,7 +10454,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
                 if(!cnt) return null;
                 return(
                   <div key={pt.id} style={{display:'flex',alignItems:'center',gap:7,marginBottom:5}}>
-                    <svg width={20} height={8}><line x1={0} y1={4} x2={20} y2={4} stroke={pt.color} strokeWidth={2} strokeDasharray="5,3"/></svg>
+                    <svg width={20} height={8}><line x1={0} y1={4} x2={20} y2={4} stroke={pt.color} strokeWidth={2}/><circle cx={10} cy={4} r={2.5} fill="white" stroke={pt.color} strokeWidth={1}/></svg>
                     <span style={{fontSize:10,color:T.muted,flex:1}}>{pt.label}</span>
                     <span style={{fontSize:11,fontWeight:700,color:pt.color}}>×{cnt}</span>
                     <button onClick={()=>setPipes(ps=>ps.filter(p=>!(p.type===pt.id&&p.page===currentPage)))}
