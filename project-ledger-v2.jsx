@@ -263,8 +263,14 @@ function drawTakeoffLabel(ctx, label, cx, cy, sz, color){
   ctx.restore();
 }
 
-// Compute the display label for a marker given the full markers array
-function getTakeoffLabel(marker, markers, prefixes){
+// Compute the display label for a marker.
+// If globalPrefix is provided (plumbing mode), all markers share one running sequence D01…Dxx.
+// Otherwise each type has its own sequence (electrical mode).
+function getTakeoffLabel(marker, markers, prefixes, globalPrefix){
+  if(globalPrefix!==undefined){
+    const idx=markers.findIndex(m=>m.id===marker.id);
+    return globalPrefix+String(idx+1).padStart(2,'0');
+  }
   const sameType=markers.filter(m=>m.type===marker.type);
   const idx=sameType.findIndex(m=>m.id===marker.id);
   const prefix=prefixes[marker.type]||marker.type;
@@ -9664,6 +9670,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     const d={}; symbolTypes.forEach(t=>d[t.id]=t.defaultPrefix); return {...d,...(takeoff?.prefixes||{})};
   });
   const [symSize,setSymSize]=useState(takeoff?.symSize||20);
+  // globalPrefix: used by plumbing for sequential D01…Dxx labelling; undefined = per-type mode (electrical)
+  const [globalPrefix,setGlobalPrefix]=useState(
+    toolKind==='plumbing' ? (takeoff?.globalPrefix??'D') : undefined
+  );
   const [activeTool,setActiveTool]=useState(symbolTypes[0].id);
   const [mode,setMode]=useState('place'); // 'place' | 'select' | 'link'
   const [selectedIds,setSelectedIds]=useState(new Set());
@@ -9845,7 +9855,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         ctx.beginPath(); ctx.arc(cx,cy,sz/2+6,0,Math.PI*2); ctx.stroke(); ctx.restore();
       }
       drawTakeoffSymbol(ctx,m.type,cx,cy,sz,color);
-      drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes),cx,cy,sz,color);
+      drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes,globalPrefix),cx,cy,sz,color);
       // Highlight link start
       if(mode==='link'&&m.id===linkStartId){
         ctx.save(); ctx.strokeStyle='#f97316'; ctx.lineWidth=2.5; ctx.setLineDash([3,2]);
@@ -10087,7 +10097,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       const url=await pdfUploadRef.current;
       if(url) finalPdfUrl=url;
     }
-    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,markers,links,pipes,prefixes,symSize,legendPos,
+    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,markers,links,pipes,prefixes,globalPrefix,symSize,legendPos,
       updatedAt:new Date().toISOString(),createdAt:takeoff?.createdAt||new Date().toISOString()});
     setSaving(false);
   };
@@ -10144,7 +10154,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'WM': dR(); dC(h*0.5); break;
             default:   dR(); break;
           }
-          page.drawText(getTakeoffLabel(m,markers,prefixes),{x:px+h+2,y:py-3,size:Math.max(5,symSzPt*0.55),font,color:col});
+          page.drawText(getTakeoffLabel(m,markers,prefixes,globalPrefix),{x:px+h+2,y:py-3,size:Math.max(5,symSzPt*0.55),font,color:col});
         });
       });
       // ── Switch leg curves ──────────────────────────────────────────────────
@@ -10240,8 +10250,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'WM': dR2(); dC2(ss*0.3); break;
             default:   dR2(); break;
           }
-          lp.drawText(`${prefixes[tt.id]||tt.defaultPrefix} — ${tt.label}  ×${counts[tt.id]}`,
-            {x:lx+padX+ss+6,y:ry+1,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15)});
+          const legendLabel= globalPrefix!==undefined
+            ? `${tt.label}  ×${counts[tt.id]}`
+            : `${prefixes[tt.id]||tt.defaultPrefix} — ${tt.label}  ×${counts[tt.id]}`;
+          lp.drawText(legendLabel,{x:lx+padX+ss+6,y:ry+1,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15)});
         });
         // Pipe type rows in legend
         usedPdfPipes.forEach((pt,i)=>{
@@ -10385,6 +10397,19 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             </div>
           </div>
 
+          {/* Global prefix (plumbing) or per-type prefixes (electrical) */}
+          {globalPrefix!==undefined&&(
+            <div style={{marginBottom:10,padding:'8px',background:T.bg,borderRadius:8,border:`1px solid ${T.borderLight}`}}>
+              <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:6}}>Label Prefix</div>
+              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                <input value={globalPrefix} maxLength={4}
+                  onChange={e=>setGlobalPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,''))}
+                  style={{width:44,border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'3px 6px',fontSize:13,fontWeight:800,textAlign:'center',fontFamily:'monospace',color:T.accent,background:'white'}}/>
+                <span style={{fontSize:10,color:T.muted}}>→ {globalPrefix||'D'}01, {globalPrefix||'D'}02…</span>
+              </div>
+            </div>
+          )}
+
           {/* Point types */}
           <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:8}}>Point Types</div>
           {symbolTypes.map(tt=>(
@@ -10402,10 +10427,12 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:11,fontWeight:600,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{tt.label}</div>
                 <div style={{display:'flex',alignItems:'center',gap:4,marginTop:2}}>
-                  <input value={prefixes[tt.id]||''} maxLength={3}
-                    onChange={e=>{const v=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');setPrefixes(p=>({...p,[tt.id]:v}));}}
-                    onClick={ev=>ev.stopPropagation()}
-                    style={{width:32,border:`1px solid ${T.borderLight}`,borderRadius:5,padding:'1px 4px',fontSize:10,fontWeight:800,textAlign:'center',fontFamily:'monospace',color:tt.color,background:T.bg}}/>
+                  {globalPrefix===undefined&&(
+                    <input value={prefixes[tt.id]||''} maxLength={3}
+                      onChange={e=>{const v=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');setPrefixes(p=>({...p,[tt.id]:v}));}}
+                      onClick={ev=>ev.stopPropagation()}
+                      style={{width:32,border:`1px solid ${T.borderLight}`,borderRadius:5,padding:'1px 4px',fontSize:10,fontWeight:800,textAlign:'center',fontFamily:'monospace',color:tt.color,background:T.bg}}/>
+                  )}
                   <span style={{fontSize:10,color:T.dim}}>×{counts[tt.id]}</span>
                 </div>
               </div>
