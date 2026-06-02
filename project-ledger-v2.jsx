@@ -9595,6 +9595,21 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
     }).catch(()=>setLibsReady(true));
   },[]);
 
+  // Auto-load PDF from saved Cloudinary URL when reopening a takeoff
+  useEffect(()=>{
+    if(!libsReady||!pdfUrl||pdfDoc) return;
+    (async()=>{
+      try{
+        const resp=await fetch(pdfUrl);
+        if(!resp.ok) return;
+        const ab=await resp.arrayBuffer();
+        setPdfBytes(ab);
+        const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
+        setPdfDoc(doc); setTotalPages(doc.numPages); setCurrentPage(1);
+      }catch(e){console.warn('Could not reload saved PDF:',e.message);}
+    })();
+  },[libsReady,pdfUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(()=>{ if(!pdfDoc||!pdfCanvasRef.current) return; renderPage(pdfDoc,currentPage,scale); },[pdfDoc,currentPage,scale]);
 
   const renderPage=async(doc,pageNum,sc)=>{
@@ -9694,7 +9709,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
 
   // ── Export PDF ────────────────────────────────────────────────────────────
   const exportPdf=async()=>{
-    if(!pdfBytes){alert('Re-upload the PDF to enable export.');return;}
+    if(!pdfBytes){alert('PDF is still loading, please wait a moment.');return;}
     if(!window.PDFLib){alert('Export library not loaded, please wait.');return;}
     setExporting(true);
     try{
