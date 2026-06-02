@@ -13827,7 +13827,7 @@ export default function App(){
           {/* Nav groups */}
           <nav style={{flex:1,padding:'8px 10px',display:'flex',flexDirection:'column',gap:1,overflowY:'auto'}}>
             {(()=>{
-              const groups=['project','expenses','admin'];
+              const groups=['project','expenses','tools','admin'];
               return groups.map(gKey=>{
                 const gItems=visibleNav.filter(n=>n.group===gKey);
                 if(!gItems.length) return null;
@@ -13933,7 +13933,7 @@ export default function App(){
               <div style={{position:'fixed',bottom:62,left:0,right:0,zIndex:40,
                 background:T.card,borderTop:`1px solid ${T.borderLight}`,padding:'12px 12px 8px',
                 boxShadow:'0 -4px 24px rgba(0,0,0,0.08)'}}>
-                {['project','expenses','admin'].map(gKey=>{
+                {['project','expenses','tools','admin'].map(gKey=>{
                   const gItems=overflowNav.filter(n=>n.group===gKey);
                   if(!gItems.length) return null;
                   const g=NAV_GROUPS[gKey];
