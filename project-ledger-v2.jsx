@@ -9552,6 +9552,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   const renderingRef=useRef(false);
   const legendDragRef=useRef(null); // {offsetX,offsetY} normalized
   const didDragLegendRef=useRef(false);
+  const pdfUploadRef=useRef(null); // pending Cloudinary upload promise
 
   // ── History ───────────────────────────────────────────────────────────────
   const pushHistory=useCallback((newMarkers)=>{
@@ -9754,7 +9755,12 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
       const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
       setPdfDoc(doc); setTotalPages(doc.numPages); setCurrentPage(1);
     }catch(e){alert('Could not read PDF: '+e.message);}
-    uploadRawPdfToCloudinary(file).then(url=>{if(url)setPdfUrl(url);});
+    const up=uploadRawPdfToCloudinary(file).then(url=>{
+      if(url) setPdfUrl(url);
+      pdfUploadRef.current=null;
+      return url;
+    });
+    pdfUploadRef.current=up;
     setUploading(false);
   };
 
@@ -9794,7 +9800,13 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave=async()=>{
     setSaving(true);
-    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl,markers,prefixes,symSize,legendPos,
+    // If PDF upload is still in flight, wait for it so the URL is persisted
+    let finalPdfUrl=pdfUrl;
+    if(pdfUploadRef.current){
+      const url=await pdfUploadRef.current;
+      if(url) finalPdfUrl=url;
+    }
+    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,markers,prefixes,symSize,legendPos,
       updatedAt:new Date().toISOString(),createdAt:takeoff?.createdAt||new Date().toISOString()});
     setSaving(false);
   };
@@ -9949,7 +9961,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
           <span style={{fontSize:11,fontWeight:700,color:T.muted,minWidth:38,textAlign:'center'}}>{Math.round(scale*100)}%</span>
           <button onClick={()=>setScale(s=>Math.min(3,+(s+0.25).toFixed(2)))} style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'4px 7px',cursor:'pointer',color:T.text}}><Plus size={12}/></button>
         </div>
-        <Btn onClick={handleSave} loading={saving}>Save</Btn>
+        <Btn onClick={handleSave} loading={saving} disabled={saving}>
+          {saving&&pdfUploadRef.current?'Uploading PDF…':'Save'}
+        </Btn>
         <Btn variant="secondary" onClick={exportPdf} loading={exporting}><Download size={12}/>Export PDF</Btn>
       </div>
 
