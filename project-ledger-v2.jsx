@@ -9539,6 +9539,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   const [pdfUrl,setPdfUrl]=useState(takeoff?.pdfUrl||'');
   const [legendPos,setLegendPos]=useState(takeoff?.legendPos||{x:0.65,y:0.7});
   const [libsReady,setLibsReady]=useState(false);
+  const [pdfLoading,setPdfLoading]=useState(!!(takeoff?.pdfUrl)); // true while auto-loading saved PDF
   const [uploading,setUploading]=useState(false);
   const [exporting,setExporting]=useState(false);
   const [saving,setSaving]=useState(false);
@@ -9617,15 +9618,17 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   // Auto-load PDF from saved Cloudinary URL when reopening a takeoff
   useEffect(()=>{
     if(!libsReady||!pdfUrl||pdfDoc) return;
+    setPdfLoading(true);
     (async()=>{
       try{
         const resp=await fetch(pdfUrl);
-        if(!resp.ok) return;
+        if(!resp.ok){setPdfLoading(false);return;}
         const ab=await resp.arrayBuffer();
         setPdfBytes(ab);
         const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
         setPdfDoc(doc); setTotalPages(doc.numPages); setCurrentPage(1);
       }catch(e){console.warn('Could not reload saved PDF:',e.message);}
+      finally{setPdfLoading(false);}
     })();
   },[libsReady,pdfUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -10051,14 +10054,26 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
         <div style={{flex:1,overflow:'auto',background:T.bg==='#141412'?'#1a1a18':'#e5e7eb',display:'flex',justifyContent:'flex-start',alignItems:'flex-start',padding:16,minHeight:'100%'}}>
           {!pdfDoc?(
             <div style={{margin:'auto',textAlign:'center',padding:'60px 20px'}}>
-              <div style={{width:72,height:72,background:T.card,borderRadius:18,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',border:`2px dashed ${T.borderLight}`}}>
-                <Upload size={30} style={{color:T.dim}}/>
-              </div>
-              <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:8}}>Drop a PDF here, or click Upload</div>
-              <div style={{fontSize:13,color:T.muted,marginBottom:16,maxWidth:300,lineHeight:1.6}}>
-                {libsReady?'Drag & drop your floor plan PDF into this area, or use the Upload button above.':'Loading PDF viewer…'}
-              </div>
-              {libsReady&&<Btn onClick={()=>fileInputRef.current?.click()}><Upload size={12}/>Upload PDF</Btn>}
+              {pdfLoading?(
+                <>
+                  <div style={{width:72,height:72,background:T.card,borderRadius:18,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',border:`2px solid ${T.borderLight}`}}>
+                    <Loader2 size={30} style={{color:T.accent,animation:'spin 1s linear infinite'}}/>
+                  </div>
+                  <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:8}}>Loading your floor plan…</div>
+                  <div style={{fontSize:13,color:T.muted,maxWidth:300,lineHeight:1.6}}>Fetching the saved PDF. This may take a moment.</div>
+                </>
+              ):(
+                <>
+                  <div style={{width:72,height:72,background:T.card,borderRadius:18,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',border:`2px dashed ${T.borderLight}`}}>
+                    <Upload size={30} style={{color:T.dim}}/>
+                  </div>
+                  <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:8}}>Drop a PDF here, or click Upload</div>
+                  <div style={{fontSize:13,color:T.muted,marginBottom:16,maxWidth:300,lineHeight:1.6}}>
+                    {libsReady?'Drag & drop your floor plan PDF into this area, or use the Upload button above.':'Loading PDF viewer…'}
+                  </div>
+                  {libsReady&&<Btn onClick={()=>fileInputRef.current?.click()}><Upload size={12}/>Upload PDF</Btn>}
+                </>
+              )}
             </div>
           ):(
             <div style={{position:'relative',display:'inline-block',boxShadow:'0 4px 24px rgba(0,0,0,0.25)',lineHeight:0}}>
