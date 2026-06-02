@@ -9887,7 +9887,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
         (l.fromId===linkStartId&&l.toId===hit.id)||(l.fromId===hit.id&&l.toId===linkStartId));
       if(exists){setLinks(prev=>prev.filter(l=>l.id!==exists.id));}
       else{setLinks(prev=>[...prev,{id:uid(),fromId:linkStartId,toId:hit.id,page:currentPage}]);}
-      // Do NOT clear linkStartId — stay in continuous linking mode until right-click/Escape
+      // Advance anchor to last-clicked marker for daisy-chain: SW→L1→L2→L3
+      setLinkStartId(hit.id);
     } else {
       if(e.shiftKey){
         setSelectedIds(prev=>{const n=new Set(prev);if(hit){if(n.has(hit.id))n.delete(hit.id);else n.add(hit.id);}return n;});
