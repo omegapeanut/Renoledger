@@ -13307,13 +13307,55 @@ function WorkerLoginScreen({siteWorkers, onLogin, onAdminLogin, acctSettings}){
 
 
 // -- Main Login Screen --
-function LoginScreen({users, siteWorkers, onStaffLogin, onWorkerPortal, acctSettings}){
-  const [mode, setMode] = useState('choose'); // 'choose' | 'staff' | 'devpin'
+function LoginScreen({users, siteWorkers, onStaffLogin, onWorkerPortal, acctSettings, onUpdateUsers}){
+  const [mode, setMode] = useState('choose'); // 'choose' | 'staff' | 'devpin' | 'forgot' | 'forgotDone'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotErr, setForgotErr] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotResult, setForgotResult] = useState(null); // {tempPw, emailSent, userName}
+
+  const genTempPw = () => {
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    return Array.from({length:8}, () => chars[Math.floor(Math.random()*chars.length)]).join('');
+  };
+
+  const handleForgot = async () => {
+    if(!forgotEmail.trim()){setForgotErr('Please enter your email.');return;}
+    setForgotLoading(true); setForgotErr('');
+    const user = users.find(u => u.active && u.email.toLowerCase() === forgotEmail.trim().toLowerCase());
+    if(!user){
+      setTimeout(()=>{setForgotErr('No active account found with this email.');setForgotLoading(false);},600);
+      return;
+    }
+    const tempPw = genTempPw();
+    const updUsers = users.map(u => u.id===user.id ? {...u, password:tempPw} : u);
+    saveUsers(updUsers);
+    onUpdateUsers?.(updUsers);
+
+    let emailSent = false;
+    const {emailjsServiceId, emailjsTemplateId, emailjsPublicKey} = acctSettings||{};
+    if(emailjsServiceId && emailjsTemplateId && emailjsPublicKey){
+      try{
+        await loadExtScript('https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js');
+        window.emailjs.init({publicKey: emailjsPublicKey});
+        await window.emailjs.send(emailjsServiceId, emailjsTemplateId, {
+          to_email: user.email,
+          to_name: user.name,
+          temp_password: tempPw,
+          company_name: acctSettings?.companyName||'RenoLedger',
+        });
+        emailSent = true;
+      }catch(e){ console.warn('EmailJS error:',e.message||e); }
+    }
+    setForgotResult({tempPw, emailSent, userName: user.name});
+    setForgotLoading(false);
+    setMode('forgotDone');
+  };
 
   // Secret dev access — tap logo 5 times then enter PIN
   const [tapCount, setTapCount] = useState(0);
@@ -13553,6 +13595,103 @@ function LoginScreen({users, siteWorkers, onStaffLogin, onWorkerPortal, acctSett
                 {loading&&<Loader2 size={16} style={{animation:'spin 0.8s linear infinite'}}/>}
                 {loading?'Signing in...':'Sign In'}
               </button>
+              <button onClick={()=>{setForgotEmail(email);setForgotErr('');setMode('forgot');}}
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.muted,
+                  fontFamily:'inherit',textAlign:'center',padding:'4px',textDecoration:'underline'}}>
+                Forgot password?
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Forgot password — enter email */}
+        {mode==='forgot'&&(
+          <div style={{display:'flex',flexDirection:'column',gap:0}}>
+            <button onClick={()=>{setMode('staff');setForgotErr('');}}
+              style={{alignSelf:'flex-start',background:'none',border:'none',cursor:'pointer',
+                fontFamily:'inherit',fontSize:13,color:T.muted,marginBottom:16,display:'flex',alignItems:'center',gap:4}}>
+              ← Back
+            </button>
+            <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:24,
+              padding:28,boxShadow:T.shadowMd,display:'flex',flexDirection:'column',gap:16}}>
+              <div>
+                <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:24,color:T.text}}>Reset Password</div>
+                <div style={{fontSize:13,color:T.muted,marginTop:4}}>Enter your email and we'll generate a temporary password for you.</div>
+              </div>
+              <div>
+                <label style={{fontSize:12,fontWeight:500,color:T.muted,display:'block',marginBottom:6}}>Email address</label>
+                <input type="email" value={forgotEmail} onChange={e=>{setForgotEmail(e.target.value);setForgotErr('');}}
+                  onKeyDown={e=>e.key==='Enter'&&handleForgot()}
+                  placeholder="you@company.com"
+                  style={{...iStyle,fontSize:15}}/>
+              </div>
+              {forgotErr&&(
+                <div style={{background:T.dangerLight,border:`1px solid ${T.danger}25`,borderRadius:10,
+                  padding:'10px 14px',fontSize:13,color:T.danger}}>{forgotErr}</div>
+              )}
+              <button onClick={handleForgot} disabled={forgotLoading||!forgotEmail}
+                style={{background:forgotLoading||!forgotEmail?T.dim:T.text,color:T.bg,border:'none',
+                  borderRadius:12,padding:'15px',fontSize:15,fontWeight:600,
+                  cursor:forgotLoading||!forgotEmail?'not-allowed':'pointer',fontFamily:'inherit',
+                  display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+                {forgotLoading&&<Loader2 size={16} style={{animation:'spin 0.8s linear infinite'}}/>}
+                {forgotLoading?'Processing…':'Send Temporary Password'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Forgot password — result */}
+        {mode==='forgotDone'&&forgotResult&&(
+          <div style={{display:'flex',flexDirection:'column',gap:0}}>
+            <button onClick={()=>{setMode('staff');setForgotResult(null);}}
+              style={{alignSelf:'flex-start',background:'none',border:'none',cursor:'pointer',
+                fontFamily:'inherit',fontSize:13,color:T.muted,marginBottom:16,display:'flex',alignItems:'center',gap:4}}>
+              ← Back to Sign In
+            </button>
+            <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:24,
+              padding:28,boxShadow:T.shadowMd,display:'flex',flexDirection:'column',gap:16}}>
+              <div style={{textAlign:'center'}}>
+                <div style={{width:52,height:52,borderRadius:'50%',background:'rgba(22,163,74,0.1)',
+                  display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 14px'}}>
+                  <CheckCircle size={26} style={{color:'#16a34a'}}/>
+                </div>
+                <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:22,color:T.text}}>
+                  {forgotResult.emailSent ? 'Email Sent!' : 'Temporary Password Ready'}
+                </div>
+              </div>
+              {forgotResult.emailSent ? (
+                <div style={{fontSize:13,color:T.muted,lineHeight:1.7,textAlign:'center'}}>
+                  A temporary password has been sent to <strong style={{color:T.text}}>{forgotEmail}</strong>.<br/>
+                  Use it to sign in, then change your password in Profile settings.
+                </div>
+              ) : (
+                <>
+                  <div style={{fontSize:13,color:T.muted,lineHeight:1.7}}>
+                    Hi <strong style={{color:T.text}}>{forgotResult.userName}</strong>, here is your temporary password. Use it to sign in, then update your password in Profile settings.
+                  </div>
+                  <div style={{background:'#f8fafc',border:`1px solid ${T.borderLight}`,borderRadius:12,
+                    padding:'16px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
+                    <span style={{fontFamily:'monospace',fontSize:22,fontWeight:700,letterSpacing:'0.12em',color:T.text}}>
+                      {forgotResult.tempPw}
+                    </span>
+                    <button onClick={()=>navigator.clipboard?.writeText(forgotResult.tempPw)}
+                      style={{background:T.accentLight,border:`1px solid ${T.borderLight}`,borderRadius:8,
+                        padding:'6px 12px',cursor:'pointer',fontSize:12,fontWeight:600,color:T.text,fontFamily:'inherit'}}>
+                      Copy
+                    </button>
+                  </div>
+                  <div style={{fontSize:11,color:T.dim,textAlign:'center'}}>
+                    Screenshot this or copy the password before leaving this screen.
+                  </div>
+                </>
+              )}
+              <button onClick={()=>{setMode('staff');setPassword(forgotResult.emailSent?'':forgotResult.tempPw);setEmail(forgotEmail);setForgotResult(null);}}
+                style={{background:T.text,color:T.bg,border:'none',borderRadius:12,padding:'14px',
+                  fontSize:15,fontWeight:600,cursor:'pointer',fontFamily:'inherit',
+                  display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+                Sign In Now
+              </button>
             </div>
           </div>
         )}
@@ -13700,6 +13839,36 @@ function SystemPanel({projects,invoices,payments,siteWorkers,attendance,users,wa
           </button>
         </div>
         {(acctSettings.anthropicApiKey||'').startsWith('sk-ant-')&&<div style={{marginTop:8,fontSize:12,color:T.success,fontWeight:600}}>✓ API key configured — AI OCR enabled</div>}
+      </div>
+
+      {/* EmailJS — Forgot Password email */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:22,boxShadow:T.shadow}}>
+        <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:6,display:'flex',alignItems:'center',gap:8}}>
+          <Mail size={15}/>Email — Forgot Password (EmailJS)
+        </div>
+        <div style={{fontSize:12,color:T.muted,marginBottom:14,lineHeight:1.6}}>
+          Enables automatic password reset emails. Free at <strong>emailjs.com</strong> (200 emails/month).<br/>
+          Create a free account → Email Services → Add Service, then Email Templates → New Template.<br/>
+          Template variables: <code style={{background:T.bg,borderRadius:4,padding:'1px 5px'}}>{'{{to_name}}'}</code>{' '}
+          <code style={{background:T.bg,borderRadius:4,padding:'1px 5px'}}>{'{{temp_password}}'}</code>{' '}
+          <code style={{background:T.bg,borderRadius:4,padding:'1px 5px'}}>{'{{company_name}}'}</code>
+        </div>
+        {[
+          {key:'emailjsPublicKey',  label:'Public Key',   ph:'user_xxxxxxxxxxxxxxxxxxxx'},
+          {key:'emailjsServiceId',  label:'Service ID',   ph:'service_xxxxxxx'},
+          {key:'emailjsTemplateId', label:'Template ID',  ph:'template_xxxxxxx'},
+        ].map(({key,label,ph})=>(
+          <div key={key} style={{marginBottom:10}}>
+            <label style={{fontSize:11,fontWeight:600,color:T.muted,display:'block',marginBottom:5}}>{label}</label>
+            <input type="text" value={acctSettings[key]||''}
+              onChange={e=>{const v=e.target.value.trim();setAcctSettings(prev=>{const u={...prev,[key]:v};saveS('acctSettings',u);return u;});}}
+              placeholder={ph}
+              style={{...iStyle,fontFamily:'monospace',fontSize:12}}/>
+          </div>
+        ))}
+        {acctSettings.emailjsPublicKey&&acctSettings.emailjsServiceId&&acctSettings.emailjsTemplateId&&(
+          <div style={{marginTop:4,fontSize:12,color:T.success,fontWeight:600}}>✓ EmailJS configured — password reset emails enabled</div>
+        )}
       </div>
 
       {/* Data overview */}
@@ -14355,7 +14524,8 @@ export default function App(){
       siteWorkers={siteWorkers}
       onStaffLogin={(user)=>setActiveUserId(user.id)}
       onWorkerPortal={()=>setShowWorkerLogin(true)}
-        acctSettings={acctSettings}
+      acctSettings={acctSettings}
+      onUpdateUsers={setUsers}
     />
   );
 
