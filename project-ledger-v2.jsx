@@ -9701,6 +9701,13 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
     }
   };
 
+  // ── Counts (must be before getLegendBox which references it) ─────────────
+  const counts=useMemo(()=>{
+    const c={}; TAKEOFF_TYPES.forEach(t=>c[t.id]=0);
+    markers.forEach(m=>{if(c[m.type]!==undefined)c[m.type]++;});
+    return c;
+  },[markers]);
+
   // ── Legend drag helpers ───────────────────────────────────────────────────
   const getLegendBox=useCallback(()=>{
     const canvas=overlayRef.current; if(!canvas) return null;
@@ -9874,13 +9881,6 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
     }catch(e){alert('Export failed: '+e.message);}
     setExporting(false);
   };
-
-  // ── Counts ────────────────────────────────────────────────────────────────
-  const counts=useMemo(()=>{
-    const c={}; TAKEOFF_TYPES.forEach(t=>c[t.id]=0);
-    markers.forEach(m=>{if(c[m.type]!==undefined)c[m.type]++;});
-    return c;
-  },[markers]);
 
   const selCount=selectedIds.size;
   const {canUndo,canRedo}=historyState;
