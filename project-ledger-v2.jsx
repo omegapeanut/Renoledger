@@ -105,6 +105,9 @@ const TAKEOFF_TYPES = [
   {id:'EX',  label:'Exhaust Fan',          color:'#92400e', defaultPrefix:'F'},
 ];
 
+// Colors cycled per circuit (one color per unique switch in switch-leg mode)
+const CIRCUIT_COLORS=['#e11d48','#2563eb','#d97706','#9333ea','#0891b2','#c026d3','#0369a1','#15803d','#ea580c','#6366f1'];
+
 // Load an external script once (CDN libs for PDF.js and pdf-lib)
 function loadExtScript(src){
   return new Promise((resolve,reject)=>{
@@ -9696,8 +9699,20 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
     return c;
   },[markers]);
 
+  // Circuit key = the SW-type endpoint of a link (or fromId as fallback)
+  const getCircuitKey=useCallback((l)=>{
+    const fm=markers.find(m=>m.id===l.fromId), tm=markers.find(m=>m.id===l.toId);
+    return (fm?.type==='SW')?l.fromId:(tm?.type==='SW')?l.toId:l.fromId;
+  },[markers]);
+
+  const circuitColorMap=useMemo(()=>{
+    const keys=[...new Set(links.map(l=>getCircuitKey(l)))];
+    const map={}; keys.forEach((k,i)=>{map[k]=CIRCUIT_COLORS[i%CIRCUIT_COLORS.length];});
+    return map;
+  },[links,getCircuitKey]);
+
   // ── Overlay ───────────────────────────────────────────────────────────────
-  useEffect(()=>{drawOverlay();},[markers,selectedIds,cursorPos,currentPage,activeTool,mode,prefixes,scale,symSize,legendPos,counts,links,linkStartId]);
+  useEffect(()=>{drawOverlay();},[markers,selectedIds,cursorPos,currentPage,activeTool,mode,prefixes,scale,symSize,legendPos,counts,links,linkStartId,circuitColorMap]);
 
   const drawOverlay=()=>{
     const canvas=overlayRef.current; if(!canvas) return;
@@ -9720,33 +9735,43 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
         ctx.beginPath(); ctx.arc(cx,cy,sz/2+8,0,Math.PI*2); ctx.stroke(); ctx.restore();
       }
     });
-    // ── Switch leg lines ──────────────────────────────────────────────────────
+    // ── Switch leg curves ─────────────────────────────────────────────────────
+    const curveCp=(x1,y1,x2,y2)=>{
+      const dx=x2-x1, dy=y2-y1, len=Math.sqrt(dx*dx+dy*dy)||1;
+      const amt=Math.min(len*0.28, 80); // gentle arc, capped
+      return {cpx:(x1+x2)/2+(-dy/len)*amt, cpy:(y1+y2)/2+(dx/len)*amt};
+    };
     links.filter(l=>l.page===currentPage).forEach(l=>{
       const fm=markers.find(m=>m.id===l.fromId), tm=markers.find(m=>m.id===l.toId);
       if(!fm||!tm) return;
       const x1=fm.x*canvas.width, y1=fm.y*canvas.height;
       const x2=tm.x*canvas.width, y2=tm.y*canvas.height;
+      const color=circuitColorMap[getCircuitKey(l)]||'#16a34a';
+      const {cpx,cpy}=curveCp(x1,y1,x2,y2);
       ctx.save();
-      ctx.strokeStyle='#16a34a'; ctx.lineWidth=1.8; ctx.setLineDash([6,4]);
-      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-      // Midpoint badge
-      const mx=(x1+x2)/2, my=(y1+y2)/2;
-      ctx.setLineDash([]); ctx.fillStyle='#16a34a';
-      ctx.beginPath(); ctx.arc(mx,my,7,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle=color; ctx.lineWidth=2; ctx.setLineDash([7,4]);
+      ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.quadraticCurveTo(cpx,cpy,x2,y2); ctx.stroke();
+      // Badge at curve midpoint (t=0.5 on quadratic bezier)
+      const bx=0.25*x1+0.5*cpx+0.25*x2, by=0.25*y1+0.5*cpy+0.25*y2;
+      ctx.setLineDash([]);
+      ctx.fillStyle=color;
+      ctx.beginPath(); ctx.arc(bx,by,7,0,Math.PI*2); ctx.fill();
       ctx.fillStyle='#fff'; ctx.font='bold 8px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText('SW',mx,my);
+      ctx.fillText('SW',bx,by);
       ctx.restore();
     });
-    // Ghost line from linkStart to cursor in link mode
+    // Ghost curve from linkStart to cursor in link mode
     if(mode==='link'&&linkStartId&&cursorPos){
       const sm=markers.find(m=>m.id===linkStartId);
       if(sm){
+        const x1=sm.x*canvas.width, y1=sm.y*canvas.height;
+        const x2=cursorPos.x*canvas.width, y2=cursorPos.y*canvas.height;
+        const {cpx,cpy}=curveCp(x1,y1,x2,y2);
         ctx.save();
-        ctx.strokeStyle='#f97316'; ctx.lineWidth=1.5; ctx.setLineDash([5,4]);
-        ctx.beginPath();
-        ctx.moveTo(sm.x*canvas.width,sm.y*canvas.height);
-        ctx.lineTo(cursorPos.x*canvas.width,cursorPos.y*canvas.height);
-        ctx.stroke(); ctx.restore();
+        ctx.strokeStyle='#f97316'; ctx.lineWidth=1.8; ctx.setLineDash([5,4]); ctx.lineCap='round';
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.quadraticCurveTo(cpx,cpy,x2,y2); ctx.stroke();
+        ctx.restore();
       }
     }
     if(cursorPos&&mode==='place'){
@@ -9937,7 +9962,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
           page.drawText(getTakeoffLabel(m,markers,prefixes),{x:px+h+2,y:py-3,size:Math.max(5,symSzPt*0.55),font,color:col});
         });
       });
-      // ── Switch leg lines ───────────────────────────────────────────────────
+      // ── Switch leg curves ──────────────────────────────────────────────────
       const linksByPage={};
       links.forEach(l=>{(linksByPage[l.page]||(linksByPage[l.page]=[])).push(l);});
       Object.entries(linksByPage).forEach(([pg,lList])=>{
@@ -9947,11 +9972,23 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
           const fm=markers.find(m=>m.id===l.fromId), tm=markers.find(m=>m.id===l.toId);
           if(!fm||!tm) return;
           const x1=fm.x*pw, y1=ph-fm.y*ph, x2=tm.x*pw, y2=ph-tm.y*ph;
-          page.drawLine({start:{x:x1,y:y1},end:{x:x2,y:y2},color:rgb(0.09,0.64,0.26),thickness:1,dashArray:[6,4],dashPhase:0});
-          // Midpoint badge
-          const mx=(x1+x2)/2, my=(y1+y2)/2;
-          page.drawCircle({x:mx,y:my,size:5,color:rgb(0.09,0.64,0.26),borderColor:rgb(0.09,0.64,0.26),borderWidth:0.5});
-          page.drawText('SW',{x:mx-4,y:my-3,size:5,font,color:rgb(1,1,1)});
+          const hexColor=circuitColorMap[getCircuitKey(l)]||'#16a34a';
+          const [cr,cg,cb]=hexToRgbF(hexColor); const col=rgb(cr,cg,cb);
+          // Approximate quadratic bezier with dashed segments
+          const dx=x2-x1, dy=y2-y1, len=Math.sqrt(dx*dx+dy*dy)||1;
+          const amt=Math.min(len*0.28,60);
+          const cpx=(x1+x2)/2+(-dy/len)*amt, cpy=(y1+y2)/2+(dx/len)*amt;
+          const bz=(t,a,b,c)=>(1-t)*(1-t)*a+2*(1-t)*t*b+t*t*c;
+          for(let i=0;i<14;i++){
+            if(i%2===1) continue; // dashed: draw even segments only
+            const t1=i/14, t2=(i+1)/14;
+            page.drawLine({start:{x:bz(t1,x1,cpx,x2),y:bz(t1,y1,cpy,y2)},
+              end:{x:bz(t2,x1,cpx,x2),y:bz(t2,y1,cpy,y2)},color:col,thickness:1.5});
+          }
+          // Badge at curve midpoint
+          const bx=bz(0.5,x1,cpx,x2), by=bz(0.5,y1,cpy,y2);
+          page.drawCircle({x:bx,y:by,size:5,color:col,borderColor:col,borderWidth:0.5});
+          page.drawText('SW',{x:bx-4,y:by-3,size:5,font,color:rgb(1,1,1)});
         });
       });
       // ── Legend (bottom-right, page 1) ──────────────────────────────────────
