@@ -9456,7 +9456,7 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast}){
           <div style={{width:44,height:44,background:'rgba(8,145,178,0.1)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12}}>
             <Layers size={22} style={{color:'#0891b2'}}/>
           </div>
-          <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:4}}>Plan Takeoff</div>
+          <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:4}}>Electrical PDF Markup</div>
           <div style={{fontSize:12,color:T.muted,lineHeight:1.5}}>Upload a PDF layout plan and count electrical, data, lighting points with Singapore standard symbols.</div>
           <div style={{marginTop:12,fontSize:11,fontWeight:600,color:'#0891b2',display:'flex',alignItems:'center',gap:4}}>
             <Plus size={11}/>New Takeoff
@@ -9799,15 +9799,16 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
         </div>
 
         {/* Canvas area */}
-        <div style={{flex:1,overflowAuto:'scroll',overflow:'auto',background:T.bg==='#141412'?'#1a1a18':'#e5e7eb',display:'flex',justifyContent:'flex-start',alignItems:'flex-start',padding:16}}>
+        <DropZone accept="application/pdf" onDrop={loadPdfFile} style={{flex:1,overflow:'auto',display:'flex',justifyContent:'flex-start',alignItems:'flex-start'}}>
+        <div style={{flex:1,overflow:'auto',background:T.bg==='#141412'?'#1a1a18':'#e5e7eb',display:'flex',justifyContent:'flex-start',alignItems:'flex-start',padding:16,minHeight:'100%'}}>
           {!pdfDoc?(
             <div style={{margin:'auto',textAlign:'center',padding:'60px 20px'}}>
-              <div style={{width:64,height:64,background:T.card,borderRadius:18,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',border:`1px solid ${T.borderLight}`}}>
-                <Upload size={28} style={{color:T.dim}}/>
+              <div style={{width:72,height:72,background:T.card,borderRadius:18,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',border:`2px dashed ${T.borderLight}`}}>
+                <Upload size={30} style={{color:T.dim}}/>
               </div>
-              <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:8}}>Upload a PDF floor plan</div>
+              <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:8}}>Drop a PDF here, or click Upload</div>
               <div style={{fontSize:13,color:T.muted,marginBottom:16,maxWidth:300,lineHeight:1.6}}>
-                {libsReady?'Click "Upload PDF" in the top bar to get started.':'Loading PDF viewer…'}
+                {libsReady?'Drag & drop your floor plan PDF into this area, or use the Upload button above.':'Loading PDF viewer…'}
               </div>
               {libsReady&&(
                 <Btn onClick={()=>fileInputRef.current?.click()}><Upload size={12}/>Upload PDF</Btn>
@@ -9830,6 +9831,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
             </div>
           )}
         </div>
+        </DropZone>
       </div>
     </div>
   );
