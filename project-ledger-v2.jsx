@@ -2020,10 +2020,10 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
   const [filter,setFilter]=useState('All');
   const [confirmPerm,setConfirmPerm]=useState(null);
   const daysLeft=d=>Math.max(0,Math.ceil((new Date(d).getTime()+365*24*60*60*1000-Date.now())/864e5));
-  const TL={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting'};
-  const TI={project:FolderOpen,invoice:Receipt,payment:CreditCard,user:Users,staffClaim:DollarSign,quote:FileSpreadsheet,sitereport:ClipboardList};
-  const TC={project:T.info,invoice:T.warning,payment:T.success,user:T.danger,staffClaim:'#7c3aed',quote:T.accent,sitereport:'#0891b2'};
-  const counts={All:trash.length,project:0,invoice:0,payment:0,user:0,staffClaim:0,quote:0,sitereport:0};
+  const TL={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'PDF Markup'};
+  const TI={project:FolderOpen,invoice:Receipt,payment:CreditCard,user:Users,staffClaim:DollarSign,quote:FileSpreadsheet,sitereport:ClipboardList,takeoff:Wrench};
+  const TC={project:T.info,invoice:T.warning,payment:T.success,user:T.danger,staffClaim:'#7c3aed',quote:T.accent,sitereport:'#0891b2',takeoff:'#7c3aed'};
+  const counts={All:trash.length,project:0,invoice:0,payment:0,user:0,staffClaim:0,quote:0,sitereport:0,takeoff:0};
   trash.forEach(t=>{if(counts[t._trashType]!==undefined)counts[t._trashType]++;});
   const shown=[...(filter==='All'?trash:trash.filter(t=>t._trashType===filter))].sort((a,b)=>new Date(b._deletedAt)-new Date(a._deletedAt));
 
@@ -2043,7 +2043,7 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
         </div>
       )}
       <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-        {['All','project','quote','sitereport','invoice','payment','staffClaim','user'].map(f=>(
+        {['All','project','quote','sitereport','invoice','payment','staffClaim','user','takeoff'].map(f=>(
           <button key={f} onClick={()=>setFilter(f)} style={{padding:'6px 14px',borderRadius:20,
             border:`1px solid ${filter===f?T.text:T.borderLight}`,
             background:filter===f?T.text:'transparent',
@@ -9448,7 +9448,7 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
 }
 
 // ─── TOOLS HUB ───────────────────────────────────────────────────────────────
-function ToolsHub({acctSettings, projects, isAdmin, onShowToast}){
+function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
   const [takeoffs,setTakeoffs]=useState([]);
   const [loaded,setLoaded]=useState(false);
   const [editing,setEditing]=useState(null);
@@ -9464,10 +9464,10 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast}){
     onShowToast?.('Takeoff saved');
   };
 
-  const deleteTakeoff=(id)=>{
-    if(!window.confirm('Delete this takeoff?'))return;
-    const upd=takeoffs.filter(x=>x.id!==id);
+  const deleteTakeoff=(t)=>{
+    const upd=takeoffs.filter(x=>x.id!==t.id);
     setTakeoffs(upd); saveS('takeoffs',upd);
+    onSoftDelete?.({...t,_trashType:'takeoff',_deletedAt:new Date().toISOString()});
   };
 
   if(editing!==null) return(
@@ -9527,7 +9527,7 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast}){
                   </div>
                   <div style={{display:'flex',gap:8,flexShrink:0}}>
                     <Btn variant="secondary" size="sm" onClick={()=>setEditing(t)}><Edit3 size={12}/>Open</Btn>
-                    {isAdmin&&<button onClick={()=>deleteTakeoff(t.id)} style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'4px'}}><Trash2 size={14}/></button>}
+                    {isAdmin&&<button onClick={()=>deleteTakeoff(t)} title="Move to Trash" style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'4px'}}><Trash2 size={14}/></button>}
                   </div>
                 </div>
               );
@@ -13697,7 +13697,7 @@ export default function App(){
 
   const handleSoftDelete = useCallback((item)=>{
     setTrash(prev=>{const upd=[...prev,item];saveS('trash',upd);return upd;});
-    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting'}[item._trashType]||item._trashType;
+    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'PDF Markup'}[item._trashType]||item._trashType;
     const label=item.name||item.invoiceNo||item.quoteNo||item.title||item.email||item.id;
     logAction(`DELETE_${(item._trashType||'').toUpperCase()}`, `Deleted ${typeName}: ${label}`, item);
   },[logAction]);
@@ -13728,6 +13728,7 @@ export default function App(){
     }
     else if(_trashType==='quote'){setQuotes(p=>{const u=[...p,orig];saveS('quotes',u);return u;});}
     else if(_trashType==='sitereport'){setSiteReports(p=>{const u=[...p,orig];saveS('siteReports',u);return u;});}
+    else if(_trashType==='takeoff'){loadS('takeoffs',[]).then(existing=>{const u=[...existing,orig];saveS('takeoffs',u);});}
     setTrash(prev=>{const upd=prev.filter(t=>t.id!==item.id);saveS('trash',upd);return upd;});
     const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting'}[_trashType]||_trashType;
     const label=orig.name||orig.invoiceNo||orig.quoteNo||orig.title||orig.email||orig.id;
@@ -13738,7 +13739,7 @@ export default function App(){
     setTrash(prev=>{
       const item=prev.find(t=>t.id===id);
       if(item){
-        const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting'}[item._trashType]||item._trashType;
+        const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'PDF Markup'}[item._trashType]||item._trashType;
         logAction('PERMANENT_DELETE', `Permanently deleted ${typeName}: ${item.name||item.invoiceNo||item.quoteNo||item.title||item.email||id}`, item);
       }
       const upd=prev.filter(t=>t.id!==id);saveS('trash',upd);return upd;
@@ -14341,7 +14342,7 @@ export default function App(){
           {tab==='workers'&&<WorkerAdmin siteWorkers={siteWorkers} setSiteWorkers={setSiteWorkers} attendance={attendance} setAttendance={setAttendance} projects={projects} invoices={invoices} setInvoices={setInvoices} claims={workerClaims} setClaims={setWorkerClaims} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='checkin'&&<WorkerLoginScreen siteWorkers={siteWorkers} onLogin={(w)=>setWorkerSession(w)} onAdminLogin={()=>setTab('dashboard')} acctSettings={acctSettings}/>}
           {tab==='accounts'&&isAdmin&&(<CompanyAccounts projects={projects} invoices={invoices} payments={payments} acctSettings={acctSettings} setAcctSettings={setAcctSettings}/>)}
-          {tab==='tools'&&<ToolsHub acctSettings={acctSettings} projects={userProjects} isAdmin={isAdmin} onShowToast={handleShowToast}/>}
+          {tab==='tools'&&<ToolsHub acctSettings={acctSettings} projects={userProjects} isAdmin={isAdmin} onShowToast={handleShowToast} onSoftDelete={handleSoftDelete}/>}
           {tab==='trash'&&isAdmin&&(<TrashBin trash={trash} onRestore={handleRestore} onPermanentDelete={handlePermanentDelete} isSuperAdmin={isSuperAdmin}/>)}
           {tab==='admin'&&isAdmin&&(<Admin users={users.filter(u=>u.id!=='__sa__')} setUsers={setUsers} projects={projects} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} actionLog={actionLog} onUndoAction={handleRestore} isSuperAdmin={isSuperAdmin}/>)}
           {tab==='system'&&isSuperAdmin&&(<SystemPanel projects={projects} invoices={invoices} payments={payments} siteWorkers={siteWorkers} attendance={attendance} users={users} warranties={warranties} trash={trash} acctSettings={acctSettings} setAcctSettings={setAcctSettings} actionLog={actionLog} setActionLog={setActionLog} logAction={logAction}/>)}
