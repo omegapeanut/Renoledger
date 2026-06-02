@@ -105,6 +105,12 @@ const TAKEOFF_TYPES = [
   {id:'EX',  label:'Exhaust Fan',          color:'#92400e', defaultPrefix:'F'},
 ];
 
+// Pipe run types (drawn as polylines, not point markers)
+const PIPE_TYPES=[
+  {id:'CWP', label:'Cold Water Pipe', color:'#2563eb'},
+  {id:'HWP', label:'Hot Water Pipe',  color:'#dc2626'},
+];
+
 // Singapore standard plumbing symbols (SS 636 / CP 48)
 const PLUMBING_TYPES = [
   {id:'CW',  label:'Cold Water Point',     color:'#2563eb', defaultPrefix:'CW'},
@@ -9663,6 +9669,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const [selectedIds,setSelectedIds]=useState(new Set());
   const [links,setLinks]=useState(takeoff?.links||[]); // [{id,fromId,toId,page}]
   const [linkStartId,setLinkStartId]=useState(null); // pending link source markerId
+  const [pipes,setPipes]=useState(takeoff?.pipes||[]); // [{id,type,points:[{x,y}],page}]
+  const [pipeInProgress,setPipeInProgress]=useState(null); // pipe being drawn
+  const [activePipeType,setActivePipeType]=useState('CWP');
   const [currentPage,setCurrentPage]=useState(1);
   const [totalPages,setTotalPages]=useState(0);
   const [scale,setScale]=useState(1.5);
@@ -9731,7 +9740,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       if(tag==='INPUT'||tag==='TEXTAREA') return;
       if((e.ctrlKey||e.metaKey)&&e.key==='z'&&!e.shiftKey){e.preventDefault();undo();}
       if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.key==='z'&&e.shiftKey))){e.preventDefault();redo();}
-      if(e.key==='Escape'){setSelectedIds(new Set());setLinkStartId(null);}
+      if(e.key==='Escape'){setSelectedIds(new Set());setLinkStartId(null);setPipeInProgress(null);}
       if((e.key==='Delete'||e.key==='Backspace')&&selectedIds.size>0){e.preventDefault();deleteSelected();}
     };
     window.addEventListener('keydown',handler);
@@ -9820,7 +9829,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   },[links,getCircuitKey]);
 
   // ── Overlay ───────────────────────────────────────────────────────────────
-  useEffect(()=>{drawOverlay();},[markers,selectedIds,cursorPos,currentPage,activeTool,mode,prefixes,scale,symSize,legendPos,counts,links,linkStartId,circuitColorMap]);
+  useEffect(()=>{drawOverlay();},[markers,selectedIds,cursorPos,currentPage,activeTool,mode,prefixes,scale,symSize,legendPos,counts,links,linkStartId,circuitColorMap,pipes,pipeInProgress,activePipeType]);
 
   const drawOverlay=()=>{
     const canvas=overlayRef.current; if(!canvas) return;
@@ -9887,10 +9896,42 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       const tt=symbolTypes.find(t=>t.id===activeTool);
       drawTakeoffSymbol(ctx,activeTool,cx,cy,sz,(tt?.color||'#000'),0.45);
     }
+    // ── Pipe runs ─────────────────────────────────────────────────────────────
+    const drawPipePolyline=(pts,color,alpha=1)=>{
+      if(pts.length<1) return;
+      ctx.save();
+      ctx.globalAlpha=alpha;
+      ctx.strokeStyle=color; ctx.lineWidth=Math.max(2,sz/10); ctx.setLineDash([10,6]); ctx.lineCap='round'; ctx.lineJoin='round';
+      ctx.beginPath();
+      pts.forEach((pt,i)=>{
+        if(i===0) ctx.moveTo(pt.x*canvas.width,pt.y*canvas.height);
+        else ctx.lineTo(pt.x*canvas.width,pt.y*canvas.height);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle=color;
+      pts.forEach(pt=>{ctx.beginPath();ctx.arc(pt.x*canvas.width,pt.y*canvas.height,3,0,Math.PI*2);ctx.fill();});
+      ctx.restore();
+    };
+    pipes.filter(p=>p.page===currentPage).forEach(p=>{
+      drawPipePolyline(p.points,p.type==='HWP'?'#dc2626':'#2563eb');
+    });
+    if(pipeInProgress&&pipeInProgress.page===currentPage){
+      const color=pipeInProgress.type==='HWP'?'#dc2626':'#2563eb';
+      const pts=cursorPos?[...pipeInProgress.points,cursorPos]:pipeInProgress.points;
+      drawPipePolyline(pts,color,0.75);
+    }
+    if(cursorPos&&mode==='pipe'){
+      const color=activePipeType==='HWP'?'#dc2626':'#2563eb';
+      ctx.save(); ctx.fillStyle=color; ctx.globalAlpha=0.8;
+      ctx.beginPath(); ctx.arc(cursorPos.x*canvas.width,cursorPos.y*canvas.height,4,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
     // ── Legend preview (draggable) ────────────────────────────────────────────
     const usedForLegend=symbolTypes.filter(tt=>counts[tt.id]>0);
-    if(usedForLegend.length>0){
-      const rowH=18, padX=8, boxW=160, boxH=18+usedForLegend.length*rowH+8;
+    const usedPipeTypes=PIPE_TYPES.filter(pt=>pipes.some(p=>p.type===pt.id));
+    const totalLegendRows=usedForLegend.length+usedPipeTypes.length;
+    if(totalLegendRows>0){
+      const rowH=18, padX=8, boxW=164, boxH=18+totalLegendRows*rowH+8;
       const lx=legendPos.x*canvas.width, ly=legendPos.y*canvas.height;
       ctx.save();
       ctx.shadowColor='rgba(0,0,0,0.18)'; ctx.shadowBlur=6;
@@ -9910,6 +9951,16 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         ctx.fillStyle=tt.color; ctx.font='bold 9px sans-serif';
         ctx.fillText(`×${counts[tt.id]}`,lx+boxW-28,ry+3);
       });
+      usedPipeTypes.forEach((pt,i)=>{
+        const row=usedForLegend.length+i;
+        const ry=ly+16+row*rowH+rowH/2;
+        ctx.save();
+        ctx.strokeStyle=pt.color; ctx.lineWidth=2; ctx.setLineDash([6,3]); ctx.lineCap='round';
+        ctx.beginPath(); ctx.moveTo(lx+padX,ry); ctx.lineTo(lx+padX+14,ry); ctx.stroke();
+        ctx.restore();
+        ctx.fillStyle='#222'; ctx.font='9px sans-serif';
+        ctx.fillText(pt.label,lx+padX+18,ry+3);
+      });
       ctx.strokeStyle='#ddd'; ctx.lineWidth=0.8;
       ctx.beginPath(); ctx.moveTo(lx,ly+boxH-10); ctx.lineTo(lx+boxW,ly+boxH-10); ctx.stroke();
       ctx.fillStyle='#222'; ctx.font='bold 9px sans-serif';
@@ -9921,11 +9972,12 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   // ── Legend drag helpers ───────────────────────────────────────────────────
   const getLegendBox=useCallback(()=>{
     const canvas=overlayRef.current; if(!canvas) return null;
-    const usedTypes=symbolTypes.filter(tt=>counts[tt.id]>0);
-    if(!usedTypes.length) return null;
-    const rowH=18, boxW=160, boxH=18+usedTypes.length*rowH+8;
-    return{x:legendPos.x*canvas.width,y:legendPos.y*canvas.height,w:boxW,h:boxH};
-  },[counts,legendPos]);
+    const symRows=symbolTypes.filter(tt=>counts[tt.id]>0).length;
+    const pipeRows=PIPE_TYPES.filter(pt=>pipes.some(p=>p.type===pt.id)).length;
+    if(!symRows&&!pipeRows) return null;
+    const rowH=18, boxH=18+(symRows+pipeRows)*rowH+8;
+    return{x:legendPos.x*canvas.width,y:legendPos.y*canvas.height,w:164,h:boxH};
+  },[counts,legendPos,pipes]);
 
   const handleCanvasMouseDown=useCallback((e)=>{
     const canvas=overlayRef.current; if(!canvas) return;
@@ -9984,7 +10036,13 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     const sz=Math.round(symSize*Math.max(0.6,scale/1.5));
     const thr=(sz/canvas.width)*1.6;
     const hit=markers.filter(m=>m.page===currentPage).find(m=>Math.abs(m.x-nx)<thr&&Math.abs(m.y-ny)<thr);
-    if(mode==='place'){
+    if(mode==='pipe'){
+      setPipeInProgress(prev=>{
+        if(!prev||prev.page!==currentPage) return {type:activePipeType,points:[{x:nx,y:ny}],page:currentPage};
+        return {...prev,points:[...prev.points,{x:nx,y:ny}]};
+      });
+      return;
+    } else if(mode==='place'){
       pushHistory([...markers,{id:uid(),page:currentPage,x:nx,y:ny,type:activeTool}]);
     } else if(mode==='link'){
       if(!hit){setLinkStartId(null);return;} // click empty → cancel
@@ -10029,7 +10087,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       const url=await pdfUploadRef.current;
       if(url) finalPdfUrl=url;
     }
-    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,markers,links,prefixes,symSize,legendPos,
+    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,markers,links,pipes,prefixes,symSize,legendPos,
       updatedAt:new Date().toISOString(),createdAt:takeoff?.createdAt||new Date().toISOString()});
     setSaving(false);
   };
@@ -10118,13 +10176,37 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           page.drawText('SW',{x:bx-4,y:by-3,size:5,font,color:rgb(1,1,1)});
         });
       });
+      // ── Pipe runs ─────────────────────────────────────────────────────────
+      const pipesByPage={};
+      pipes.forEach(p=>{(pipesByPage[p.page]||(pipesByPage[p.page]=[])).push(p);});
+      Object.entries(pipesByPage).forEach(([pg,pList])=>{
+        const page=pages[parseInt(pg)-1]; if(!page) return;
+        const pw=page.getWidth(), ph=page.getHeight();
+        pList.forEach(p=>{
+          if(p.points.length<2) return;
+          const hexColor=p.type==='HWP'?'#dc2626':'#2563eb';
+          const [pr,pg2,pb]=hexToRgbF(hexColor); const col=rgb(pr,pg2,pb);
+          for(let i=0;i<p.points.length-1;i++){
+            const x1=p.points[i].x*pw, y1=ph-p.points[i].y*ph;
+            const x2=p.points[i+1].x*pw, y2=ph-p.points[i+1].y*ph;
+            const dx=x2-x1, dy=y2-y1, len=Math.sqrt(dx*dx+dy*dy)||1;
+            let pos=0;
+            while(pos<len){
+              const s=pos/len, e=Math.min((pos+10)/len,1);
+              page.drawLine({start:{x:x1+dx*s,y:y1+dy*s},end:{x:x1+dx*e,y:y1+dy*e},color:col,thickness:1.5});
+              pos+=16; // 10 dash + 6 gap
+            }
+          }
+        });
+      });
       // ── Legend (bottom-right, page 1) ──────────────────────────────────────
       const lp=pages[0];
       const lpw=lp.getWidth(), lph=lp.getHeight();
       const usedTypes=symbolTypes.filter(tt=>counts[tt.id]>0);
-      if(usedTypes.length>0){
+      const usedPdfPipes=PIPE_TYPES.filter(pt=>pipes.some(p=>p.type===pt.id));
+      if(usedTypes.length>0||usedPdfPipes.length>0){
         const rowH=13, padX=8, padY=6, legendW=175;
-        const legendH=padY*2+16+usedTypes.length*rowH;
+        const legendH=padY*2+16+(usedTypes.length+usedPdfPipes.length)*rowH;
         const lx=Math.max(0,Math.min(lpw-legendW,legendPos.x*lpw));
         const ly=Math.max(0,Math.min(lph-legendH,lph*(1-legendPos.y)-legendH));
         lp.drawRectangle({x:lx,y:ly,width:legendW,height:legendH,
@@ -10161,6 +10243,15 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           lp.drawText(`${prefixes[tt.id]||tt.defaultPrefix} — ${tt.label}  ×${counts[tt.id]}`,
             {x:lx+padX+ss+6,y:ry+1,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15)});
         });
+        // Pipe type rows in legend
+        usedPdfPipes.forEach((pt,i)=>{
+          const row=usedTypes.length+i;
+          const ry=ly+legendH-padY-15-(row+1)*rowH;
+          const [pr2,pg3,pb2]=hexToRgbF(pt.color); const pcol=rgb(pr2,pg3,pb2);
+          const sx=lx+padX+1, sy=ry+rowH/2;
+          for(let seg=0;seg<3;seg++) lp.drawLine({start:{x:sx+seg*4,y:sy},end:{x:sx+seg*4+2.5,y:sy},color:pcol,thickness:1.5});
+          lp.drawText(`${pt.label}`,{x:lx+padX+14,y:ry+1,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15)});
+        });
         // total row
         lp.drawLine({start:{x:lx,y:ly+3+rowH},end:{x:lx+legendW,y:ly+3+rowH},color:rgb(0.75,0.75,0.75),thickness:0.5});
         lp.drawText(`TOTAL  ${markers.length}`,{x:lx+padX,y:ly+5,size:6.5,font,color:rgb(0.2,0.2,0.2)});
@@ -10196,14 +10287,39 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         </button>
         {/* Mode */}
         <div style={{display:'flex',border:`1px solid ${T.borderLight}`,borderRadius:8,overflow:'hidden'}}>
-          {[['place','Place',PenLine],['select','Select',MousePointer],['link','Switch Leg',Link2]].map(([m,l,Icon])=>(
-            <button key={m} onClick={()=>{setMode(m);setSelectedIds(new Set());setLinkStartId(null);}}
+          {[['place','Place',PenLine],['select','Select',MousePointer],
+            ...(toolKind==='plumbing'?[['pipe','Draw Pipe',PenLine]]:([['link','Switch Leg',Link2]]))
+          ].map(([m,l,Icon])=>(
+            <button key={m} onClick={()=>{setMode(m);setSelectedIds(new Set());setLinkStartId(null);setPipeInProgress(null);}}
               style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
                 background:mode===m?T.text:'transparent',color:mode===m?T.bg:T.muted,transition:'all 0.15s'}}>
               <Icon size={11}/>{l}
             </button>
           ))}
+          {toolKind==='electrical'&&(
+            <button onClick={()=>{setMode('link');setSelectedIds(new Set());setLinkStartId(null);}}
+              style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
+                background:mode==='link'?T.text:'transparent',color:mode==='link'?T.bg:T.muted,transition:'all 0.15s'}}>
+              <Link2 size={11}/>Switch Leg
+            </button>
+          )}
         </div>
+        {/* Pipe type picker (plumbing) */}
+        {mode==='pipe'&&toolKind==='plumbing'&&(
+          <div style={{display:'flex',gap:6,alignItems:'center'}}>
+            {PIPE_TYPES.map(pt=>(
+              <button key={pt.id} onClick={()=>setActivePipeType(pt.id)}
+                style={{padding:'4px 10px',borderRadius:7,border:`2px solid ${activePipeType===pt.id?pt.color:T.borderLight}`,
+                  cursor:'pointer',fontSize:11,fontWeight:700,color:activePipeType===pt.id?pt.color:T.muted,
+                  background:activePipeType===pt.id?pt.color+'18':'transparent',fontFamily:'inherit'}}>
+                {pt.id==='CWP'?'● Cold Water':'● Hot Water'}
+              </button>
+            ))}
+            <span style={{fontSize:11,color:T.muted,fontStyle:'italic'}}>
+              {pipeInProgress?'Click to add points — right-click to finish':'Click to start drawing a pipe'}
+            </span>
+          </div>
+        )}
         {/* Link mode instructions */}
         {mode==='link'&&(
           <span style={{fontSize:11,color:T.muted,fontStyle:'italic'}}>
@@ -10296,6 +10412,27 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             </div>
           ))}
 
+          {/* Pipe runs (plumbing only) */}
+          {toolKind==='plumbing'&&pipes.length>0&&(
+            <div style={{borderTop:`1px solid ${T.borderLight}`,marginTop:8,paddingTop:8}}>
+              <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:6}}>Pipe Runs</div>
+              {PIPE_TYPES.map(pt=>{
+                const cnt=pipes.filter(p=>p.type===pt.id).length;
+                if(!cnt) return null;
+                return(
+                  <div key={pt.id} style={{display:'flex',alignItems:'center',gap:7,marginBottom:5}}>
+                    <svg width={20} height={8}><line x1={0} y1={4} x2={20} y2={4} stroke={pt.color} strokeWidth={2} strokeDasharray="5,3"/></svg>
+                    <span style={{fontSize:10,color:T.muted,flex:1}}>{pt.label}</span>
+                    <span style={{fontSize:11,fontWeight:700,color:pt.color}}>×{cnt}</span>
+                    <button onClick={()=>setPipes(ps=>ps.filter(p=>!(p.type===pt.id&&p.page===currentPage)))}
+                      title={`Delete ${pt.label} on this page`}
+                      style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'2px',lineHeight:1}}>✕</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* Status + page nav */}
           <div style={{borderTop:`1px solid ${T.borderLight}`,marginTop:8,paddingTop:8}}>
             <div style={{fontSize:11,fontWeight:700,color:T.text}}>Total: {markers.length} points</div>
@@ -10363,13 +10500,20 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             <div style={{position:'relative',display:'inline-block',boxShadow:'0 4px 24px rgba(0,0,0,0.25)',lineHeight:0}}>
               <canvas ref={pdfCanvasRef} style={{display:'block'}}/>
               <canvas ref={overlayRef}
-                style={{position:'absolute',top:0,left:0,cursor:legendDragRef.current?'grabbing':mode==='place'?'crosshair':'default'}}
+                style={{position:'absolute',top:0,left:0,cursor:legendDragRef.current?'grabbing':(mode==='place'||mode==='pipe')?'crosshair':'default'}}
                 onClick={handleOverlayClick}
                 onMouseDown={handleCanvasMouseDown}
                 onMouseMove={handleCanvasMouseMove}
                 onMouseUp={handleCanvasMouseUp}
                 onMouseLeave={()=>{legendDragRef.current=null;setCursorPos(null);}}
-                onContextMenu={e=>{e.preventDefault();setLinkStartId(null);}}
+                onContextMenu={e=>{
+                  e.preventDefault();
+                  setLinkStartId(null);
+                  if(mode==='pipe'&&pipeInProgress){
+                    if(pipeInProgress.points.length>=2) setPipes(ps=>[...ps,{...pipeInProgress,id:uid()}]);
+                    setPipeInProgress(null);
+                  }
+                }}
               />
             </div>
           )}
