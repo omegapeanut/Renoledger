@@ -505,6 +505,26 @@ const uploadRawPdfToCloudinary=async(file)=>{
   }
 };
 
+// IndexedDB helpers — store raw PDF bytes locally so same-device reload is instant
+const _idbName='renoledger-takeoff-pdfs', _idbStore='pdfs', _idbVer=1;
+const _openIdb=()=>new Promise((res,rej)=>{
+  const req=indexedDB.open(_idbName,_idbVer);
+  req.onupgradeneeded=e=>e.target.result.createObjectStore(_idbStore);
+  req.onsuccess=e=>res(e.target.result);
+  req.onerror=rej;
+});
+const savePdfToIdb=async(id,bytes)=>{
+  try{const db=await _openIdb();const tx=db.transaction(_idbStore,'readwrite');
+    tx.objectStore(_idbStore).put(bytes,id);
+    await new Promise((r,j)=>{tx.oncomplete=r;tx.onerror=j;});}
+  catch(e){console.warn('IDB save:',e.message);}
+};
+const loadPdfFromIdb=async(id)=>{
+  try{const db=await _openIdb();const tx=db.transaction(_idbStore,'readonly');
+    return await new Promise((r,j)=>{const req=tx.objectStore(_idbStore).get(id);req.onsuccess=e=>r(e.target.result||null);req.onerror=j;});}
+  catch(e){console.warn('IDB load:',e.message);return null;}
+};
+
 // Save users — strips any photo >50KB to prevent Firebase document size limit on mobile
 // Save invoices — strips proof images >100KB to prevent Firebase document size limit
 // Proof images are kept in memory for the current session; receipt data (amounts, dates) always persists
@@ -9539,7 +9559,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   const [pdfUrl,setPdfUrl]=useState(takeoff?.pdfUrl||'');
   const [legendPos,setLegendPos]=useState(takeoff?.legendPos||{x:0.65,y:0.7});
   const [libsReady,setLibsReady]=useState(false);
-  const [pdfLoading,setPdfLoading]=useState(!!(takeoff?.pdfUrl)); // true while auto-loading saved PDF
+  const [pdfLoading,setPdfLoading]=useState(!!(takeoff?.id||takeoff?.pdfUrl)); // true while auto-loading saved PDF
   const [uploading,setUploading]=useState(false);
   const [exporting,setExporting]=useState(false);
   const [saving,setSaving]=useState(false);
@@ -9615,22 +9635,37 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
     }).catch(()=>setLibsReady(true));
   },[]);
 
-  // Auto-load PDF from saved Cloudinary URL when reopening a takeoff
+  // Auto-load PDF when reopening a takeoff — tries IndexedDB first, then Cloudinary URL
   useEffect(()=>{
-    if(!libsReady||!pdfUrl||pdfDoc) return;
+    if(!libsReady||pdfDoc) return;
+    const hasIdbKey=!!(takeoff?.id);
+    const hasUrl=!!(pdfUrl);
+    if(!hasIdbKey&&!hasUrl) return;
     setPdfLoading(true);
     (async()=>{
       try{
-        const resp=await fetch(pdfUrl);
-        if(!resp.ok){setPdfLoading(false);return;}
-        const ab=await resp.arrayBuffer();
+        let ab=null;
+        // 1. IndexedDB — instant, same device
+        if(hasIdbKey) ab=await loadPdfFromIdb(takeoff.id);
+        // 2. Cloudinary URL — cross-device
+        if(!ab&&hasUrl){
+          try{
+            const resp=await fetch(pdfUrl,{mode:'cors'});
+            if(resp.ok){
+              ab=await resp.arrayBuffer();
+              // Cache locally for next time
+              if(hasIdbKey) savePdfToIdb(takeoff.id, ab);
+            }
+          }catch(fetchErr){console.warn('Cloudinary fetch failed:',fetchErr.message);}
+        }
+        if(!ab){setPdfLoading(false);return;}
         setPdfBytes(ab);
         const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
         setPdfDoc(doc); setTotalPages(doc.numPages); setCurrentPage(1);
       }catch(e){console.warn('Could not reload saved PDF:',e.message);}
       finally{setPdfLoading(false);}
     })();
-  },[libsReady,pdfUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  },[libsReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(()=>{ if(!pdfDoc||!pdfCanvasRef.current) return; renderPage(pdfDoc,currentPage,scale); },[pdfDoc,currentPage,scale]);
 
@@ -9758,6 +9793,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
       const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
       setPdfDoc(doc); setTotalPages(doc.numPages); setCurrentPage(1);
     }catch(e){alert('Could not read PDF: '+e.message);}
+    // Cache bytes in IndexedDB so same-device reload is instant
+    if(takeoff?.id) savePdfToIdb(takeoff.id, ab);
+    // Upload to Cloudinary for cross-device access (best effort)
     const up=uploadRawPdfToCloudinary(file).then(url=>{
       if(url) setPdfUrl(url);
       pdfUploadRef.current=null;
@@ -9978,7 +10016,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
           <div style={{marginBottom:12,padding:'8px',background:T.bg,borderRadius:8,border:`1px solid ${T.borderLight}`}}>
             <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:6}}>Symbol Size</div>
             <div style={{display:'flex',alignItems:'center',gap:6}}>
-              <input type="range" min={10} max={40} step={1} value={symSize}
+              <input type="range" min={5} max={40} step={1} value={symSize}
                 onChange={e=>setSymSize(Number(e.target.value))}
                 style={{flex:1,accentColor:T.accent}}/>
               <span style={{fontSize:11,fontWeight:700,color:T.text,minWidth:28,textAlign:'right'}}>{symSize}px</span>
