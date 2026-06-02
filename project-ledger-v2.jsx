@@ -9623,7 +9623,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
       if(tag==='INPUT'||tag==='TEXTAREA') return;
       if((e.ctrlKey||e.metaKey)&&e.key==='z'&&!e.shiftKey){e.preventDefault();undo();}
       if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.key==='z'&&e.shiftKey))){e.preventDefault();redo();}
-      if(e.key==='Escape'){setSelectedIds(new Set());}
+      if(e.key==='Escape'){setSelectedIds(new Set());setLinkStartId(null);}
       if((e.key==='Delete'||e.key==='Backspace')&&selectedIds.size>0){e.preventDefault();deleteSelected();}
     };
     window.addEventListener('keydown',handler);
@@ -9882,12 +9882,12 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
       if(!hit){setLinkStartId(null);return;} // click empty → cancel
       if(!linkStartId){setLinkStartId(hit.id);return;} // first click → set start
       if(hit.id===linkStartId){setLinkStartId(null);return;} // click same → cancel
-      // Toggle link between linkStartId and hit.id
+      // Toggle link between linkStartId and hit.id; keep linkStartId active for continuous linking
       const exists=links.find(l=>
         (l.fromId===linkStartId&&l.toId===hit.id)||(l.fromId===hit.id&&l.toId===linkStartId));
       if(exists){setLinks(prev=>prev.filter(l=>l.id!==exists.id));}
       else{setLinks(prev=>[...prev,{id:uid(),fromId:linkStartId,toId:hit.id,page:currentPage}]);}
-      setLinkStartId(null);
+      // Do NOT clear linkStartId — stay in continuous linking mode until right-click/Escape
     } else {
       if(e.shiftKey){
         setSelectedIds(prev=>{const n=new Set(prev);if(hit){if(n.has(hit.id))n.delete(hit.id);else n.add(hit.id);}return n;});
@@ -10069,7 +10069,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
         {/* Link mode instructions */}
         {mode==='link'&&(
           <span style={{fontSize:11,color:T.muted,fontStyle:'italic'}}>
-            {linkStartId?'Click another point to link, or same point to cancel':'Click a point to start a switch leg'}
+            {linkStartId?'Click lights to keep linking — right-click or Esc to finish':'Click a switch/light to start, then click each connected point'}
           </span>
         )}
         {/* Multi-select actions */}
@@ -10231,6 +10231,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
                 onMouseMove={handleCanvasMouseMove}
                 onMouseUp={handleCanvasMouseUp}
                 onMouseLeave={()=>{legendDragRef.current=null;setCursorPos(null);}}
+                onContextMenu={e=>{e.preventDefault();setLinkStartId(null);}}
               />
             </div>
           )}
