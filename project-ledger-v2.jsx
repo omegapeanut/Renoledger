@@ -9646,6 +9646,13 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
     }finally{renderingRef.current=false;}
   };
 
+  // ── Counts (before drawOverlay useEffect and getLegendBox) ───────────────
+  const counts=useMemo(()=>{
+    const c={}; TAKEOFF_TYPES.forEach(t=>c[t.id]=0);
+    markers.forEach(m=>{if(c[m.type]!==undefined)c[m.type]++;});
+    return c;
+  },[markers]);
+
   // ── Overlay ───────────────────────────────────────────────────────────────
   useEffect(()=>{drawOverlay();},[markers,selectedIds,cursorPos,currentPage,activeTool,mode,prefixes,scale,symSize,legendPos,counts]);
 
@@ -9700,13 +9707,6 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
       ctx.restore();
     }
   };
-
-  // ── Counts (must be before getLegendBox which references it) ─────────────
-  const counts=useMemo(()=>{
-    const c={}; TAKEOFF_TYPES.forEach(t=>c[t.id]=0);
-    markers.forEach(m=>{if(c[m.type]!==undefined)c[m.type]++;});
-    return c;
-  },[markers]);
 
   // ── Legend drag helpers ───────────────────────────────────────────────────
   const getLegendBox=useCallback(()=>{
