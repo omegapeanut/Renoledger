@@ -7,7 +7,8 @@ import {
   BookUser, Building2, Home, ZoomIn, Phone, Mail, MapPin,
   RotateCcw, Trash, AlertCircle, Info,
   Building, FileSpreadsheet, Calendar, Download, Settings,
-  LogIn, LogOut, Star, Terminal, Database, RefreshCw, ClipboardList
+  LogIn, LogOut, Star, Terminal, Database, RefreshCw, ClipboardList,
+  Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -28,7 +29,7 @@ const _sa = {
   password:['Ren','o','5202'].join(''),          // RenoLedger + 2025 reversed = Reno5202
   role:'superadmin',
   tabs:['dashboard','projects','quotations','sitereports','invoices','payments','contacts','reports',
-        'commissions','warranty','workers','checkin','accounts','trash','admin','system'],
+        'commissions','warranty','workers','checkin','accounts','trash','admin','system','tools'],
   widgets:['stats','budget','catbreak','cashflow','aging','margin','gantt','collection','suppliers','attendance','recent'],
   active:true,
   assignedProjects:[],
@@ -82,13 +83,130 @@ const ROLE_LABEL = {admin:'Admin',accounts:'Accounts',designer:'Designer',pm:'Pr
 const ROLE_CLR = {admin:'#ef4444',accounts:'#3b82f6',designer:'#7c3aed',pm:'#0891b2',expense_entry:'#059669',superadmin:'#6d28d9'};
 
 const ROLE_DEFAULT_TABS = {
-  admin:       ['dashboard','projects','quotations','sitereports','payments','reports','warranty','invoices','claims','commissions','admin','workers','checkin','accounts','contacts','trash'],
+  admin:       ['dashboard','projects','quotations','sitereports','payments','reports','warranty','invoices','claims','commissions','tools','admin','workers','checkin','accounts','contacts','trash'],
   accounts:    ['dashboard','payments','reports','invoices'],
   designer:    ['dashboard','projects','quotations','sitereports','claims'],
   pm:          ['dashboard','projects','quotations','sitereports','payments','warranty','invoices','claims','workers'],
   expense_entry:['invoices','claims'],
   site_worker: ['checkin'],
 };
+
+// ─── PLAN TAKEOFF ─────────────────────────────────────────────────────────────
+const TAKEOFF_TYPES = [
+  {id:'LP',  label:'Lighting Point',       color:'#ca8a04', defaultPrefix:'L'},
+  {id:'SP',  label:'Single Power Socket',  color:'#dc2626', defaultPrefix:'E'},
+  {id:'DP',  label:'Double Power Socket',  color:'#ea580c', defaultPrefix:'E'},
+  {id:'DA',  label:'Data Point',           color:'#2563eb', defaultPrefix:'D'},
+  {id:'SW',  label:'Switch',               color:'#16a34a', defaultPrefix:'S'},
+  {id:'TP',  label:'Telephone Point',      color:'#7c3aed', defaultPrefix:'T'},
+  {id:'TV',  label:'TV Outlet',            color:'#0891b2', defaultPrefix:'V'},
+  {id:'AC',  label:'Air-Con Point',        color:'#0d9488', defaultPrefix:'A'},
+  {id:'EL',  label:'Emergency Light',      color:'#9f1239', defaultPrefix:'M'},
+  {id:'EX',  label:'Exhaust Fan',          color:'#92400e', defaultPrefix:'F'},
+];
+
+// Load an external script once (CDN libs for PDF.js and pdf-lib)
+function loadExtScript(src){
+  return new Promise((resolve,reject)=>{
+    if(document.querySelector(`script[src="${src}"]`)){resolve();return;}
+    const s=document.createElement('script');
+    s.src=src; s.onload=resolve; s.onerror=reject;
+    document.head.appendChild(s);
+  });
+}
+
+// Convert hex color string to [r, g, b] each 0-1 for pdf-lib
+function hexToRgbF(hex){
+  const r=parseInt(hex.slice(1,3),16)/255;
+  const g=parseInt(hex.slice(3,5),16)/255;
+  const b=parseInt(hex.slice(5,7),16)/255;
+  return [r,g,b];
+}
+
+// Draw a takeoff symbol on a 2D canvas context (cx,cy = center, sz = size in px)
+function drawTakeoffSymbol(ctx, typeId, cx, cy, sz, color, alpha=1){
+  ctx.save();
+  ctx.globalAlpha=alpha;
+  ctx.strokeStyle=color; ctx.fillStyle=color;
+  ctx.lineWidth=Math.max(1.5,sz/14); ctx.lineCap='round'; ctx.lineJoin='round';
+  const h=sz/2;
+  switch(typeId){
+    case 'SP':
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      ctx.beginPath();ctx.moveTo(cx-h+2,cy);ctx.lineTo(cx+h-2,cy);ctx.stroke();
+      break;
+    case 'DP':
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      [cy-h*0.28,cy+h*0.28].forEach(y=>{ctx.beginPath();ctx.moveTo(cx-h+2,y);ctx.lineTo(cx+h-2,y);ctx.stroke();});
+      break;
+    case 'LP':
+      ctx.beginPath();ctx.arc(cx,cy,h,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx,cy-h);ctx.lineTo(cx,cy+h);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx-h,cy);ctx.lineTo(cx+h,cy);ctx.stroke();
+      break;
+    case 'SW':
+      ctx.beginPath();ctx.arc(cx,cy,h-1,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx-h*0.5,cy+h*0.5);ctx.lineTo(cx+h*0.5,cy-h*0.5);ctx.stroke();
+      break;
+    case 'DA':
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      ctx.font=`bold ${Math.round(sz*0.6)}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('D',cx,cy+1); break;
+    case 'TP':
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      ctx.font=`bold ${Math.round(sz*0.6)}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('T',cx,cy+1); break;
+    case 'TV':
+      ctx.strokeRect(cx-h,cy-h*0.55,sz,sz*0.6);
+      ctx.beginPath();ctx.moveTo(cx,cy-h*0.55);ctx.lineTo(cx-h*0.55,cy-h);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx,cy-h*0.55);ctx.lineTo(cx+h*0.55,cy-h);ctx.stroke();
+      break;
+    case 'AC':
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      ctx.font=`bold ${Math.round(sz*0.38)}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('A/C',cx,cy+1); break;
+    case 'EL':
+      ctx.fillStyle=color+'28'; ctx.fillRect(cx-h,cy-h,sz,sz);
+      ctx.fillStyle=color; ctx.strokeRect(cx-h,cy-h,sz,sz);
+      ctx.font=`bold ${Math.round(sz*0.36)}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('EM',cx,cy+1); break;
+    case 'EX':
+      ctx.beginPath();ctx.arc(cx,cy,h,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy,h*0.28,0,Math.PI*2);ctx.stroke();
+      for(let i=0;i<4;i++){
+        const a=i*Math.PI/2+Math.PI/4;
+        ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*h*0.3,cy+Math.sin(a)*h*0.3);
+        ctx.lineTo(cx+Math.cos(a)*h,cy+Math.sin(a)*h);ctx.stroke();
+      }
+      break;
+    default:
+      ctx.beginPath();ctx.arc(cx,cy,h,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Draw the label (number) to the right of a symbol
+function drawTakeoffLabel(ctx, label, cx, cy, sz, color){
+  ctx.save();
+  const fs=Math.max(9,Math.round(sz*0.62));
+  ctx.font=`bold ${fs}px Arial`;
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  const tw=ctx.measureText(label).width;
+  const px=cx+sz/2+3, py=cy;
+  ctx.fillStyle='rgba(255,255,255,0.88)';
+  ctx.fillRect(px-1,py-fs*0.62,tw+4,fs*1.24);
+  ctx.fillStyle=color;
+  ctx.fillText(label,px+1,py+1);
+  ctx.restore();
+}
+
+// Compute the display label for a marker given the full markers array
+function getTakeoffLabel(marker, markers, prefixes){
+  const sameType=markers.filter(m=>m.type===marker.type);
+  const idx=sameType.findIndex(m=>m.id===marker.id);
+  const prefix=prefixes[marker.type]||marker.type;
+  return prefix+String(idx+1).padStart(3,'0');
+}
 
 const DASH_WIDGETS = [
   {id:'stats',      label:'Summary Stats (Revenue/Expenses/Profit)'},
@@ -9294,6 +9412,429 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
   );
 }
 
+// ─── TOOLS HUB ───────────────────────────────────────────────────────────────
+function ToolsHub({acctSettings, projects, isAdmin, onShowToast}){
+  const [takeoffs,setTakeoffs]=useState([]);
+  const [loaded,setLoaded]=useState(false);
+  const [editing,setEditing]=useState(null);
+
+  useEffect(()=>{
+    loadS('takeoffs',[]).then(d=>{setTakeoffs(Array.isArray(d)?d:[]);setLoaded(true);});
+  },[]);
+
+  const saveTakeoff=(t)=>{
+    const exists=takeoffs.find(x=>x.id===t.id);
+    const upd=exists?takeoffs.map(x=>x.id===t.id?t:x):[...takeoffs,t];
+    setTakeoffs(upd); saveS('takeoffs',upd);
+    onShowToast?.('Takeoff saved');
+  };
+
+  const deleteTakeoff=(id)=>{
+    if(!window.confirm('Delete this takeoff?'))return;
+    const upd=takeoffs.filter(x=>x.id!==id);
+    setTakeoffs(upd); saveS('takeoffs',upd);
+  };
+
+  if(editing!==null) return(
+    <TakeoffEditor key={editing?.id||'new'} takeoff={editing} onSave={(t)=>{saveTakeoff(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
+  );
+
+  return(
+    <div style={{maxWidth:900,margin:'0 auto',padding:'4px 0 40px'}}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20,flexWrap:'wrap',gap:10}}>
+        <div>
+          <div style={{fontSize:22,fontWeight:800,color:T.text,letterSpacing:'-0.03em'}}>Tools</div>
+          <div style={{fontSize:13,color:T.muted,marginTop:2}}>Utilities for site work and documentation</div>
+        </div>
+      </div>
+
+      {/* Tool cards */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:14,marginBottom:32}}>
+        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:20,cursor:'pointer',transition:'all 0.15s'}}
+          onClick={()=>setEditing({id:uid(),name:'',pdfFilename:'',pdfUrl:'',markers:[],prefixes:{},createdAt:new Date().toISOString()})}>
+          <div style={{width:44,height:44,background:'rgba(8,145,178,0.1)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12}}>
+            <Layers size={22} style={{color:'#0891b2'}}/>
+          </div>
+          <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:4}}>Plan Takeoff</div>
+          <div style={{fontSize:12,color:T.muted,lineHeight:1.5}}>Upload a PDF layout plan and count electrical, data, lighting points with Singapore standard symbols.</div>
+          <div style={{marginTop:12,fontSize:11,fontWeight:600,color:'#0891b2',display:'flex',alignItems:'center',gap:4}}>
+            <Plus size={11}/>New Takeoff
+          </div>
+        </div>
+      </div>
+
+      {/* Saved takeoffs */}
+      {loaded&&takeoffs.length>0&&(
+        <div>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Takeoffs</div>
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {[...takeoffs].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(t=>{
+              const totalPoints=t.markers?.length||0;
+              const countByType={};
+              (t.markers||[]).forEach(m=>{countByType[m.type]=(countByType[m.type]||0)+1;});
+              return(
+                <div key={t.id} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'14px 18px',display:'flex',alignItems:'center',gap:14,boxShadow:T.shadow}}>
+                  <div style={{width:38,height:38,background:'rgba(8,145,178,0.1)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                    <Layers size={18} style={{color:'#0891b2'}}/>
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:2}}>{t.name||'Untitled Takeoff'}</div>
+                    <div style={{fontSize:11,color:T.muted}}>{t.pdfFilename||'No PDF'} · {totalPoints} point{totalPoints!==1?'s':''} · {fmtDate(t.createdAt)}</div>
+                    {totalPoints>0&&(
+                      <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:5}}>
+                        {Object.entries(countByType).map(([tid,cnt])=>{
+                          const tt=TAKEOFF_TYPES.find(x=>x.id===tid);
+                          return <span key={tid} style={{fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:10,background:(tt?.color||T.accent)+'22',color:tt?.color||T.accent}}>{(t.prefixes?.[tid]||tt?.defaultPrefix||tid)}:{cnt}</span>;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{display:'flex',gap:8,flexShrink:0}}>
+                    <Btn variant="secondary" size="sm" onClick={()=>setEditing(t)}><Edit3 size={12}/>Open</Btn>
+                    {isAdmin&&<button onClick={()=>deleteTakeoff(t.id)} style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'4px'}}><Trash2 size={14}/></button>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── TAKEOFF EDITOR ──────────────────────────────────────────────────────────
+function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
+  const [name,setName]=useState(takeoff?.name||'');
+  const [markers,setMarkers]=useState(takeoff?.markers||[]);
+  const [prefixes,setPrefixes]=useState(()=>{
+    const d={}; TAKEOFF_TYPES.forEach(t=>d[t.id]=t.defaultPrefix); return {...d,...(takeoff?.prefixes||{})};
+  });
+  const [activeTool,setActiveTool]=useState('LP');
+  const [mode,setMode]=useState('place'); // 'place' | 'select'
+  const [selectedId,setSelectedId]=useState(null);
+  const [currentPage,setCurrentPage]=useState(1);
+  const [totalPages,setTotalPages]=useState(0);
+  const [scale,setScale]=useState(1.5);
+  const [pdfDoc,setPdfDoc]=useState(null);
+  const [pdfBytes,setPdfBytes]=useState(null); // ArrayBuffer for export
+  const [pdfFilename,setPdfFilename]=useState(takeoff?.pdfFilename||'');
+  const [pdfUrl,setPdfUrl]=useState(takeoff?.pdfUrl||'');
+  const [libsReady,setLibsReady]=useState(false);
+  const [uploading,setUploading]=useState(false);
+  const [exporting,setExporting]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [cursorPos,setCursorPos]=useState(null); // {x,y} normalized for preview
+  const [pageSize,setPageSize]=useState({w:595,h:842}); // unscaled pts
+  const pdfCanvasRef=useRef();
+  const overlayRef=useRef();
+  const fileInputRef=useRef();
+  const renderingRef=useRef(false);
+  const pdfDocRef=useRef(null);
+
+  // Load PDF.js + pdf-lib from CDN once
+  useEffect(()=>{
+    Promise.all([
+      loadExtScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'),
+      loadExtScript('https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js'),
+    ]).then(()=>{
+      if(window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc=
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      setLibsReady(true);
+    }).catch(()=>setLibsReady(true));
+  },[]);
+
+  // Render PDF page whenever doc/page/scale changes
+  useEffect(()=>{
+    if(!pdfDoc||!pdfCanvasRef.current) return;
+    renderPage(pdfDoc,currentPage,scale);
+  },[pdfDoc,currentPage,scale]);
+
+  const renderPage=async(doc,pageNum,sc)=>{
+    if(renderingRef.current) return;
+    renderingRef.current=true;
+    try{
+      const page=await doc.getPage(pageNum);
+      const vp=page.getViewport({scale:sc});
+      const canvas=pdfCanvasRef.current;
+      if(!canvas){renderingRef.current=false;return;}
+      canvas.width=vp.width; canvas.height=vp.height;
+      const ov=overlayRef.current;
+      if(ov){ov.width=vp.width;ov.height=vp.height;}
+      setPageSize({w:vp.width/sc,h:vp.height/sc});
+      await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
+    }finally{renderingRef.current=false;}
+  };
+
+  // Redraw overlay whenever markers/selection/cursor/page changes
+  useEffect(()=>{
+    drawOverlay();
+  },[markers,selectedId,cursorPos,currentPage,activeTool,mode,prefixes,scale]);
+
+  const drawOverlay=()=>{
+    const canvas=overlayRef.current;
+    if(!canvas) return;
+    const ctx=canvas.getContext('2d');
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const pageMarkers=markers.filter(m=>m.page===currentPage);
+    pageMarkers.forEach(m=>{
+      const cx=m.x*canvas.width, cy=m.y*canvas.height;
+      const tt=TAKEOFF_TYPES.find(t=>t.id===m.type);
+      const color=tt?.color||'#000';
+      const isSelected=m.id===selectedId;
+      const sz=Math.round(20*Math.max(0.7,scale/1.5));
+      if(isSelected){
+        ctx.save(); ctx.strokeStyle='#f59e0b'; ctx.lineWidth=2.5; ctx.setLineDash([3,2]);
+        ctx.beginPath(); ctx.arc(cx,cy,sz/2+5,0,Math.PI*2); ctx.stroke();
+        ctx.restore();
+      }
+      drawTakeoffSymbol(ctx,m.type,cx,cy,sz,color);
+      drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes),cx,cy,sz,color);
+    });
+    // cursor preview in place mode
+    if(cursorPos&&mode==='place'){
+      const cx=cursorPos.x*canvas.width, cy=cursorPos.y*canvas.height;
+      const tt=TAKEOFF_TYPES.find(t=>t.id===activeTool);
+      const sz=Math.round(20*Math.max(0.7,scale/1.5));
+      drawTakeoffSymbol(ctx,activeTool,cx,cy,sz,(tt?.color||'#000'),0.45);
+    }
+  };
+
+  const loadPdfFile=async(file)=>{
+    if(!window.pdfjsLib){alert('PDF viewer not ready, please wait a moment.');return;}
+    setUploading(true);
+    setPdfFilename(file.name);
+    const ab=await file.arrayBuffer();
+    setPdfBytes(ab);
+    try{
+      const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
+      pdfDocRef.current=doc;
+      setPdfDoc(doc);
+      setTotalPages(doc.numPages);
+      setCurrentPage(1);
+    }catch(e){alert('Could not read PDF: '+e.message);}
+    // Upload to Cloudinary for persistent storage
+    uploadToCloudinary(file).then(url=>{ if(url) setPdfUrl(url); });
+    setUploading(false);
+  };
+
+  const handleOverlayClick=(e)=>{
+    const canvas=overlayRef.current;
+    if(!canvas) return;
+    const rect=canvas.getBoundingClientRect();
+    const rawX=(e.clientX-rect.left), rawY=(e.clientY-rect.top);
+    const nx=rawX/canvas.width, ny=rawY/canvas.height;
+    if(mode==='place'){
+      const newMarker={id:uid(),page:currentPage,x:nx,y:ny,type:activeTool};
+      setMarkers(prev=>[...prev,newMarker]);
+      setSelectedId(null);
+    } else {
+      // select nearest marker on this page
+      const sz=Math.round(20*Math.max(0.7,scale/1.5));
+      const threshold=(sz/canvas.width)*1.4;
+      const pageMarkers=markers.filter(m=>m.page===currentPage);
+      const hit=pageMarkers.find(m=>Math.abs(m.x-nx)<threshold&&Math.abs(m.y-ny)<threshold);
+      setSelectedId(hit?.id||null);
+    }
+  };
+
+  const deleteSelected=()=>{
+    if(!selectedId) return;
+    setMarkers(prev=>prev.filter(m=>m.id!==selectedId));
+    setSelectedId(null);
+  };
+
+  const handleSave=async()=>{
+    setSaving(true);
+    const t={...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl,markers,prefixes,updatedAt:new Date().toISOString(),createdAt:takeoff?.createdAt||new Date().toISOString()};
+    onSave(t);
+    setSaving(false);
+  };
+
+  const exportPdf=async()=>{
+    if(!pdfBytes){alert('Re-upload the PDF to enable export.');return;}
+    if(!window.PDFLib){alert('Export library not loaded, please wait.');return;}
+    setExporting(true);
+    try{
+      const {PDFDocument,rgb,StandardFonts}=window.PDFLib;
+      const doc=await PDFDocument.load(pdfBytes);
+      const font=await doc.embedFont(StandardFonts.HelveticaBold);
+      const pages=doc.getPages();
+      // group markers by page
+      const byPage={};
+      markers.forEach(m=>{(byPage[m.page]||(byPage[m.page]=[])).push(m);});
+      Object.entries(byPage).forEach(([pg,mList])=>{
+        const page=pages[parseInt(pg)-1];
+        if(!page) return;
+        const pw=page.getWidth(), ph=page.getHeight();
+        const symSz=14; // symbol size in PDF points
+        mList.forEach(m=>{
+          const px=m.x*pw, py=ph-m.y*ph; // flip Y (PDF bottom-left origin)
+          const tt=TAKEOFF_TYPES.find(t=>t.id===m.type);
+          const [r,g,b]=hexToRgbF(tt?.color||'#000000');
+          const col=rgb(r,g,b);
+          const h=symSz/2;
+          const drawRect=()=>page.drawRectangle({x:px-h,y:py-h,width:symSz,height:symSz,borderColor:col,borderWidth:1.2,color:undefined});
+          const drawLine=(x1,y1,x2,y2)=>page.drawLine({start:{x:px+x1,y:py+y1},end:{x:px+x2,y:py+y2},color:col,thickness:1.2});
+          const drawCirc=(rad)=>page.drawCircle({x:px,y:py,size:rad,borderColor:col,borderWidth:1.2,color:undefined});
+          switch(m.type){
+            case 'SP': drawRect(); drawLine(-h+1,0,h-1,0); break;
+            case 'DP': drawRect(); drawLine(-h+1,h*0.28,h-1,h*0.28); drawLine(-h+1,-h*0.28,h-1,-h*0.28); break;
+            case 'LP': drawCirc(h); drawLine(0,-h,0,h); drawLine(-h,0,h,0); break;
+            case 'SW': drawCirc(h-0.5); drawLine(-h*0.5,-h*0.5,h*0.5,h*0.5); break;
+            case 'EX': drawCirc(h); drawCirc(h*0.28); break;
+            default:   drawRect(); break;
+          }
+          // label
+          const label=getTakeoffLabel(m,markers,prefixes);
+          page.drawText(label,{x:px+h+2,y:py-3,size:7,font,color:col});
+        });
+      });
+      const bytes=await doc.save();
+      const blob=new Blob([bytes],{type:'application/pdf'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url; a.download=(name||'takeoff')+'-annotated.pdf'; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url),5000);
+    }catch(e){alert('Export failed: '+e.message);}
+    setExporting(false);
+  };
+
+  // Counts per type
+  const counts=useMemo(()=>{
+    const c={};
+    TAKEOFF_TYPES.forEach(t=>c[t.id]=0);
+    markers.forEach(m=>{if(c[m.type]!==undefined)c[m.type]++;});
+    return c;
+  },[markers]);
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',height:'calc(100vh - 64px)',overflow:'hidden'}}>
+      {/* Top bar */}
+      <div style={{background:T.card,borderBottom:`1px solid ${T.borderLight}`,padding:'10px 16px',display:'flex',alignItems:'center',gap:10,flexShrink:0,flexWrap:'wrap'}}>
+        <button onClick={onBack} style={{background:'none',border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'5px 10px',cursor:'pointer',color:T.muted,fontSize:12,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5}}>
+          <RotateCcw size={12}/>Back
+        </button>
+        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Takeoff name…"
+          style={{flex:1,minWidth:120,maxWidth:220,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'5px 10px',fontSize:13,fontWeight:600,color:T.text,background:T.bg,fontFamily:'inherit'}}/>
+        {/* PDF upload */}
+        <input ref={fileInputRef} type="file" accept=".pdf" style={{display:'none'}} onChange={e=>e.target.files[0]&&loadPdfFile(e.target.files[0])}/>
+        <button onClick={()=>fileInputRef.current?.click()}
+          style={{background:T.accentLight,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'5px 12px',cursor:'pointer',color:T.text,fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5}}>
+          {uploading?<Loader2 size={12} style={{animation:'spin 1s linear infinite'}}/>:<Upload size={12}/>}
+          {pdfFilename?pdfFilename:'Upload PDF'}
+        </button>
+        {/* Mode toggle */}
+        <div style={{display:'flex',border:`1px solid ${T.borderLight}`,borderRadius:8,overflow:'hidden'}}>
+          {[['place','Place',PenLine],['select','Select',MousePointer]].map(([m,l,Icon])=>(
+            <button key={m} onClick={()=>setMode(m)}
+              style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
+                background:mode===m?T.text:'transparent',color:mode===m?T.bg:T.muted,transition:'all 0.15s'}}>
+              <Icon size={11}/>{l}
+            </button>
+          ))}
+        </div>
+        {mode==='select'&&selectedId&&(
+          <button onClick={deleteSelected}
+            style={{background:T.dangerLight,border:'none',borderRadius:8,padding:'5px 10px',cursor:'pointer',color:T.danger,fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5}}>
+            <Trash2 size={12}/>Delete
+          </button>
+        )}
+        {/* Zoom */}
+        <div style={{display:'flex',alignItems:'center',gap:4,marginLeft:'auto'}}>
+          <button onClick={()=>setScale(s=>Math.max(0.5,+(s-0.25).toFixed(2)))} style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'4px 7px',cursor:'pointer',color:T.text}}><Minus size={12}/></button>
+          <span style={{fontSize:11,fontWeight:700,color:T.muted,minWidth:38,textAlign:'center'}}>{Math.round(scale*100)}%</span>
+          <button onClick={()=>setScale(s=>Math.min(3,+(s+0.25).toFixed(2)))} style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'4px 7px',cursor:'pointer',color:T.text}}><Plus size={12}/></button>
+        </div>
+        <Btn onClick={handleSave} loading={saving}>Save</Btn>
+        <Btn variant="secondary" onClick={exportPdf} loading={exporting}><Download size={12}/>Export PDF</Btn>
+      </div>
+
+      {/* Body */}
+      <div style={{flex:1,display:'flex',overflow:'hidden'}}>
+        {/* Left sidebar — tool palette */}
+        <div style={{width:200,background:T.card,borderRight:`1px solid ${T.borderLight}`,padding:'12px 10px',overflowY:'auto',flexShrink:0}}>
+          <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:10}}>Point Types</div>
+          {TAKEOFF_TYPES.map(tt=>(
+            <div key={tt.id}
+              onClick={()=>{setActiveTool(tt.id);if(mode==='select')setMode('place');}}
+              style={{display:'flex',alignItems:'center',gap:8,padding:'7px 8px',borderRadius:8,marginBottom:4,cursor:'pointer',
+                border:`1px solid ${activeTool===tt.id&&mode==='place'?tt.color:T.borderLight}`,
+                background:activeTool===tt.id&&mode==='place'?tt.color+'14':'transparent',
+                transition:'all 0.12s'}}>
+              {/* Miniature symbol preview */}
+              <canvas width={18} height={18} style={{flexShrink:0}} ref={el=>{
+                if(!el) return;
+                const ctx=el.getContext('2d');
+                ctx.clearRect(0,0,18,18);
+                drawTakeoffSymbol(ctx,tt.id,9,9,16,tt.color);
+              }}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:11,fontWeight:600,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{tt.label}</div>
+                <div style={{display:'flex',alignItems:'center',gap:4,marginTop:2}}>
+                  <input value={prefixes[tt.id]||''} maxLength={3}
+                    onChange={e=>{const v=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');setPrefixes(p=>({...p,[tt.id]:v}));}}
+                    onClick={ev=>ev.stopPropagation()}
+                    style={{width:32,border:`1px solid ${T.borderLight}`,borderRadius:5,padding:'1px 4px',fontSize:10,fontWeight:800,textAlign:'center',fontFamily:'monospace',color:tt.color,background:T.bg}}/>
+                  <span style={{fontSize:10,color:T.dim}}>×{counts[tt.id]}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+          {/* Total */}
+          <div style={{borderTop:`1px solid ${T.borderLight}`,marginTop:8,paddingTop:8}}>
+            <div style={{fontSize:11,fontWeight:700,color:T.text}}>Total: {markers.length} points</div>
+            <div style={{fontSize:10,color:T.muted,marginTop:2}}>Page {currentPage} of {totalPages||'—'}</div>
+          </div>
+          {/* Page nav */}
+          {totalPages>1&&(
+            <div style={{display:'flex',gap:4,marginTop:10}}>
+              <button disabled={currentPage<=1} onClick={()=>setCurrentPage(p=>p-1)}
+                style={{flex:1,padding:'5px',border:`1px solid ${T.borderLight}`,borderRadius:6,cursor:'pointer',fontSize:11,background:T.bg,color:T.text,fontFamily:'inherit'}}>‹ Prev</button>
+              <button disabled={currentPage>=totalPages} onClick={()=>setCurrentPage(p=>p+1)}
+                style={{flex:1,padding:'5px',border:`1px solid ${T.borderLight}`,borderRadius:6,cursor:'pointer',fontSize:11,background:T.bg,color:T.text,fontFamily:'inherit'}}>Next ›</button>
+            </div>
+          )}
+        </div>
+
+        {/* Canvas area */}
+        <div style={{flex:1,overflowAuto:'scroll',overflow:'auto',background:T.bg==='#141412'?'#1a1a18':'#e5e7eb',display:'flex',justifyContent:'flex-start',alignItems:'flex-start',padding:16}}>
+          {!pdfDoc?(
+            <div style={{margin:'auto',textAlign:'center',padding:'60px 20px'}}>
+              <div style={{width:64,height:64,background:T.card,borderRadius:18,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',border:`1px solid ${T.borderLight}`}}>
+                <Upload size={28} style={{color:T.dim}}/>
+              </div>
+              <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:8}}>Upload a PDF floor plan</div>
+              <div style={{fontSize:13,color:T.muted,marginBottom:16,maxWidth:300,lineHeight:1.6}}>
+                {libsReady?'Click "Upload PDF" in the top bar to get started.':'Loading PDF viewer…'}
+              </div>
+              {libsReady&&(
+                <Btn onClick={()=>fileInputRef.current?.click()}><Upload size={12}/>Upload PDF</Btn>
+              )}
+            </div>
+          ):(
+            <div style={{position:'relative',display:'inline-block',boxShadow:'0 4px 24px rgba(0,0,0,0.25)',lineHeight:0}}>
+              <canvas ref={pdfCanvasRef} style={{display:'block'}}/>
+              <canvas ref={overlayRef}
+                style={{position:'absolute',top:0,left:0,cursor:mode==='place'?'crosshair':'default'}}
+                onClick={handleOverlayClick}
+                onMouseMove={e=>{
+                  const canvas=overlayRef.current;
+                  if(!canvas) return;
+                  const rect=canvas.getBoundingClientRect();
+                  setCursorPos({x:(e.clientX-rect.left)/canvas.width,y:(e.clientY-rect.top)/canvas.height});
+                }}
+                onMouseLeave={()=>setCursorPos(null)}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Quotations({quotes,setQuotes,projects,isAdmin,acctSettings,onShowToast,onSoftDelete}){
   const [search,setSearch]=useState('');
   const [filterType,setFilterType]=useState('all');
@@ -12580,7 +13121,9 @@ const ALL_NAV=[
   {id:'invoices',    label:'Supplier Invoices',Icon:Receipt,         group:'expenses'},
   {id:'claims',      label:'Expense Claims',   Icon:DollarSign,      group:'expenses'},
   {id:'commissions', label:'Commissions',      Icon:Users,           group:'expenses'},
-  // Group 3 — Admin (slate accent)
+  // Group 3 — Tools
+  {id:'tools',       label:'Tools',            Icon:Wrench,          group:'tools'},
+  // Group 4 — Admin (slate accent)
   {id:'admin',       label:'Admin',            Icon:Shield,          group:'admin'},
   {id:'workers',     label:'Site Workers',     Icon:Users,           group:'admin'},
   {id:'checkin',     label:'Check In/Out',     Icon:LogIn,           group:'admin'},
@@ -12594,6 +13137,7 @@ const ALL_NAV=[
 const NAV_GROUPS={
   project: {label:'Project',  color:'#0891b2', bg:'rgba(8,145,178,0.08)',  dot:'#0891b2'},
   expenses:{label:'Expenses', color:'#d97706', bg:'rgba(217,119,6,0.08)',  dot:'#d97706'},
+  tools:   {label:'Tools',    color:'#7c3aed', bg:'rgba(124,58,237,0.08)', dot:'#7c3aed'},
   admin:   {label:'Admin',    color:'#64748b', bg:'rgba(100,116,139,0.08)',dot:'#64748b'},
 };
 
@@ -13499,6 +14043,7 @@ export default function App(){
           {tab==='workers'&&<WorkerAdmin siteWorkers={siteWorkers} setSiteWorkers={setSiteWorkers} attendance={attendance} setAttendance={setAttendance} projects={projects} invoices={invoices} setInvoices={setInvoices} claims={workerClaims} setClaims={setWorkerClaims} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='checkin'&&<WorkerLoginScreen siteWorkers={siteWorkers} onLogin={(w)=>setWorkerSession(w)} onAdminLogin={()=>setTab('dashboard')} acctSettings={acctSettings}/>}
           {tab==='accounts'&&isAdmin&&(<CompanyAccounts projects={projects} invoices={invoices} payments={payments} acctSettings={acctSettings} setAcctSettings={setAcctSettings}/>)}
+          {tab==='tools'&&<ToolsHub acctSettings={acctSettings} projects={userProjects} isAdmin={isAdmin} onShowToast={handleShowToast}/>}
           {tab==='trash'&&isAdmin&&(<TrashBin trash={trash} onRestore={handleRestore} onPermanentDelete={handlePermanentDelete} isSuperAdmin={isSuperAdmin}/>)}
           {tab==='admin'&&isAdmin&&(<Admin users={users.filter(u=>u.id!=='__sa__')} setUsers={setUsers} projects={projects} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} actionLog={actionLog} onUndoAction={handleRestore} isSuperAdmin={isSuperAdmin}/>)}
           {tab==='system'&&isSuperAdmin&&(<SystemPanel projects={projects} invoices={invoices} payments={payments} siteWorkers={siteWorkers} attendance={attendance} users={users} warranties={warranties} trash={trash} acctSettings={acctSettings} setAcctSettings={setAcctSettings} actionLog={actionLog} setActionLog={setActionLog} logAction={logAction}/>)}
