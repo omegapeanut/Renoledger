@@ -105,6 +105,20 @@ const TAKEOFF_TYPES = [
   {id:'EX',  label:'Exhaust Fan',          color:'#92400e', defaultPrefix:'F'},
 ];
 
+// Singapore standard plumbing symbols (SS 636 / CP 48)
+const PLUMBING_TYPES = [
+  {id:'CW',  label:'Cold Water Point',     color:'#2563eb', defaultPrefix:'CW'},
+  {id:'HW',  label:'Hot Water Point',      color:'#dc2626', defaultPrefix:'HW'},
+  {id:'WC',  label:'Water Closet',         color:'#64748b', defaultPrefix:'WC'},
+  {id:'HB',  label:'Hand Basin',           color:'#0891b2', defaultPrefix:'HB'},
+  {id:'SH',  label:'Shower Point',         color:'#06b6d4', defaultPrefix:'SH'},
+  {id:'FD',  label:'Floor Drain',          color:'#475569', defaultPrefix:'FD'},
+  {id:'WH',  label:'Water Heater',         color:'#f59e0b', defaultPrefix:'WH'},
+  {id:'GV',  label:'Gate Valve',           color:'#16a34a', defaultPrefix:'GV'},
+  {id:'BV',  label:'Ball Valve',           color:'#0d9488', defaultPrefix:'BV'},
+  {id:'WM',  label:'Washing Machine Pt',   color:'#7c3aed', defaultPrefix:'WM'},
+];
+
 // Colors cycled per circuit (one color per unique switch in switch-leg mode)
 const CIRCUIT_COLORS=['#e11d48','#2563eb','#d97706','#9333ea','#0891b2','#c026d3','#0369a1','#15803d','#ea580c','#6366f1'];
 
@@ -182,6 +196,46 @@ function drawTakeoffSymbol(ctx, typeId, cx, cy, sz, color, alpha=1){
         ctx.lineTo(cx+Math.cos(a)*h,cy+Math.sin(a)*h);ctx.stroke();
       }
       break;
+    // ── Plumbing symbols ─────────────────────────────────────────────────────
+    case 'CW': // Cold water — circle with C
+      ctx.beginPath();ctx.arc(cx,cy,h,0,Math.PI*2);ctx.stroke();
+      ctx.font=`bold ${Math.round(sz*0.55)}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('C',cx,cy+1); break;
+    case 'HW': // Hot water — circle with H
+      ctx.beginPath();ctx.arc(cx,cy,h,0,Math.PI*2);ctx.stroke();
+      ctx.font=`bold ${Math.round(sz*0.55)}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('H',cx,cy+1); break;
+    case 'WC': // Water closet — rectangle above, oval below
+      ctx.strokeRect(cx-h,cy-h,sz,sz*0.55);
+      ctx.beginPath();ctx.arc(cx,cy+h*0.22,h*0.65,0,Math.PI*2);ctx.stroke(); break;
+    case 'HB': // Hand basin — rectangle with circle drain
+      ctx.strokeRect(cx-h,cy-h,sz,sz*0.65);
+      ctx.beginPath();ctx.arc(cx,cy-h*0.12,h*0.28,0,Math.PI*2);ctx.stroke(); break;
+    case 'SH': // Shower — centre circle + 4 droplets
+      ctx.beginPath();ctx.arc(cx,cy,h*0.52,0,Math.PI*2);ctx.stroke();
+      for(let i=0;i<4;i++){
+        const a=i*Math.PI/2;
+        ctx.beginPath();ctx.arc(cx+Math.cos(a)*h*0.88,cy+Math.sin(a)*h*0.88,h*0.16,0,Math.PI*2);ctx.fill();
+      } break;
+    case 'FD': // Floor drain — square with X
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      ctx.beginPath();ctx.moveTo(cx-h+1,cy-h+1);ctx.lineTo(cx+h-1,cy+h-1);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx+h-1,cy-h+1);ctx.lineTo(cx-h+1,cy+h-1);ctx.stroke(); break;
+    case 'WH': // Water heater — double circle with text
+      ctx.beginPath();ctx.arc(cx,cy,h,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy,h*0.52,0,Math.PI*2);ctx.stroke();
+      ctx.font=`bold ${Math.round(sz*0.3)}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('WH',cx,cy+1); break;
+    case 'GV': // Gate valve — bowtie (two triangles)
+      ctx.beginPath();ctx.moveTo(cx-h,cy-h);ctx.lineTo(cx,cy);ctx.lineTo(cx-h,cy+h);ctx.closePath();ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx+h,cy-h);ctx.lineTo(cx,cy);ctx.lineTo(cx+h,cy+h);ctx.closePath();ctx.stroke(); break;
+    case 'BV': // Ball valve — circle with horizontal pipe + handle
+      ctx.beginPath();ctx.arc(cx,cy,h*0.58,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx-h,cy);ctx.lineTo(cx+h,cy);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx,cy-h*0.58);ctx.lineTo(cx,cy-h);ctx.stroke(); break;
+    case 'WM': // Washing machine — square with inner circle
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      ctx.beginPath();ctx.arc(cx,cy,h*0.5,0,Math.PI*2);ctx.stroke(); break;
     default:
       ctx.beginPath();ctx.arc(cx,cy,h,0,Math.PI*2);ctx.stroke();
   }
@@ -2023,10 +2077,10 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
   const [filter,setFilter]=useState('All');
   const [confirmPerm,setConfirmPerm]=useState(null);
   const daysLeft=d=>Math.max(0,Math.ceil((new Date(d).getTime()+365*24*60*60*1000-Date.now())/864e5));
-  const TL={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'PDF Markup'};
-  const TI={project:FolderOpen,invoice:Receipt,payment:CreditCard,user:Users,staffClaim:DollarSign,quote:FileSpreadsheet,sitereport:ClipboardList,takeoff:Wrench};
-  const TC={project:T.info,invoice:T.warning,payment:T.success,user:T.danger,staffClaim:'#7c3aed',quote:T.accent,sitereport:'#0891b2',takeoff:'#7c3aed'};
-  const counts={All:trash.length,project:0,invoice:0,payment:0,user:0,staffClaim:0,quote:0,sitereport:0,takeoff:0};
+  const TL={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'Electrical Markup',plumbing:'Plumbing Markup'};
+  const TI={project:FolderOpen,invoice:Receipt,payment:CreditCard,user:Users,staffClaim:DollarSign,quote:FileSpreadsheet,sitereport:ClipboardList,takeoff:Wrench,plumbing:Wrench};
+  const TC={project:T.info,invoice:T.warning,payment:T.success,user:T.danger,staffClaim:'#7c3aed',quote:T.accent,sitereport:'#0891b2',takeoff:'#7c3aed',plumbing:'#2563eb'};
+  const counts={All:trash.length,project:0,invoice:0,payment:0,user:0,staffClaim:0,quote:0,sitereport:0,takeoff:0,plumbing:0};
   trash.forEach(t=>{if(counts[t._trashType]!==undefined)counts[t._trashType]++;});
   const shown=[...(filter==='All'?trash:trash.filter(t=>t._trashType===filter))].sort((a,b)=>new Date(b._deletedAt)-new Date(a._deletedAt));
 
@@ -2046,7 +2100,7 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
         </div>
       )}
       <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-        {['All','project','quote','sitereport','invoice','payment','staffClaim','user','takeoff'].map(f=>(
+        {['All','project','quote','sitereport','invoice','payment','staffClaim','user','takeoff','plumbing'].map(f=>(
           <button key={f} onClick={()=>setFilter(f)} style={{padding:'6px 14px',borderRadius:20,
             border:`1px solid ${filter===f?T.text:T.borderLight}`,
             background:filter===f?T.text:'transparent',
@@ -9453,11 +9507,17 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
 // ─── TOOLS HUB ───────────────────────────────────────────────────────────────
 function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
   const [takeoffs,setTakeoffs]=useState([]);
+  const [plumbings,setPlumbings]=useState([]);
   const [loaded,setLoaded]=useState(false);
-  const [editing,setEditing]=useState(null);
+  const [editing,setEditing]=useState(null);       // {data, kind}
+  const [editingKind,setEditingKind]=useState('electrical');
 
   useEffect(()=>{
-    loadS('takeoffs',[]).then(d=>{setTakeoffs(Array.isArray(d)?d:[]);setLoaded(true);});
+    Promise.all([loadS('takeoffs',[]),loadS('plumbings',[])]).then(([e,p])=>{
+      setTakeoffs(Array.isArray(e)?e:[]);
+      setPlumbings(Array.isArray(p)?p:[]);
+      setLoaded(true);
+    });
   },[]);
 
   const saveTakeoff=(t)=>{
@@ -9466,15 +9526,67 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
     setTakeoffs(upd); saveS('takeoffs',upd);
     onShowToast?.('Takeoff saved');
   };
-
   const deleteTakeoff=(t)=>{
     const upd=takeoffs.filter(x=>x.id!==t.id);
     setTakeoffs(upd); saveS('takeoffs',upd);
     onSoftDelete?.({...t,_trashType:'takeoff',_deletedAt:new Date().toISOString()});
   };
 
-  if(editing!==null) return(
-    <TakeoffEditor key={editing?.id||'new'} takeoff={editing} onSave={(t)=>{saveTakeoff(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
+  const savePlumbing=(t)=>{
+    const exists=plumbings.find(x=>x.id===t.id);
+    const upd=exists?plumbings.map(x=>x.id===t.id?t:x):[...plumbings,t];
+    setPlumbings(upd); saveS('plumbings',upd);
+    onShowToast?.('Plumbing markup saved');
+  };
+  const deletePlumbing=(t)=>{
+    const upd=plumbings.filter(x=>x.id!==t.id);
+    setPlumbings(upd); saveS('plumbings',upd);
+    onSoftDelete?.({...t,_trashType:'plumbing',_deletedAt:new Date().toISOString()});
+  };
+
+  const newBlank=()=>({id:uid(),name:'',pdfFilename:'',pdfUrl:'',markers:[],prefixes:{},createdAt:new Date().toISOString()});
+
+  if(editing!==null){
+    if(editingKind==='plumbing') return(
+      <TakeoffEditor key={editing?.id||'new-p'} takeoff={editing} symbolTypes={PLUMBING_TYPES} toolKind="plumbing"
+        onSave={(t)=>{savePlumbing(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
+    );
+    return(
+      <TakeoffEditor key={editing?.id||'new'} takeoff={editing} onSave={(t)=>{saveTakeoff(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
+    );
+  }
+
+  const SavedList=({items,symTypes,accentColor,onOpen,onDelete})=>(
+    <div style={{display:'flex',flexDirection:'column',gap:10}}>
+      {[...items].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(t=>{
+        const totalPoints=t.markers?.length||0;
+        const countByType={};
+        (t.markers||[]).forEach(m=>{countByType[m.type]=(countByType[m.type]||0)+1;});
+        return(
+          <div key={t.id} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'14px 18px',display:'flex',alignItems:'center',gap:14,boxShadow:T.shadow}}>
+            <div style={{width:38,height:38,background:accentColor+'18',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              <Layers size={18} style={{color:accentColor}}/>
+            </div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:2}}>{t.name||'Untitled'}</div>
+              <div style={{fontSize:11,color:T.muted}}>{t.pdfFilename||'No PDF'} · {totalPoints} point{totalPoints!==1?'s':''} · {fmtDate(t.createdAt)}</div>
+              {totalPoints>0&&(
+                <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:5}}>
+                  {Object.entries(countByType).map(([tid,cnt])=>{
+                    const tt=symTypes.find(x=>x.id===tid);
+                    return <span key={tid} style={{fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:10,background:(tt?.color||T.accent)+'22',color:tt?.color||T.accent}}>{(t.prefixes?.[tid]||tt?.defaultPrefix||tid)}:{cnt}</span>;
+                  })}
+                </div>
+              )}
+            </div>
+            <div style={{display:'flex',gap:8,flexShrink:0}}>
+              <Btn variant="secondary" size="sm" onClick={()=>onOpen(t)}><Edit3 size={12}/>Open</Btn>
+              {isAdmin&&<button onClick={()=>onDelete(t)} title="Move to Trash" style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'4px'}}><Trash2 size={14}/></button>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 
   return(
@@ -9489,8 +9601,9 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
 
       {/* Tool cards */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:14,marginBottom:32}}>
+        {/* Electrical */}
         <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:20,cursor:'pointer',transition:'all 0.15s'}}
-          onClick={()=>setEditing({id:uid(),name:'',pdfFilename:'',pdfUrl:'',markers:[],prefixes:{},createdAt:new Date().toISOString()})}>
+          onClick={()=>{setEditingKind('electrical');setEditing(newBlank());}}>
           <div style={{width:44,height:44,background:'rgba(8,145,178,0.1)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12}}>
             <Layers size={22} style={{color:'#0891b2'}}/>
           </div>
@@ -9500,42 +9613,37 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
             <Plus size={11}/>New Takeoff
           </div>
         </div>
+        {/* Plumbing */}
+        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:20,cursor:'pointer',transition:'all 0.15s'}}
+          onClick={()=>{setEditingKind('plumbing');setEditing(newBlank());}}>
+          <div style={{width:44,height:44,background:'rgba(37,99,235,0.1)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12}}>
+            <Wrench size={22} style={{color:'#2563eb'}}/>
+          </div>
+          <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:4}}>Plumbing PDF Markup</div>
+          <div style={{fontSize:12,color:T.muted,lineHeight:1.5}}>Upload a PDF layout plan and mark water points, valves, drains, and fixtures with Singapore standard plumbing symbols (SS 636).</div>
+          <div style={{marginTop:12,fontSize:11,fontWeight:600,color:'#2563eb',display:'flex',alignItems:'center',gap:4}}>
+            <Plus size={11}/>New Markup
+          </div>
+        </div>
       </div>
 
-      {/* Saved takeoffs */}
+      {/* Saved electrical takeoffs */}
       {loaded&&takeoffs.length>0&&(
+        <div style={{marginBottom:28}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Electrical Takeoffs</div>
+          <SavedList items={takeoffs} symTypes={TAKEOFF_TYPES} accentColor="#0891b2"
+            onOpen={t=>{setEditingKind('electrical');setEditing(t);}}
+            onDelete={deleteTakeoff}/>
+        </div>
+      )}
+
+      {/* Saved plumbing markups */}
+      {loaded&&plumbings.length>0&&(
         <div>
-          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Takeoffs</div>
-          <div style={{display:'flex',flexDirection:'column',gap:10}}>
-            {[...takeoffs].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(t=>{
-              const totalPoints=t.markers?.length||0;
-              const countByType={};
-              (t.markers||[]).forEach(m=>{countByType[m.type]=(countByType[m.type]||0)+1;});
-              return(
-                <div key={t.id} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,padding:'14px 18px',display:'flex',alignItems:'center',gap:14,boxShadow:T.shadow}}>
-                  <div style={{width:38,height:38,background:'rgba(8,145,178,0.1)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                    <Layers size={18} style={{color:'#0891b2'}}/>
-                  </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:2}}>{t.name||'Untitled Takeoff'}</div>
-                    <div style={{fontSize:11,color:T.muted}}>{t.pdfFilename||'No PDF'} · {totalPoints} point{totalPoints!==1?'s':''} · {fmtDate(t.createdAt)}</div>
-                    {totalPoints>0&&(
-                      <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:5}}>
-                        {Object.entries(countByType).map(([tid,cnt])=>{
-                          const tt=TAKEOFF_TYPES.find(x=>x.id===tid);
-                          return <span key={tid} style={{fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:10,background:(tt?.color||T.accent)+'22',color:tt?.color||T.accent}}>{(t.prefixes?.[tid]||tt?.defaultPrefix||tid)}:{cnt}</span>;
-                        })}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{display:'flex',gap:8,flexShrink:0}}>
-                    <Btn variant="secondary" size="sm" onClick={()=>setEditing(t)}><Edit3 size={12}/>Open</Btn>
-                    {isAdmin&&<button onClick={()=>deleteTakeoff(t)} title="Move to Trash" style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'4px'}}><Trash2 size={14}/></button>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Plumbing Markups</div>
+          <SavedList items={plumbings} symTypes={PLUMBING_TYPES} accentColor="#2563eb"
+            onOpen={t=>{setEditingKind('plumbing');setEditing(t);}}
+            onDelete={deletePlumbing}/>
         </div>
       )}
     </div>
@@ -9543,14 +9651,14 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
 }
 
 // ─── TAKEOFF EDITOR ──────────────────────────────────────────────────────────
-function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
+function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolTypes=TAKEOFF_TYPES, toolKind='electrical'}){
   const [name,setName]=useState(takeoff?.name||'');
   const [markers,setMarkers]=useState(takeoff?.markers||[]);
   const [prefixes,setPrefixes]=useState(()=>{
-    const d={}; TAKEOFF_TYPES.forEach(t=>d[t.id]=t.defaultPrefix); return {...d,...(takeoff?.prefixes||{})};
+    const d={}; symbolTypes.forEach(t=>d[t.id]=t.defaultPrefix); return {...d,...(takeoff?.prefixes||{})};
   });
   const [symSize,setSymSize]=useState(takeoff?.symSize||20);
-  const [activeTool,setActiveTool]=useState('LP');
+  const [activeTool,setActiveTool]=useState(symbolTypes[0].id);
   const [mode,setMode]=useState('place'); // 'place' | 'select' | 'link'
   const [selectedIds,setSelectedIds]=useState(new Set());
   const [links,setLinks]=useState(takeoff?.links||[]); // [{id,fromId,toId,page}]
@@ -9694,7 +9802,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
 
   // ── Counts (before drawOverlay useEffect and getLegendBox) ───────────────
   const counts=useMemo(()=>{
-    const c={}; TAKEOFF_TYPES.forEach(t=>c[t.id]=0);
+    const c={}; symbolTypes.forEach(t=>c[t.id]=0);
     markers.forEach(m=>{if(c[m.type]!==undefined)c[m.type]++;});
     return c;
   },[markers]);
@@ -9721,7 +9829,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
     const sz=Math.round(symSize*Math.max(0.6,scale/1.5));
     markers.filter(m=>m.page===currentPage).forEach(m=>{
       const cx=m.x*canvas.width, cy=m.y*canvas.height;
-      const tt=TAKEOFF_TYPES.find(t=>t.id===m.type);
+      const tt=symbolTypes.find(t=>t.id===m.type);
       const color=tt?.color||'#000';
       if(selectedIds.has(m.id)){
         ctx.save(); ctx.strokeStyle='#f59e0b'; ctx.lineWidth=2.5; ctx.setLineDash([3,2]);
@@ -9776,11 +9884,11 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
     }
     if(cursorPos&&mode==='place'){
       const cx=cursorPos.x*canvas.width, cy=cursorPos.y*canvas.height;
-      const tt=TAKEOFF_TYPES.find(t=>t.id===activeTool);
+      const tt=symbolTypes.find(t=>t.id===activeTool);
       drawTakeoffSymbol(ctx,activeTool,cx,cy,sz,(tt?.color||'#000'),0.45);
     }
     // ── Legend preview (draggable) ────────────────────────────────────────────
-    const usedForLegend=TAKEOFF_TYPES.filter(tt=>counts[tt.id]>0);
+    const usedForLegend=symbolTypes.filter(tt=>counts[tt.id]>0);
     if(usedForLegend.length>0){
       const rowH=18, padX=8, boxW=160, boxH=18+usedForLegend.length*rowH+8;
       const lx=legendPos.x*canvas.width, ly=legendPos.y*canvas.height;
@@ -9813,7 +9921,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   // ── Legend drag helpers ───────────────────────────────────────────────────
   const getLegendBox=useCallback(()=>{
     const canvas=overlayRef.current; if(!canvas) return null;
-    const usedTypes=TAKEOFF_TYPES.filter(tt=>counts[tt.id]>0);
+    const usedTypes=symbolTypes.filter(tt=>counts[tt.id]>0);
     if(!usedTypes.length) return null;
     const rowH=18, boxW=160, boxH=18+usedTypes.length*rowH+8;
     return{x:legendPos.x*canvas.width,y:legendPos.y*canvas.height,w:boxW,h:boxH};
@@ -9946,18 +10054,36 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
         const h=symSzPt/2;
         mList.forEach(m=>{
           const px=m.x*pw, py=ph-m.y*ph;
-          const tt=TAKEOFF_TYPES.find(t=>t.id===m.type);
+          const tt=symbolTypes.find(t=>t.id===m.type);
           const [r,g,b]=hexToRgbF(tt?.color||'#000');
           const col=rgb(r,g,b);
           const dR=()=>page.drawRectangle({x:px-h,y:py-h,width:symSzPt,height:symSzPt,borderColor:col,borderWidth:1,color:undefined});
           const dL=(x1,y1,x2,y2)=>page.drawLine({start:{x:px+x1,y:py+y1},end:{x:px+x2,y:py+y2},color:col,thickness:1});
           const dC=(rad)=>page.drawCircle({x:px,y:py,size:rad,borderColor:col,borderWidth:1,color:undefined});
+          const dT=(txt,sz2)=>page.drawText(txt,{x:px-sz2*0.35,y:py-sz2*0.35,size:sz2,font,color:col});
           switch(m.type){
             case 'SP': dR(); dL(-h+1,0,h-1,0); break;
             case 'DP': dR(); dL(-h+1,h*0.28,h-1,h*0.28); dL(-h+1,-h*0.28,h-1,-h*0.28); break;
             case 'LP': dC(h); dL(0,-h,0,h); dL(-h,0,h,0); break;
             case 'SW': dC(h-0.5); dL(-h*0.5,-h*0.5,h*0.5,h*0.5); break;
             case 'EX': dC(h); dC(h*0.3); break;
+            // ── Plumbing ──────────────────────────────────────────────────────
+            case 'CW': dC(h); dT('C',h*1.1); break;
+            case 'HW': dC(h); dT('H',h*1.1); break;
+            case 'WC':
+              page.drawRectangle({x:px-h,y:py,width:symSzPt,height:symSzPt*0.55,borderColor:col,borderWidth:1,color:undefined});
+              dC(h*0.65); break;
+            case 'HB':
+              page.drawRectangle({x:px-h,y:py,width:symSzPt,height:symSzPt*0.65,borderColor:col,borderWidth:1,color:undefined});
+              page.drawCircle({x:px,y:py+h*0.28,size:h*0.28,borderColor:col,borderWidth:0.8,color:undefined}); break;
+            case 'SH': dC(h*0.52); dC(h*0.18); break;
+            case 'FD': dR(); dL(-h+1,-h+1,h-1,h-1); dL(h-1,-h+1,-h+1,h-1); break;
+            case 'WH': dC(h); dC(h*0.52); break;
+            case 'GV':
+              dL(-h,-h,0,0); dL(0,0,-h,h);
+              dL(h,-h,0,0); dL(0,0,h,h); break;
+            case 'BV': dC(h*0.58); dL(-h,0,h,0); dL(0,h*0.58,0,h); break;
+            case 'WM': dR(); dC(h*0.5); break;
             default:   dR(); break;
           }
           page.drawText(getTakeoffLabel(m,markers,prefixes),{x:px+h+2,y:py-3,size:Math.max(5,symSzPt*0.55),font,color:col});
@@ -9995,7 +10121,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
       // ── Legend (bottom-right, page 1) ──────────────────────────────────────
       const lp=pages[0];
       const lpw=lp.getWidth(), lph=lp.getHeight();
-      const usedTypes=TAKEOFF_TYPES.filter(tt=>counts[tt.id]>0);
+      const usedTypes=symbolTypes.filter(tt=>counts[tt.id]>0);
       if(usedTypes.length>0){
         const rowH=13, padX=8, padY=6, legendW=175;
         const legendH=padY*2+16+usedTypes.length*rowH;
@@ -10019,6 +10145,17 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
             case 'LP': dC2(ss/2); dL2(0,-ss/2,0,ss/2); dL2(-ss/2,0,ss/2,0); break;
             case 'SW': dC2(ss/2-0.5); dL2(-ss*0.3,-ss*0.3,ss*0.3,ss*0.3); break;
             case 'EX': dC2(ss/2); dC2(ss*0.2); break;
+            // ── Plumbing ────────────────────────────────────────────────────────
+            case 'CW': dC2(ss/2); break;
+            case 'HW': dC2(ss/2); break;
+            case 'WC': dR2(); break;
+            case 'HB': dR2(); dC2(ss*0.2); break;
+            case 'SH': dC2(ss/2); dC2(ss*0.18); break;
+            case 'FD': dR2(); dL2(-ss/2+1,-ss/2+1,ss/2-1,ss/2-1); dL2(ss/2-1,-ss/2+1,-ss/2+1,ss/2-1); break;
+            case 'WH': dC2(ss/2); dC2(ss*0.28); break;
+            case 'GV': dL2(-ss/2,-ss/2,0,0); dL2(0,0,-ss/2,ss/2); dL2(ss/2,-ss/2,0,0); dL2(0,0,ss/2,ss/2); break;
+            case 'BV': dC2(ss*0.38); dL2(-ss/2,0,ss/2,0); dL2(0,ss*0.38,0,ss/2); break;
+            case 'WM': dR2(); dC2(ss*0.3); break;
             default:   dR2(); break;
           }
           lp.drawText(`${prefixes[tt.id]||tt.defaultPrefix} — ${tt.label}  ×${counts[tt.id]}`,
@@ -10134,7 +10271,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
 
           {/* Point types */}
           <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:8}}>Point Types</div>
-          {TAKEOFF_TYPES.map(tt=>(
+          {symbolTypes.map(tt=>(
             <div key={tt.id}
               onClick={()=>{setActiveTool(tt.id);if(mode==='select')setMode('place');}}
               style={{display:'flex',alignItems:'center',gap:8,padding:'7px 8px',borderRadius:8,marginBottom:4,cursor:'pointer',
@@ -10178,7 +10315,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
           {markers.length>0&&(
             <div style={{borderTop:`1px solid ${T.borderLight}`,marginTop:12,paddingTop:10}}>
               <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:8}}>Legend</div>
-              {TAKEOFF_TYPES.filter(tt=>counts[tt.id]>0).map(tt=>(
+              {symbolTypes.filter(tt=>counts[tt.id]>0).map(tt=>(
                 <div key={tt.id} style={{display:'flex',alignItems:'center',gap:7,marginBottom:5}}>
                   <canvas width={14} height={14} style={{flexShrink:0}} ref={el=>{
                     if(!el) return;
@@ -13839,8 +13976,9 @@ export default function App(){
     else if(_trashType==='quote'){setQuotes(p=>{const u=[...p,orig];saveS('quotes',u);return u;});}
     else if(_trashType==='sitereport'){setSiteReports(p=>{const u=[...p,orig];saveS('siteReports',u);return u;});}
     else if(_trashType==='takeoff'){loadS('takeoffs',[]).then(existing=>{const u=[...existing,orig];saveS('takeoffs',u);});}
+    else if(_trashType==='plumbing'){loadS('plumbings',[]).then(existing=>{const u=[...existing,orig];saveS('plumbings',u);});}
     setTrash(prev=>{const upd=prev.filter(t=>t.id!==item.id);saveS('trash',upd);return upd;});
-    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting'}[_trashType]||_trashType;
+    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'Electrical Markup',plumbing:'Plumbing Markup'}[_trashType]||_trashType;
     const label=orig.name||orig.invoiceNo||orig.quoteNo||orig.title||orig.email||orig.id;
     logAction(`RESTORE_${(_trashType||'').toUpperCase()}`, `Restored ${typeName}: ${label}`, orig);
   },[logAction]);
@@ -13849,7 +13987,7 @@ export default function App(){
     setTrash(prev=>{
       const item=prev.find(t=>t.id===id);
       if(item){
-        const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'PDF Markup'}[item._trashType]||item._trashType;
+        const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'Electrical Markup',plumbing:'Plumbing Markup'}[item._trashType]||item._trashType;
         logAction('PERMANENT_DELETE', `Permanently deleted ${typeName}: ${item.name||item.invoiceNo||item.quoteNo||item.title||item.email||id}`, item);
       }
       const upd=prev.filter(t=>t.id!==id);saveS('trash',upd);return upd;
