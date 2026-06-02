@@ -489,6 +489,21 @@ const uploadToCloudinary = async (file) => {
   }
 };
 
+const uploadRawPdfToCloudinary=async(file)=>{
+  if(!file||file.type!=='application/pdf') return null;
+  try{
+    const fd=new FormData();
+    fd.append('upload_preset',CLOUDINARY_PRESET);
+    fd.append('file',file);
+    const res=await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/raw/upload`,{method:'POST',body:fd});
+    if(!res.ok) throw new Error(`Cloudinary ${res.status}`);
+    const data=await res.json();
+    return data.secure_url||null;
+  }catch(e){
+    console.warn('uploadRawPdfToCloudinary error:',e.message);
+    return null;
+  }
+};
 
 // Save users — strips any photo >50KB to prevent Firebase document size limit on mobile
 // Save invoices — strips proof images >100KB to prevent Firebase document size limit
@@ -9522,6 +9537,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   const [pdfBytes,setPdfBytes]=useState(null);
   const [pdfFilename,setPdfFilename]=useState(takeoff?.pdfFilename||'');
   const [pdfUrl,setPdfUrl]=useState(takeoff?.pdfUrl||'');
+  const [legendPos,setLegendPos]=useState(takeoff?.legendPos||{x:0.65,y:0.7});
   const [libsReady,setLibsReady]=useState(false);
   const [uploading,setUploading]=useState(false);
   const [exporting,setExporting]=useState(false);
@@ -9534,6 +9550,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   const overlayRef=useRef();
   const fileInputRef=useRef();
   const renderingRef=useRef(false);
+  const legendDragRef=useRef(null); // {offsetX,offsetY} normalized
+  const didDragLegendRef=useRef(false);
 
   // ── History ───────────────────────────────────────────────────────────────
   const pushHistory=useCallback((newMarkers)=>{
@@ -9629,7 +9647,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   };
 
   // ── Overlay ───────────────────────────────────────────────────────────────
-  useEffect(()=>{drawOverlay();},[markers,selectedIds,cursorPos,currentPage,activeTool,mode,prefixes,scale,symSize]);
+  useEffect(()=>{drawOverlay();},[markers,selectedIds,cursorPos,currentPage,activeTool,mode,prefixes,scale,symSize,legendPos,counts]);
 
   const drawOverlay=()=>{
     const canvas=overlayRef.current; if(!canvas) return;
@@ -9652,7 +9670,73 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
       const tt=TAKEOFF_TYPES.find(t=>t.id===activeTool);
       drawTakeoffSymbol(ctx,activeTool,cx,cy,sz,(tt?.color||'#000'),0.45);
     }
+    // ── Legend preview (draggable) ────────────────────────────────────────────
+    const usedForLegend=TAKEOFF_TYPES.filter(tt=>counts[tt.id]>0);
+    if(usedForLegend.length>0){
+      const rowH=18, padX=8, boxW=160, boxH=18+usedForLegend.length*rowH+8;
+      const lx=legendPos.x*canvas.width, ly=legendPos.y*canvas.height;
+      ctx.save();
+      ctx.shadowColor='rgba(0,0,0,0.18)'; ctx.shadowBlur=6;
+      ctx.fillStyle='rgba(255,255,255,0.92)';
+      ctx.strokeStyle='#7c3aed'; ctx.lineWidth=1.5; ctx.setLineDash([4,3]);
+      ctx.fillRect(lx,ly,boxW,boxH); ctx.strokeRect(lx,ly,boxW,boxH);
+      ctx.setLineDash([]); ctx.shadowBlur=0;
+      ctx.fillStyle='#7c3aed'; ctx.font='bold 9.5px sans-serif';
+      ctx.fillText('⠿ LEGEND  (drag to move)',lx+padX,ly+13);
+      ctx.strokeStyle='#ddd'; ctx.lineWidth=0.8;
+      ctx.beginPath(); ctx.moveTo(lx,ly+16); ctx.lineTo(lx+boxW,ly+16); ctx.stroke();
+      usedForLegend.forEach((tt,i)=>{
+        const ry=ly+16+i*rowH+rowH/2;
+        drawTakeoffSymbol(ctx,tt.id,lx+padX+7,ry,12,tt.color);
+        ctx.fillStyle='#222'; ctx.font='9px sans-serif';
+        ctx.fillText(`${tt.label}`,lx+padX+18,ry+3);
+        ctx.fillStyle=tt.color; ctx.font='bold 9px sans-serif';
+        ctx.fillText(`×${counts[tt.id]}`,lx+boxW-28,ry+3);
+      });
+      ctx.strokeStyle='#ddd'; ctx.lineWidth=0.8;
+      ctx.beginPath(); ctx.moveTo(lx,ly+boxH-10); ctx.lineTo(lx+boxW,ly+boxH-10); ctx.stroke();
+      ctx.fillStyle='#222'; ctx.font='bold 9px sans-serif';
+      ctx.fillText(`Total: ${markers.length}`,lx+padX,ly+boxH-2);
+      ctx.restore();
+    }
   };
+
+  // ── Legend drag helpers ───────────────────────────────────────────────────
+  const getLegendBox=useCallback(()=>{
+    const canvas=overlayRef.current; if(!canvas) return null;
+    const usedTypes=TAKEOFF_TYPES.filter(tt=>counts[tt.id]>0);
+    if(!usedTypes.length) return null;
+    const rowH=18, boxW=160, boxH=18+usedTypes.length*rowH+8;
+    return{x:legendPos.x*canvas.width,y:legendPos.y*canvas.height,w:boxW,h:boxH};
+  },[counts,legendPos]);
+
+  const handleCanvasMouseDown=useCallback((e)=>{
+    const canvas=overlayRef.current; if(!canvas) return;
+    const rect=canvas.getBoundingClientRect();
+    const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    const box=getLegendBox();
+    if(box&&mx>=box.x&&mx<=box.x+box.w&&my>=box.y&&my<=box.y+box.h){
+      legendDragRef.current={offsetX:(mx-box.x)/canvas.width,offsetY:(my-box.y)/canvas.height};
+      e.preventDefault();
+    }
+  },[getLegendBox]);
+
+  const handleCanvasMouseMove=useCallback((e)=>{
+    const canvas=overlayRef.current; if(!canvas) return;
+    const rect=canvas.getBoundingClientRect();
+    const nx=(e.clientX-rect.left)/canvas.width, ny=(e.clientY-rect.top)/canvas.height;
+    if(legendDragRef.current){
+      const{offsetX,offsetY}=legendDragRef.current;
+      setLegendPos({x:Math.max(0,Math.min(0.88,nx-offsetX)),y:Math.max(0,Math.min(0.88,ny-offsetY))});
+      return;
+    }
+    setCursorPos({x:nx,y:ny});
+  },[]);
+
+  const handleCanvasMouseUp=useCallback(()=>{
+    if(legendDragRef.current) didDragLegendRef.current=true;
+    legendDragRef.current=null;
+  },[]);
 
   // ── Interactions ──────────────────────────────────────────────────────────
   const loadPdfFile=async(file)=>{
@@ -9663,11 +9747,12 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
       const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
       setPdfDoc(doc); setTotalPages(doc.numPages); setCurrentPage(1);
     }catch(e){alert('Could not read PDF: '+e.message);}
-    uploadToCloudinary(file).then(url=>{if(url)setPdfUrl(url);});
+    uploadRawPdfToCloudinary(file).then(url=>{if(url)setPdfUrl(url);});
     setUploading(false);
   };
 
   const handleOverlayClick=(e)=>{
+    if(didDragLegendRef.current){didDragLegendRef.current=false;return;}
     const canvas=overlayRef.current; if(!canvas) return;
     const rect=canvas.getBoundingClientRect();
     const nx=(e.clientX-rect.left)/canvas.width, ny=(e.clientY-rect.top)/canvas.height;
@@ -9702,7 +9787,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave=async()=>{
     setSaving(true);
-    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl,markers,prefixes,symSize,
+    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl,markers,prefixes,symSize,legendPos,
       updatedAt:new Date().toISOString(),createdAt:takeoff?.createdAt||new Date().toISOString()});
     setSaving(false);
   };
@@ -9751,7 +9836,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
       if(usedTypes.length>0){
         const rowH=13, padX=8, padY=6, legendW=175;
         const legendH=padY*2+16+usedTypes.length*rowH;
-        const lx=lpw-legendW-15, ly=15;
+        const lx=Math.max(0,Math.min(lpw-legendW,legendPos.x*lpw));
+        const ly=Math.max(0,Math.min(lph-legendH,lph*(1-legendPos.y)-legendH));
         lp.drawRectangle({x:lx,y:ly,width:legendW,height:legendH,
           color:rgb(1,1,1),borderColor:rgb(0.65,0.65,0.65),borderWidth:0.8,opacity:0.93});
         lp.drawText('LEGEND',{x:lx+padX,y:ly+legendH-padY-9,size:8,font,color:rgb(0.2,0.2,0.2)});
@@ -9964,14 +10050,12 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings}){
             <div style={{position:'relative',display:'inline-block',boxShadow:'0 4px 24px rgba(0,0,0,0.25)',lineHeight:0}}>
               <canvas ref={pdfCanvasRef} style={{display:'block'}}/>
               <canvas ref={overlayRef}
-                style={{position:'absolute',top:0,left:0,cursor:mode==='place'?'crosshair':'default'}}
+                style={{position:'absolute',top:0,left:0,cursor:legendDragRef.current?'grabbing':mode==='place'?'crosshair':'default'}}
                 onClick={handleOverlayClick}
-                onMouseMove={e=>{
-                  const canvas=overlayRef.current; if(!canvas) return;
-                  const rect=canvas.getBoundingClientRect();
-                  setCursorPos({x:(e.clientX-rect.left)/canvas.width,y:(e.clientY-rect.top)/canvas.height});
-                }}
-                onMouseLeave={()=>setCursorPos(null)}
+                onMouseDown={handleCanvasMouseDown}
+                onMouseMove={handleCanvasMouseMove}
+                onMouseUp={handleCanvasMouseUp}
+                onMouseLeave={()=>{legendDragRef.current=null;setCursorPos(null);}}
               />
             </div>
           )}
