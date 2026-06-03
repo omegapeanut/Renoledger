@@ -10444,12 +10444,20 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     if(!window.PDFLib){alert('Export library not loaded, please wait.');return;}
     setExporting(true);
     // Convert normalised (0-1) canvas coords to PDF-lib point coords,
-    // accounting for the page's Rotate attribute (90/180/270).
+    // accounting for the page's Rotate attribute (CW degrees per PDF spec).
+    //
+    // For each rotation, pdf.js maps PDF content → canvas as follows,
+    // so here we invert that mapping (canvas → PDF content):
+    //
+    //   Rotate=0:   canvas(cx,cy) = (x*s,  (ph-y)*s)  → x=nx*pw,      y=ph*(1-ny)
+    //   Rotate=90:  canvas(cx,cy) = (y*s,  x*s)        → x=ny*pw,      y=nx*ph
+    //   Rotate=180: canvas(cx,cy) = ((pw-x)*s, y*s)    → x=pw*(1-nx),  y=ny*ph
+    //   Rotate=270: canvas(cx,cy) = ((ph-y)*s,(pw-x)*s)→ x=pw*(1-ny),  y=ph*(1-nx)
     const toPdfPt=(nx,ny,pw,ph,rot)=>{
-      if(rot===90)  return {x:pw*(1-ny), y:ph*(1-nx)};
-      if(rot===180) return {x:pw*(1-nx), y:ph*(1-ny)};
-      if(rot===270) return {x:pw*ny,     y:ph*nx};
-      return {x:nx*pw, y:ph*(1-ny)};
+      if(rot===90)  return {x:pw*ny,       y:ph*nx};
+      if(rot===180) return {x:pw*(1-nx),   y:ph*ny};
+      if(rot===270) return {x:pw*(1-ny),   y:ph*(1-nx)};
+      return         {x:nx*pw,             y:ph*(1-ny)};
     };
     try{
       const {PDFDocument,rgb,StandardFonts}=window.PDFLib;
@@ -10531,7 +10539,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'WM': dR(); dC(h*0.5); break;
             default:   dR(); break;
           }
-          page.drawText(getTakeoffLabel(m,markers,prefixes,globalPrefix),{x:px+h+2,y:py-4,size:Math.max(5,symSzPt*0.55),font,color:col});
+          page.drawText(getTakeoffLabel(m,markers,prefixes,globalPrefix),{x:px+h+2,y:py-3,size:Math.max(5,symSzPt*0.55),font,color:col});
         });
       });
       // ── Switch leg curves ──────────────────────────────────────────────────
