@@ -9803,6 +9803,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const [totalPages,setTotalPages]=useState(0);
   const [scale,setScale]=useState(1.5);
   const [pdfDoc,setPdfDoc]=useState(null);
+  const [imgEl,setImgEl]=useState(null);   // loaded Image element when source is an image
+  const [fileType,setFileType]=useState(takeoff?.fileType||'pdf'); // 'pdf' | 'image'
   const [pdfBytes,setPdfBytes]=useState(null);
   const [pdfFilename,setPdfFilename]=useState(takeoff?.pdfFilename||'');
   const [pdfUrl,setPdfUrl]=useState(takeoff?.pdfUrl||'');
@@ -9886,9 +9888,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     }).catch(()=>setLibsReady(true));
   },[]);
 
-  // Auto-load PDF when reopening a takeoff — tries IndexedDB first, then Cloudinary URL
+  // Auto-load file when reopening a takeoff — tries IndexedDB first, then Cloudinary URL
   useEffect(()=>{
-    if(!libsReady||pdfDoc) return;
+    if(!libsReady||pdfDoc||imgEl) return;
     const hasIdbKey=!!(takeoff?.id);
     const hasUrl=!!(pdfUrl);
     if(!hasIdbKey&&!hasUrl) return;
@@ -9896,38 +9898,54 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     (async()=>{
       try{
         let ab=null;
-        // 1. IndexedDB — instant, same device
         if(hasIdbKey) ab=await loadPdfFromIdb(takeoff.id);
-        // 2. Cloudinary URL — cross-device
         if(!ab&&hasUrl){
           try{
             const resp=await fetch(pdfUrl,{mode:'cors'});
-            if(resp.ok){
-              ab=await resp.arrayBuffer();
-              // Cache locally for next time
-              if(hasIdbKey) savePdfToIdb(takeoff.id, ab);
-            }
+            if(resp.ok){ ab=await resp.arrayBuffer(); if(hasIdbKey) savePdfToIdb(takeoff.id,ab); }
           }catch(fetchErr){console.warn('Cloudinary fetch failed:',fetchErr.message);}
         }
         if(!ab){setPdfLoading(false);return;}
         setPdfBytes(ab);
-        const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
-        setPdfDoc(doc); setTotalPages(doc.numPages); setCurrentPage(1);
-      }catch(e){console.warn('Could not reload saved PDF:',e.message);}
+        const isImg=takeoff?.fileType==='image'||/\.(jpe?g|png|gif|webp|bmp)$/i.test(pdfFilename);
+        if(isImg){
+          const ext=pdfFilename.split('.').pop().toLowerCase();
+          const mime={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',webp:'image/webp',bmp:'image/bmp'}[ext]||'image/jpeg';
+          const blob=new Blob([ab],{type:mime});
+          const blobUrl=URL.createObjectURL(blob);
+          const img=new Image();
+          img.onload=()=>{setImgEl(img);setPdfDoc(null);setTotalPages(1);setCurrentPage(1);URL.revokeObjectURL(blobUrl);};
+          img.onerror=()=>URL.revokeObjectURL(blobUrl);
+          img.src=blobUrl;
+        } else {
+          const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
+          setPdfDoc(doc); setImgEl(null); setTotalPages(doc.numPages); setCurrentPage(1);
+        }
+      }catch(e){console.warn('Could not reload saved file:',e.message);}
       finally{setPdfLoading(false);}
     })();
   },[libsReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(()=>{ if(!pdfDoc||!pdfCanvasRef.current) return; renderPage(pdfDoc,currentPage,scale); },[pdfDoc,currentPage,scale]);
+  useEffect(()=>{
+    if(imgEl&&pdfCanvasRef.current) renderPage(null,1,scale);
+    else if(pdfDoc&&pdfCanvasRef.current) renderPage(pdfDoc,currentPage,scale);
+  },[pdfDoc,imgEl,currentPage,scale]);
 
   const renderPage=async(doc,pageNum,sc)=>{
-    if(renderingRef.current) return;
+    const canvas=pdfCanvasRef.current; if(!canvas) return;
+    if(imgEl){
+      const w=Math.round(imgEl.naturalWidth*sc), h=Math.round(imgEl.naturalHeight*sc);
+      canvas.width=w; canvas.height=h;
+      const ov=overlayRef.current; if(ov){ov.width=w;ov.height=h;}
+      setPageSize({w:imgEl.naturalWidth,h:imgEl.naturalHeight});
+      canvas.getContext('2d').drawImage(imgEl,0,0,w,h);
+      return;
+    }
+    if(!doc||renderingRef.current) return;
     renderingRef.current=true;
     try{
       const page=await doc.getPage(pageNum);
       const vp=page.getViewport({scale:sc});
-      const canvas=pdfCanvasRef.current;
-      if(!canvas){renderingRef.current=false;return;}
       canvas.width=vp.width; canvas.height=vp.height;
       const ov=overlayRef.current;
       if(ov){ov.width=vp.width;ov.height=vp.height;}
@@ -10141,23 +10159,30 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   },[]);
 
   // ── Interactions ──────────────────────────────────────────────────────────
-  const loadPdfFile=async(file)=>{
-    if(!window.pdfjsLib){alert('PDF viewer not ready, please wait a moment.');return;}
-    setUploading(true); setPdfFilename(file.name);
+  const loadFile=async(file)=>{
+    const isImg=file.type.startsWith('image/')||/\.(jpe?g|png|gif|webp|bmp)$/i.test(file.name);
+    setUploading(true); setPdfFilename(file.name); setFileType(isImg?'image':'pdf');
     const ab=await file.arrayBuffer(); setPdfBytes(ab);
-    try{
-      const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
-      setPdfDoc(doc); setTotalPages(doc.numPages); setCurrentPage(1);
-    }catch(e){alert('Could not read PDF: '+e.message);}
-    // Cache bytes in IndexedDB so same-device reload is instant
-    if(takeoff?.id) savePdfToIdb(takeoff.id, ab);
-    // Upload to Cloudinary for cross-device access (best effort)
-    const up=uploadRawPdfToCloudinary(file).then(url=>{
-      if(url) setPdfUrl(url);
-      pdfUploadRef.current=null;
-      return url;
-    });
-    pdfUploadRef.current=up;
+    if(isImg){
+      const blob=new Blob([ab],{type:file.type||'image/jpeg'});
+      const blobUrl=URL.createObjectURL(blob);
+      const img=new Image();
+      img.onload=()=>{setImgEl(img);setPdfDoc(null);setTotalPages(1);setCurrentPage(1);URL.revokeObjectURL(blobUrl);};
+      img.onerror=()=>{alert('Could not load image.');URL.revokeObjectURL(blobUrl);};
+      img.src=blobUrl;
+      if(takeoff?.id) savePdfToIdb(takeoff.id,ab);
+      const up=uploadToCloudinary(file).then(url=>{if(url)setPdfUrl(url);pdfUploadRef.current=null;return url;});
+      pdfUploadRef.current=up;
+    } else {
+      if(!window.pdfjsLib){alert('PDF viewer not ready, please wait a moment.');setUploading(false);return;}
+      try{
+        const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
+        setPdfDoc(doc); setImgEl(null); setTotalPages(doc.numPages); setCurrentPage(1);
+      }catch(e){alert('Could not read PDF: '+e.message);}
+      if(takeoff?.id) savePdfToIdb(takeoff.id,ab);
+      const up=uploadRawPdfToCloudinary(file).then(url=>{if(url)setPdfUrl(url);pdfUploadRef.current=null;return url;});
+      pdfUploadRef.current=up;
+    }
     setUploading(false);
   };
 
@@ -10220,22 +10245,32 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       const url=await pdfUploadRef.current;
       if(url) finalPdfUrl=url;
     }
-    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,markers,links,pipes,prefixes,globalPrefix,symSize,legendPos,
+    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,fileType,markers,links,pipes,prefixes,globalPrefix,symSize,legendPos,
       updatedAt:new Date().toISOString(),createdAt:takeoff?.createdAt||new Date().toISOString()});
     setSaving(false);
   };
 
   // ── Export PDF ────────────────────────────────────────────────────────────
   const exportPdf=async()=>{
-    if(!pdfBytes){alert('PDF is still loading, please wait a moment.');return;}
+    if(!pdfBytes){alert('File is still loading, please wait a moment.');return;}
     if(!window.PDFLib){alert('Export library not loaded, please wait.');return;}
     setExporting(true);
     try{
       const {PDFDocument,rgb,StandardFonts}=window.PDFLib;
-      const doc=await PDFDocument.load(pdfBytes);
+      let doc, pages;
+      if(fileType==='image'){
+        doc=await PDFDocument.create();
+        const ext=pdfFilename.split('.').pop().toLowerCase();
+        const embedImg=ext==='png'?await doc.embedPng(pdfBytes):await doc.embedJpg(pdfBytes);
+        const pg=doc.addPage([embedImg.width,embedImg.height]);
+        pg.drawImage(embedImg,{x:0,y:0,width:embedImg.width,height:embedImg.height});
+        pages=doc.getPages();
+      } else {
+        doc=await PDFDocument.load(pdfBytes);
+        pages=doc.getPages();
+      }
       const font=await doc.embedFont(StandardFonts.HelveticaBold);
       const fontReg=await doc.embedFont(StandardFonts.Helvetica);
-      const pages=doc.getPages();
       const symSzPt=symSize*0.75;
       const byPage={};
       markers.forEach(m=>{(byPage[m.page]||(byPage[m.page]=[])).push(m);});
@@ -10444,11 +10479,11 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         </button>
         <input value={name} onChange={e=>setName(e.target.value)} placeholder="Markup name…"
           style={{flex:1,minWidth:120,maxWidth:200,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'5px 10px',fontSize:13,fontWeight:600,color:T.text,background:T.bg,fontFamily:'inherit'}}/>
-        <input ref={fileInputRef} type="file" accept=".pdf" style={{display:'none'}} onChange={e=>e.target.files[0]&&loadPdfFile(e.target.files[0])}/>
+        <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,image/*,application/pdf" style={{display:'none'}} onChange={e=>e.target.files[0]&&loadFile(e.target.files[0])}/>
         <button onClick={()=>fileInputRef.current?.click()}
           style={{background:T.accentLight,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'5px 12px',cursor:'pointer',color:T.text,fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5}}>
           {uploading?<Loader2 size={12} style={{animation:'spin 1s linear infinite'}}/>:<Upload size={12}/>}
-          {pdfFilename||'Upload PDF'}
+          {pdfFilename||'Upload PDF / Image'}
         </button>
         {/* Mode */}
         <div style={{display:'flex',border:`1px solid ${T.borderLight}`,borderRadius:8,overflow:'hidden'}}>
@@ -10651,9 +10686,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         </div>
 
         {/* Canvas area */}
-        <DropZone accept="application/pdf" onDrop={loadPdfFile} style={{flex:1,overflow:'auto',display:'flex',justifyContent:'flex-start',alignItems:'flex-start'}}>
+        <DropZone accept="application/pdf,image/*" onDrop={loadFile} style={{flex:1,overflow:'auto',display:'flex',justifyContent:'flex-start',alignItems:'flex-start'}}>
         <div style={{flex:1,overflow:'auto',background:T.bg==='#141412'?'#1a1a18':'#e5e7eb',display:'flex',justifyContent:'flex-start',alignItems:'flex-start',padding:16,minHeight:'100%'}}>
-          {!pdfDoc?(
+          {!pdfDoc&&!imgEl?(
             <div style={{margin:'auto',textAlign:'center',padding:'60px 20px'}}>
               {pdfLoading?(
                 <>
@@ -10661,18 +10696,18 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
                     <Loader2 size={30} style={{color:T.accent,animation:'spin 1s linear infinite'}}/>
                   </div>
                   <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:8}}>Loading your floor plan…</div>
-                  <div style={{fontSize:13,color:T.muted,maxWidth:300,lineHeight:1.6}}>Fetching the saved PDF. This may take a moment.</div>
+                  <div style={{fontSize:13,color:T.muted,maxWidth:300,lineHeight:1.6}}>Fetching the saved file. This may take a moment.</div>
                 </>
               ):(
                 <>
                   <div style={{width:72,height:72,background:T.card,borderRadius:18,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px',border:`2px dashed ${T.borderLight}`}}>
                     <Upload size={30} style={{color:T.dim}}/>
                   </div>
-                  <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:8}}>Drop a PDF here, or click Upload</div>
+                  <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:8}}>Drop a PDF or image here, or click Upload</div>
                   <div style={{fontSize:13,color:T.muted,marginBottom:16,maxWidth:300,lineHeight:1.6}}>
-                    {libsReady?'Drag & drop your floor plan PDF into this area, or use the Upload button above.':'Loading PDF viewer…'}
+                    Supports PDF, JPG, PNG, GIF, WebP. Drag & drop or use the Upload button above.
                   </div>
-                  {libsReady&&<Btn onClick={()=>fileInputRef.current?.click()}><Upload size={12}/>Upload PDF</Btn>}
+                  <Btn onClick={()=>fileInputRef.current?.click()}><Upload size={12}/>Upload PDF / Image</Btn>
                 </>
               )}
             </div>
