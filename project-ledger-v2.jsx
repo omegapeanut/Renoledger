@@ -10168,6 +10168,14 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     if(cursorPos&&mode==='place'&&activeTool){
       const cx=cursorPos.x*canvas.width, cy=cursorPos.y*canvas.height;
       const tt=symbolTypes.find(t=>t.id===activeTool);
+      // Snap guide lines
+      if(cursorPos.snapX||cursorPos.snapY){
+        ctx.save();
+        ctx.strokeStyle='#3b82f6'; ctx.lineWidth=1; ctx.setLineDash([5,4]); ctx.globalAlpha=0.7;
+        if(cursorPos.snapX){ctx.beginPath();ctx.moveTo(cx,0);ctx.lineTo(cx,canvas.height);ctx.stroke();}
+        if(cursorPos.snapY){ctx.beginPath();ctx.moveTo(0,cy);ctx.lineTo(canvas.width,cy);ctx.stroke();}
+        ctx.restore();
+      }
       drawTakeoffSymbol(ctx,activeTool,cx,cy,sz,(tt?.color||'#000'),0.45);
     }
     // ── Pipe / paint line runs ─────────────────────────────────────────────────
@@ -10332,13 +10340,29 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       setLegendPos({x:Math.max(0,Math.min(0.88,nx-offsetX)),y:Math.max(0,Math.min(0.88,ny-offsetY))});
       return;
     }
-    setCursorPos({x:nx,y:ny});
-  },[]);
+    setCursorPos(getSnapped(nx,ny,canvas));
+  },[getSnapped]);
 
   const handleCanvasMouseUp=useCallback(()=>{
     if(legendDragRef.current) didDragLegendRef.current=true;
     legendDragRef.current=null;
   },[]);
+
+  // ── Snap-to-alignment helper ───────────────────────────────────────────────
+  // Returns snapped (nx,ny) + flags indicating which axis was snapped.
+  // Looks at all markers on the current page within SNAP_PX screen pixels.
+  const getSnapped=useCallback((nx,ny,canvas)=>{
+    const SNAP_PX=14;
+    const thx=SNAP_PX/canvas.width, thy=SNAP_PX/canvas.height;
+    let sx=nx, sy=ny, didSnapX=false, didSnapY=false;
+    let bestDX=thx, bestDY=thy;
+    markers.filter(m=>m.page===currentPage).forEach(m=>{
+      const dx=Math.abs(m.x-nx), dy=Math.abs(m.y-ny);
+      if(dx<bestDX){bestDX=dx;sx=m.x;didSnapX=true;}
+      if(dy<bestDY){bestDY=dy;sy=m.y;didSnapY=true;}
+    });
+    return {x:sx,y:sy,snapX:didSnapX,snapY:didSnapY};
+  },[markers,currentPage]);
 
   // ── Interactions ──────────────────────────────────────────────────────────
   const loadFile=async(file)=>{
@@ -10389,7 +10413,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       });
       return;
     } else if(mode==='place'&&activeTool){
-      pushHistory([...markers,{id:uid(),page:currentPage,x:nx,y:ny,type:activeTool}]);
+      const {x:sx,y:sy}=getSnapped(nx,ny,canvas);
+      pushHistory([...markers,{id:uid(),page:currentPage,x:sx,y:sy,type:activeTool}]);
     } else if(mode==='link'){
       if(!hit){setLinkStartId(null);return;} // click empty → cancel
       if(!linkStartId){setLinkStartId(hit.id);return;} // first click → set start
@@ -10849,7 +10874,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         <div style={{display:'flex',alignItems:'center',gap:4}}>
           <button onClick={()=>setScale(s=>Math.max(0.5,+(s-0.25).toFixed(2)))} style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'4px 7px',cursor:'pointer',color:T.text}}><Minus size={12}/></button>
           <span style={{fontSize:11,fontWeight:700,color:T.muted,minWidth:38,textAlign:'center'}}>{Math.round(scale*100)}%</span>
-          <button onClick={()=>setScale(s=>Math.min(3,+(s+0.25).toFixed(2)))} style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'4px 7px',cursor:'pointer',color:T.text}}><Plus size={12}/></button>
+          <button onClick={()=>setScale(s=>Math.min(5,+(s+0.25).toFixed(2)))} style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'4px 7px',cursor:'pointer',color:T.text}}><Plus size={12}/></button>
         </div>
         <Btn onClick={handleSave} loading={saving} disabled={saving}>
           {saving&&pdfUploadRef.current?'Uploading PDF…':'Save'}
