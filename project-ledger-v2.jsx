@@ -10443,6 +10443,14 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     if(!pdfBytes){alert('File is still loading, please wait a moment.');return;}
     if(!window.PDFLib){alert('Export library not loaded, please wait.');return;}
     setExporting(true);
+    // Convert normalised (0-1) canvas coords to PDF-lib point coords,
+    // accounting for the page's Rotate attribute (90/180/270).
+    const toPdfPt=(nx,ny,pw,ph,rot)=>{
+      if(rot===90)  return {x:pw*(1-ny), y:ph*(1-nx)};
+      if(rot===180) return {x:pw*(1-nx), y:ph*(1-ny)};
+      if(rot===270) return {x:pw*ny,     y:ph*nx};
+      return {x:nx*pw, y:ph*(1-ny)};
+    };
     try{
       const {PDFDocument,rgb,StandardFonts}=window.PDFLib;
       let doc, pages;
@@ -10465,9 +10473,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       Object.entries(byPage).forEach(([pg,mList])=>{
         const page=pages[parseInt(pg)-1]; if(!page) return;
         const pw=page.getWidth(), ph=page.getHeight();
+        const rot=(page.getRotation?.()?.angle||0)%360;
         const h=symSzPt/2;
         mList.forEach(m=>{
-          const px=m.x*pw, py=ph-m.y*ph;
+          const {x:px,y:py}=toPdfPt(m.x,m.y,pw,ph,rot);
           const tt=symbolTypes.find(t=>t.id===m.type);
           const [r,g,b]=hexToRgbF(tt?.color||'#000');
           const col=rgb(r,g,b);
@@ -10522,7 +10531,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'WM': dR(); dC(h*0.5); break;
             default:   dR(); break;
           }
-          page.drawText(getTakeoffLabel(m,markers,prefixes,globalPrefix),{x:px+h+2,y:py-3,size:Math.max(5,symSzPt*0.55),font,color:col});
+          page.drawText(getTakeoffLabel(m,markers,prefixes,globalPrefix),{x:px+h+2,y:py-4,size:Math.max(5,symSzPt*0.55),font,color:col});
         });
       });
       // ── Switch leg curves ──────────────────────────────────────────────────
@@ -10531,10 +10540,12 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       Object.entries(linksByPage).forEach(([pg,lList])=>{
         const page=pages[parseInt(pg)-1]; if(!page) return;
         const pw=page.getWidth(), ph=page.getHeight();
+        const rot=(page.getRotation?.()?.angle||0)%360;
         lList.forEach(l=>{
           const fm=markers.find(m=>m.id===l.fromId), tm=markers.find(m=>m.id===l.toId);
           if(!fm||!tm) return;
-          const x1=fm.x*pw, y1=ph-fm.y*ph, x2=tm.x*pw, y2=ph-tm.y*ph;
+          const {x:x1,y:y1}=toPdfPt(fm.x,fm.y,pw,ph,rot);
+          const {x:x2,y:y2}=toPdfPt(tm.x,tm.y,pw,ph,rot);
           const hexColor=circuitColorMap[getCircuitKey(l)]||'#16a34a';
           const [cr,cg,cb]=hexToRgbF(hexColor); const col=rgb(cr,cg,cb);
           // Approximate quadratic bezier with dashed segments
@@ -10560,6 +10571,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       Object.entries(pipesByPage).forEach(([pg,pList])=>{
         const page=pages[parseInt(pg)-1]; if(!page) return;
         const pw=page.getWidth(), ph=page.getHeight();
+        const rot=(page.getRotation?.()?.angle||0)%360;
         pList.forEach(p=>{
           if(p.points.length<2) return;
           const ptDef=activePipeTypeList.find(t=>t.id===p.type);
@@ -10567,19 +10579,20 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           const [pr,pg2,pb]=hexToRgbF(hexColor); const col=rgb(pr,pg2,pb);
           const thick=toolKind==='painting';
           for(let i=0;i<p.points.length-1;i++){
-            const x1=p.points[i].x*pw, y1=ph-p.points[i].y*ph;
-            const x2=p.points[i+1].x*pw, y2=ph-p.points[i+1].y*ph;
+            const {x:x1,y:y1}=toPdfPt(p.points[i].x,p.points[i].y,pw,ph,rot);
+            const {x:x2,y:y2}=toPdfPt(p.points[i+1].x,p.points[i+1].y,pw,ph,rot);
             page.drawLine({start:{x:x1,y:y1},end:{x:x2,y:y2},color:col,thickness:thick?4:1.5});
           }
           if(!thick){
             p.points.forEach(pt=>{
-              const px2=pt.x*pw, py2=ph-pt.y*ph;
+              const {x:px2,y:py2}=toPdfPt(pt.x,pt.y,pw,ph,rot);
               page.drawCircle({x:px2,y:py2,size:2.5,borderColor:col,borderWidth:1,color:rgb(1,1,1)});
             });
           } else {
             const midPt=p.points[Math.floor(p.points.length/2)];
+            const {x:mlx,y:mly}=toPdfPt(midPt.x,midPt.y,pw,ph,rot);
             const lbl=prefixes[p.type]||ptDef?.label||p.type;
-            page.drawText(lbl,{x:midPt.x*pw+4,y:ph-midPt.y*ph-3,size:6,font,color:col});
+            page.drawText(lbl,{x:mlx+4,y:mly-3,size:6,font,color:col});
           }
         });
       });
@@ -10590,16 +10603,20 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         Object.entries(areasByPage).forEach(([pg,aList])=>{
           const page=pages[parseInt(pg)-1]; if(!page) return;
           const pw=page.getWidth(), ph=page.getHeight();
+          const rot=(page.getRotation?.()?.angle||0)%360;
           aList.forEach(a=>{
             if(a.points.length<3) return;
             const ft=FLOOR_TYPES.find(t=>t.id===a.typeId);
             const [fr,fg,fb]=hexToRgbF(ft?.color||'#94a3b8'); const col=rgb(fr,fg,fb);
             for(let i=0;i<a.points.length;i++){
               const p1=a.points[i], p2=a.points[(i+1)%a.points.length];
-              page.drawLine({start:{x:p1.x*pw,y:ph-p1.y*ph},end:{x:p2.x*pw,y:ph-p2.y*ph},color:col,thickness:1.5});
+              const {x:fx1,y:fy1}=toPdfPt(p1.x,p1.y,pw,ph,rot);
+              const {x:fx2,y:fy2}=toPdfPt(p2.x,p2.y,pw,ph,rot);
+              page.drawLine({start:{x:fx1,y:fy1},end:{x:fx2,y:fy2},color:col,thickness:1.5});
             }
-            const cx=a.points.reduce((s,p)=>s+p.x,0)/a.points.length*pw;
-            const cy=ph-a.points.reduce((s,p)=>s+p.y,0)/a.points.length*ph;
+            const acx=a.points.reduce((s,p)=>s+p.x,0)/a.points.length;
+            const acy=a.points.reduce((s,p)=>s+p.y,0)/a.points.length;
+            const {x:cx,y:cy}=toPdfPt(acx,acy,pw,ph,rot);
             const lbl=`${ft?.label||a.typeId}${a.sqft?' '+a.sqft+' sqft':''}${a.note?' ('+a.note+')':''}`;
             page.drawText(lbl,{x:cx-lbl.length*2,y:cy,size:8,font,color:col});
           });
