@@ -10320,6 +10320,20 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     return{x:legendPos.x*canvas.width,y:legendPos.y*canvas.height,w:164,h:boxH};
   },[counts,legendPos,pipes]);
 
+  // ── Snap-to-alignment helper ───────────────────────────────────────────────
+  const getSnapped=useCallback((nx,ny,canvas)=>{
+    const SNAP_PX=14;
+    const thx=SNAP_PX/canvas.width, thy=SNAP_PX/canvas.height;
+    let sx=nx, sy=ny, didSnapX=false, didSnapY=false;
+    let bestDX=thx, bestDY=thy;
+    markers.filter(m=>m.page===currentPage).forEach(m=>{
+      const dx=Math.abs(m.x-nx), dy=Math.abs(m.y-ny);
+      if(dx<bestDX){bestDX=dx;sx=m.x;didSnapX=true;}
+      if(dy<bestDY){bestDY=dy;sy=m.y;didSnapY=true;}
+    });
+    return {x:sx,y:sy,snapX:didSnapX,snapY:didSnapY};
+  },[markers,currentPage]);
+
   const handleCanvasMouseDown=useCallback((e)=>{
     const canvas=overlayRef.current; if(!canvas) return;
     const rect=canvas.getBoundingClientRect();
@@ -10347,22 +10361,6 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     if(legendDragRef.current) didDragLegendRef.current=true;
     legendDragRef.current=null;
   },[]);
-
-  // ── Snap-to-alignment helper ───────────────────────────────────────────────
-  // Returns snapped (nx,ny) + flags indicating which axis was snapped.
-  // Looks at all markers on the current page within SNAP_PX screen pixels.
-  const getSnapped=useCallback((nx,ny,canvas)=>{
-    const SNAP_PX=14;
-    const thx=SNAP_PX/canvas.width, thy=SNAP_PX/canvas.height;
-    let sx=nx, sy=ny, didSnapX=false, didSnapY=false;
-    let bestDX=thx, bestDY=thy;
-    markers.filter(m=>m.page===currentPage).forEach(m=>{
-      const dx=Math.abs(m.x-nx), dy=Math.abs(m.y-ny);
-      if(dx<bestDX){bestDX=dx;sx=m.x;didSnapX=true;}
-      if(dy<bestDY){bestDY=dy;sy=m.y;didSnapY=true;}
-    });
-    return {x:sx,y:sy,snapX:didSnapX,snapY:didSnapY};
-  },[markers,currentPage]);
 
   // ── Interactions ──────────────────────────────────────────────────────────
   const loadFile=async(file)=>{
