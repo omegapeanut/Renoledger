@@ -10666,25 +10666,36 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           });
         });
       }
-      // ── Legend (bottom-right, page 1) ──────────────────────────────────────
+      // ── Legend (page 1) ───────────────────────────────────────────────────
       const lp=pages[0];
       const lpw=lp.getWidth(), lph=lp.getHeight();
+      const p1Rot=pageRot(1);
+      // Anchor = legend top-left corner in PDF coords, rotation-aware
+      const {x:lax,y:lay}=toPdfPt(legendPos.x,legendPos.y,lpw,lph,1);
+      // lpt(dr,dd): PDF point at display-offset (dr right, dd down) from anchor
+      const lpt=(dr,dd)=>{const{dx,dy}=dispOff(dr,dd,p1Rot);return{x:lax+dx,y:lay+dy};};
       const usedTypes=symbolTypes.filter(tt=>counts[tt.id]>0);
       const usedPdfPipes=activePipeTypeList.filter(pt=>pipes.some(p=>p.type===pt.id));
       if(usedTypes.length>0||usedPdfPipes.length>0){
-        const rowH=13, padX=8, padY=6, legendW=175;
+        const rowH=13,padX=8,padY=6,legendW=175;
         const legendH=padY*2+16+(usedTypes.length+usedPdfPipes.length)*rowH;
-        const lx=Math.max(0,Math.min(lpw-legendW,legendPos.x*lpw));
-        const ly=Math.max(0,Math.min(lph-legendH,lph*(1-legendPos.y)-legendH));
-        lp.drawRectangle({x:lx,y:ly,width:legendW,height:legendH,
+        const W=legendW,H=legendH;
+        // Axis-aligned bounding box (works for all 90° rotations)
+        const crns=[lpt(0,0),lpt(W,0),lpt(0,H),lpt(W,H)];
+        const rx=Math.min(...crns.map(c=>c.x)),ry2=Math.min(...crns.map(c=>c.y));
+        const rw=Math.max(...crns.map(c=>c.x))-rx,rh=Math.max(...crns.map(c=>c.y))-ry2;
+        lp.drawRectangle({x:rx,y:ry2,width:rw,height:rh,
           color:rgb(1,1,1),borderColor:rgb(0.65,0.65,0.65),borderWidth:0.8,opacity:0.93});
-        lp.drawText('LEGEND',{x:lx+padX,y:ly+legendH-padY-9,size:8,font,color:rgb(0.2,0.2,0.2)});
-        lp.drawLine({start:{x:lx,y:ly+legendH-padY-14},end:{x:lx+legendW,y:ly+legendH-padY-14},color:rgb(0.75,0.75,0.75),thickness:0.5});
+        // Header
+        const hPt=lpt(padX,padY+8);
+        lp.drawText('LEGEND',{x:hPt.x,y:hPt.y,size:8,font,color:rgb(0.2,0.2,0.2),rotate:tDeg(p1Rot)});
+        const d1a=lpt(0,padY+14),d1b=lpt(W,padY+14);
+        lp.drawLine({start:d1a,end:d1b,color:rgb(0.75,0.75,0.75),thickness:0.5});
+        // Symbol type rows
         usedTypes.forEach((tt,i)=>{
-          const [r,g,b]=hexToRgbF(tt.color);
-          const col=rgb(r,g,b);
-          const ry=ly+legendH-padY-15-(i+1)*rowH;
-          const ss=7, sx=lx+padX+ss/2+1, sy=ry+ss/2;
+          const[r,g,b]=hexToRgbF(tt.color);const col=rgb(r,g,b);
+          const ss=7,rowDD=padY+16+i*rowH;
+          const{x:sx,y:sy}=lpt(padX+ss/2+1,rowDD+rowH*0.5);
           const dR2=()=>lp.drawRectangle({x:sx-ss/2,y:sy-ss/2,width:ss,height:ss,borderColor:col,borderWidth:0.8,color:undefined});
           const dL2=(x1,y1,x2,y2)=>lp.drawLine({start:{x:sx+x1,y:sy+y1},end:{x:sx+x2,y:sy+y2},color:col,thickness:0.8});
           const dC2=(rad)=>lp.drawCircle({x:sx,y:sy,size:rad,borderColor:col,borderWidth:0.8,color:undefined});
@@ -10694,25 +10705,20 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'LP': dC2(ss/2); dL2(0,-ss/2,0,ss/2); dL2(-ss/2,0,ss/2,0); break;
             case 'SW': dC2(ss/2-0.5); dL2(-ss*0.3,-ss*0.3,ss*0.3,ss*0.3); break;
             case 'EX': dC2(ss/2); dC2(ss*0.2); break;
-            // ── Lighting extras ──────────────────────────────────────────────────
             case 'DL': dC2(ss/2); dC2(ss*0.22); break;
             case 'S2': dC2(ss/2); dL2(-ss*0.3,-ss*0.3,ss*0.3,ss*0.3); break;
             case 'S3': dC2(ss/2); dL2(-ss*0.3,-ss*0.3,ss*0.3,ss*0.3); break;
-            // ── Power extras ────────────────────────────────────────────────────
             case 'WP': dR2(); dL2(-ss/2+1,0,ss/2-1,0); break;
             case 'DB': dR2(); break;
-            // ── Network extras ──────────────────────────────────────────────────
             case 'FB': dL2(0,-ss/2,-ss/2,0); dL2(-ss/2,0,0,ss/2); dL2(0,ss/2,ss/2,0); dL2(ss/2,0,0,-ss/2); break;
             case 'RT': dC2(ss/2); dC2(ss*0.28); break;
             case 'NS': dR2(); dL2(-ss/2+1,ss*0.18,ss/2-1,ss*0.18); break;
             case 'AP': dC2(ss/2); dC2(ss*0.32); break;
             case 'SV': dR2(); dL2(-ss/2+1,ss*0.2,ss/2-1,ss*0.2); dL2(-ss/2+1,-ss*0.2,ss/2-1,-ss*0.2); break;
-            // ── Aircon ──────────────────────────────────────────────────────────
             case 'CU': dR2(); dL2(-ss/2+1,ss*0.18,ss/2-1,ss*0.18); dL2(-ss/2+1,-ss*0.18,ss/2-1,-ss*0.18); break;
             case 'FCU': dR2(); dC2(ss*0.35); break;
             case 'VRV': dR2(); break;
             case 'EV': dC2(ss/2); dL2(-ss*0.35,-ss*0.35,ss*0.35,ss*0.35); dL2(ss*0.35,-ss*0.35,-ss*0.35,ss*0.35); break;
-            // ── Plumbing ────────────────────────────────────────────────────────
             case 'CW': dC2(ss/2); break;
             case 'HW': dC2(ss/2); break;
             case 'WC': dR2(); break;
@@ -10723,26 +10729,32 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'GV': dL2(-ss/2,-ss/2,0,0); dL2(0,0,-ss/2,ss/2); dL2(ss/2,-ss/2,0,0); dL2(0,0,ss/2,ss/2); break;
             case 'BV': dC2(ss*0.38); dL2(-ss/2,0,ss/2,0); dL2(0,ss*0.38,0,ss/2); break;
             case 'WM': dR2(); dC2(ss*0.3); break;
-            default:   dR2(); break;
+            default: dR2(); break;
           }
-          const legendLabel= globalPrefix!==undefined
-            ? `${tt.label}  ×${counts[tt.id]}`
-            : `${prefixes[tt.id]||tt.defaultPrefix} — ${tt.label}  ×${counts[tt.id]}`;
-          lp.drawText(legendLabel,{x:lx+padX+ss+6,y:ry+1,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15)});
+          const legendLabel=globalPrefix!==undefined
+            ?`${tt.label}  ×${counts[tt.id]}`
+            :`${prefixes[tt.id]||tt.defaultPrefix} — ${tt.label}  ×${counts[tt.id]}`;
+          const{x:tx,y:ty}=lpt(padX+ss+6,rowDD+rowH*0.6);
+          lp.drawText(legendLabel,{x:tx,y:ty,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15),rotate:tDeg(p1Rot)});
         });
-        // Pipe type rows in legend
+        // Pipe type rows
         usedPdfPipes.forEach((pt,i)=>{
-          const row=usedTypes.length+i;
-          const ry=ly+legendH-padY-15-(row+1)*rowH;
-          const [pr2,pg3,pb2]=hexToRgbF(pt.color); const pcol=rgb(pr2,pg3,pb2);
-          const sx=lx+padX+1, sy=ry+rowH/2;
-          lp.drawLine({start:{x:sx,y:sy},end:{x:sx+12,y:sy},color:pcol,thickness:1.5});
-          lp.drawCircle({x:sx+6,y:sy,size:2,borderColor:pcol,borderWidth:0.8,color:rgb(1,1,1)});
-          lp.drawText(`${pt.label}`,{x:lx+padX+16,y:ry+1,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15)});
+          const row=usedTypes.length+i,rowDD=padY+16+row*rowH;
+          const[pr2,pg3,pb2]=hexToRgbF(pt.color);const pcol=rgb(pr2,pg3,pb2);
+          const{x:lsx,y:lsy}=lpt(padX+1,rowDD+rowH*0.5);
+          const{x:lex,y:ley}=lpt(padX+13,rowDD+rowH*0.5);
+          lp.drawLine({start:{x:lsx,y:lsy},end:{x:lex,y:ley},color:pcol,thickness:1.5});
+          const{x:mcx,y:mcy}=lpt(padX+7,rowDD+rowH*0.5);
+          lp.drawCircle({x:mcx,y:mcy,size:2,borderColor:pcol,borderWidth:0.8,color:rgb(1,1,1)});
+          const{x:ptx,y:pty}=lpt(padX+16,rowDD+rowH*0.6);
+          lp.drawText(`${pt.label}`,{x:ptx,y:pty,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15),rotate:tDeg(p1Rot)});
         });
-        // total row
-        lp.drawLine({start:{x:lx,y:ly+3+rowH},end:{x:lx+legendW,y:ly+3+rowH},color:rgb(0.75,0.75,0.75),thickness:0.5});
-        lp.drawText(`TOTAL  ${markers.length}`,{x:lx+padX,y:ly+5,size:6.5,font,color:rgb(0.2,0.2,0.2)});
+        // Total row
+        const totalRows=usedTypes.length+usedPdfPipes.length;
+        const d2a=lpt(0,padY+16+totalRows*rowH+2),d2b=lpt(W,padY+16+totalRows*rowH+2);
+        lp.drawLine({start:d2a,end:d2b,color:rgb(0.75,0.75,0.75),thickness:0.5});
+        const{x:ttx,y:tty}=lpt(padX,padY+16+totalRows*rowH+rowH*0.75);
+        lp.drawText(`TOTAL  ${markers.length}`,{x:ttx,y:tty,size:6.5,font,color:rgb(0.2,0.2,0.2),rotate:tDeg(p1Rot)});
       }
       const bytes=await doc.save();
       const blob=new Blob([bytes],{type:'application/pdf'});
