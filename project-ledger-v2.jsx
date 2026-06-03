@@ -10467,7 +10467,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     };
     const pageRot=(pageNum)=>(pdfjsVps[pageNum]?.rotation||0);
     try{
-      const {PDFDocument,rgb,StandardFonts}=window.PDFLib;
+      const {PDFDocument,rgb,StandardFonts,degrees:tDeg}=window.PDFLib;
       let doc, pages;
       if(fileType==='image'){
         doc=await PDFDocument.create();
@@ -10498,7 +10498,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           const dR=()=>page.drawRectangle({x:px-h,y:py-h,width:symSzPt,height:symSzPt,borderColor:col,borderWidth:1,color:undefined});
           const dL=(x1,y1,x2,y2)=>page.drawLine({start:{x:px+x1,y:py+y1},end:{x:px+x2,y:py+y2},color:col,thickness:1});
           const dC=(rad)=>page.drawCircle({x:px,y:py,size:rad,borderColor:col,borderWidth:1,color:undefined});
-          const dT=(txt,sz2)=>page.drawText(txt,{x:px-sz2*0.35,y:py-sz2*0.35,size:sz2,font,color:col});
+          const dT=(txt,sz2)=>page.drawText(txt,{x:px-sz2*0.35,y:py-sz2*0.35,size:sz2,font,color:col,rotate:tDeg(rot)});
           switch(m.type){
             case 'SP': dR(); dL(-h+1,0,h-1,0); break;
             case 'DP': dR(); dL(-h+1,h*0.28,h-1,h*0.28); dL(-h+1,-h*0.28,h-1,-h*0.28); break;
@@ -10547,7 +10547,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             default:   dR(); break;
           }
           const {dx:lbdx,dy:lbdy}=dispOff(h+2,3,rot);
-          page.drawText(getTakeoffLabel(m,markers,prefixes,globalPrefix),{x:px+lbdx,y:py+lbdy,size:Math.max(5,symSzPt*0.55),font,color:col});
+          page.drawText(getTakeoffLabel(m,markers,prefixes,globalPrefix),{x:px+lbdx,y:py+lbdy,size:Math.max(5,symSzPt*0.55),font,color:col,rotate:tDeg(rot)});
         });
       });
       // ── Switch leg curves ──────────────────────────────────────────────────
@@ -10577,7 +10577,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           // Badge at curve midpoint
           const bx=bz(0.5,x1,cpx,x2), by=bz(0.5,y1,cpy,y2);
           page.drawCircle({x:bx,y:by,size:5,color:col,borderColor:col,borderWidth:0.5});
-          page.drawText('SW',{x:bx-4,y:by-3,size:5,font,color:rgb(1,1,1)});
+          const swRot=pageRot(parseInt(pg));
+          page.drawText('SW',{x:bx-4,y:by-3,size:5,font,color:rgb(1,1,1),rotate:tDeg(swRot)});
         });
       });
       // ── Pipe / paint line runs ─────────────────────────────────────────────
@@ -10607,7 +10608,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             const {x:mlx,y:mly}=toPdfPt(midPt.x,midPt.y,pw,ph,parseInt(pg));
             const lbl=prefixes[p.type]||ptDef?.label||p.type;
             const {dx:pldx,dy:pldy}=dispOff(4,3,pageRot(parseInt(pg)));
-            page.drawText(lbl,{x:mlx+pldx,y:mly+pldy,size:6,font,color:col});
+            page.drawText(lbl,{x:mlx+pldx,y:mly+pldy,size:6,font,color:col,rotate:tDeg(pageRot(parseInt(pg)))});
           }
         });
       });
@@ -10632,7 +10633,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             const acy=a.points.reduce((s,p)=>s+p.y,0)/a.points.length;
             const {x:cx,y:cy}=toPdfPt(acx,acy,pw,ph,parseInt(pg));
             const lbl=`${ft?.label||a.typeId}${a.sqft?' '+a.sqft+' sqft':''}${a.note?' ('+a.note+')':''}`;
-            page.drawText(lbl,{x:cx-lbl.length*2,y:cy,size:8,font,color:col});
+            page.drawText(lbl,{x:cx-lbl.length*2,y:cy,size:8,font,color:col,rotate:tDeg(pageRot(parseInt(pg)))});
           });
         });
       }
