@@ -10677,28 +10677,34 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       const usedTypes=symbolTypes.filter(tt=>counts[tt.id]>0);
       const usedPdfPipes=activePipeTypeList.filter(pt=>pipes.some(p=>p.type===pt.id));
       if(usedTypes.length>0||usedPdfPipes.length>0){
-        const rowH=13,padX=8,padY=6,legendW=175;
-        const legendH=padY*2+16+(usedTypes.length+usedPdfPipes.length)*rowH;
+        const ss=7,rowH=15,padX=10,legendW=200,hdrH=20;
+        const totalRowsN=usedTypes.length+usedPdfPipes.length;
+        const legendH=hdrH+totalRowsN*rowH+rowH; // header + data rows + total row
         const W=legendW,H=legendH;
-        // Axis-aligned bounding box (works for all 90° rotations)
+        // Axis-aligned bounding box
         const crns=[lpt(0,0),lpt(W,0),lpt(0,H),lpt(W,H)];
         const rx=Math.min(...crns.map(c=>c.x)),ry2=Math.min(...crns.map(c=>c.y));
         const rw=Math.max(...crns.map(c=>c.x))-rx,rh=Math.max(...crns.map(c=>c.y))-ry2;
+        // White background
         lp.drawRectangle({x:rx,y:ry2,width:rw,height:rh,
-          color:rgb(1,1,1),borderColor:rgb(0.65,0.65,0.65),borderWidth:0.8,opacity:0.93});
-        // Header
-        const hPt=lpt(padX,padY+8);
-        lp.drawText('LEGEND',{x:hPt.x,y:hPt.y,size:8,font,color:rgb(0.2,0.2,0.2),rotate:tDeg(p1Rot)});
-        const d1a=lpt(0,padY+14),d1b=lpt(W,padY+14);
-        lp.drawLine({start:d1a,end:d1b,color:rgb(0.75,0.75,0.75),thickness:0.5});
+          color:rgb(1,1,1),borderColor:rgb(0.5,0.5,0.5),borderWidth:1,opacity:0.97});
+        // Dark navy header band
+        const hCrns=[lpt(0,0),lpt(W,0),lpt(0,hdrH),lpt(W,hdrH)];
+        const hx=Math.min(...hCrns.map(c=>c.x)),hy=Math.min(...hCrns.map(c=>c.y));
+        const hw=Math.max(...hCrns.map(c=>c.x))-hx,hh=Math.max(...hCrns.map(c=>c.y))-hy;
+        lp.drawRectangle({x:hx,y:hy,width:hw,height:hh,color:rgb(0.08,0.19,0.37),borderWidth:0});
+        const{x:hTx,y:hTy}=lpt(padX,5);
+        lp.drawText('LEGEND',{x:hTx,y:hTy,size:9,font,color:rgb(1,1,1),rotate:tDeg(p1Rot)});
         // Symbol type rows
         usedTypes.forEach((tt,i)=>{
           const[r,g,b]=hexToRgbF(tt.color);const col=rgb(r,g,b);
-          const ss=7,rowDD=padY+16+i*rowH;
+          const rowDD=hdrH+i*rowH;
+          // Subtle row separator
+          if(i>0){const ra=lpt(padX,rowDD),rb=lpt(W-padX,rowDD);lp.drawLine({start:ra,end:rb,color:rgb(0.88,0.88,0.88),thickness:0.4});}
           const{x:sx,y:sy}=lpt(padX+ss/2+1,rowDD+rowH*0.5);
-          const dR2=()=>lp.drawRectangle({x:sx-ss/2,y:sy-ss/2,width:ss,height:ss,borderColor:col,borderWidth:0.8,color:undefined});
-          const dL2=(x1,y1,x2,y2)=>lp.drawLine({start:{x:sx+x1,y:sy+y1},end:{x:sx+x2,y:sy+y2},color:col,thickness:0.8});
-          const dC2=(rad)=>lp.drawCircle({x:sx,y:sy,size:rad,borderColor:col,borderWidth:0.8,color:undefined});
+          const dR2=()=>lp.drawRectangle({x:sx-ss/2,y:sy-ss/2,width:ss,height:ss,borderColor:col,borderWidth:0.9,color:undefined});
+          const dL2=(x1,y1,x2,y2)=>lp.drawLine({start:{x:sx+x1,y:sy+y1},end:{x:sx+x2,y:sy+y2},color:col,thickness:0.9});
+          const dC2=(rad)=>lp.drawCircle({x:sx,y:sy,size:rad,borderColor:col,borderWidth:0.9,color:undefined});
           switch(tt.id){
             case 'SP': dR2(); dL2(-ss/2+1,0,ss/2-1,0); break;
             case 'DP': dR2(); dL2(-ss/2+1,ss*0.2,ss/2-1,ss*0.2); dL2(-ss/2+1,-ss*0.2,ss/2-1,-ss*0.2); break;
@@ -10731,30 +10737,38 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'WM': dR2(); dC2(ss*0.3); break;
             default: dR2(); break;
           }
-          const legendLabel=globalPrefix!==undefined
-            ?`${tt.label}  ×${counts[tt.id]}`
-            :`${prefixes[tt.id]||tt.defaultPrefix} — ${tt.label}  ×${counts[tt.id]}`;
-          const{x:tx,y:ty}=lpt(padX+ss+6,rowDD+rowH*0.6);
-          lp.drawText(legendLabel,{x:tx,y:ty,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15),rotate:tDeg(p1Rot)});
+          // Label (left) + count right-aligned in symbol colour
+          const labelTxt=globalPrefix!==undefined?tt.label:`${prefixes[tt.id]||tt.defaultPrefix} — ${tt.label}`;
+          const cntTxt=`×${counts[tt.id]}`;
+          const cntW=fontReg.widthOfTextAtSize(cntTxt,6.5);
+          const{x:lbx,y:lby}=lpt(padX+ss+5,rowDD+rowH*0.62);
+          lp.drawText(labelTxt,{x:lbx,y:lby,size:6.5,font:fontReg,color:rgb(0.1,0.1,0.1),rotate:tDeg(p1Rot)});
+          const{x:ctx2,y:cty2}=lpt(W-padX-cntW,rowDD+rowH*0.62);
+          lp.drawText(cntTxt,{x:ctx2,y:cty2,size:6.5,font,color:col,rotate:tDeg(p1Rot)});
         });
         // Pipe type rows
         usedPdfPipes.forEach((pt,i)=>{
-          const row=usedTypes.length+i,rowDD=padY+16+row*rowH;
+          const row=usedTypes.length+i,rowDD=hdrH+row*rowH;
+          if(row>0){const ra=lpt(padX,rowDD),rb=lpt(W-padX,rowDD);lp.drawLine({start:ra,end:rb,color:rgb(0.88,0.88,0.88),thickness:0.4});}
           const[pr2,pg3,pb2]=hexToRgbF(pt.color);const pcol=rgb(pr2,pg3,pb2);
           const{x:lsx,y:lsy}=lpt(padX+1,rowDD+rowH*0.5);
           const{x:lex,y:ley}=lpt(padX+13,rowDD+rowH*0.5);
           lp.drawLine({start:{x:lsx,y:lsy},end:{x:lex,y:ley},color:pcol,thickness:1.5});
           const{x:mcx,y:mcy}=lpt(padX+7,rowDD+rowH*0.5);
           lp.drawCircle({x:mcx,y:mcy,size:2,borderColor:pcol,borderWidth:0.8,color:rgb(1,1,1)});
-          const{x:ptx,y:pty}=lpt(padX+16,rowDD+rowH*0.6);
-          lp.drawText(`${pt.label}`,{x:ptx,y:pty,size:6.5,font:fontReg,color:rgb(0.15,0.15,0.15),rotate:tDeg(p1Rot)});
+          const{x:ptx,y:pty}=lpt(padX+16,rowDD+rowH*0.62);
+          lp.drawText(pt.label,{x:ptx,y:pty,size:6.5,font:fontReg,color:rgb(0.1,0.1,0.1),rotate:tDeg(p1Rot)});
         });
-        // Total row
-        const totalRows=usedTypes.length+usedPdfPipes.length;
-        const d2a=lpt(0,padY+16+totalRows*rowH+2),d2b=lpt(W,padY+16+totalRows*rowH+2);
-        lp.drawLine({start:d2a,end:d2b,color:rgb(0.75,0.75,0.75),thickness:0.5});
-        const{x:ttx,y:tty}=lpt(padX,padY+16+totalRows*rowH+rowH*0.75);
-        lp.drawText(`TOTAL  ${markers.length}`,{x:ttx,y:tty,size:6.5,font,color:rgb(0.2,0.2,0.2),rotate:tDeg(p1Rot)});
+        // Total row — dark separator + bold count right-aligned
+        const totDD=hdrH+totalRowsN*rowH;
+        const ta=lpt(0,totDD),tb=lpt(W,totDD);
+        lp.drawLine({start:ta,end:tb,color:rgb(0.5,0.5,0.5),thickness:0.8});
+        const{x:tltx,y:tlty}=lpt(padX,totDD+rowH*0.62);
+        lp.drawText('TOTAL',{x:tltx,y:tlty,size:7,font,color:rgb(0.1,0.1,0.1),rotate:tDeg(p1Rot)});
+        const totNumTxt=`${markers.length}`;
+        const totNumW=font.widthOfTextAtSize(totNumTxt,8);
+        const{x:tnx,y:tny}=lpt(W-padX-totNumW,totDD+rowH*0.62);
+        lp.drawText(totNumTxt,{x:tnx,y:tny,size:8,font,color:rgb(0.08,0.19,0.37),rotate:tDeg(p1Rot)});
       }
       const bytes=await doc.save();
       const blob=new Blob([bytes],{type:'application/pdf'});
