@@ -9,7 +9,7 @@ import {
   Building, FileSpreadsheet, Calendar, Download, Settings,
   LogIn, LogOut, Star, Terminal, Database, RefreshCw, ClipboardList,
   Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine, Link2,
-  Zap, Plug, Wifi
+  Zap, Plug, Wifi, Wind, Palette, LayoutGrid
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -158,6 +158,41 @@ const PLUMBING_TYPES = [
   {id:'WM',  label:'Washing Machine Pt',   color:'#7c3aed', defaultPrefix:'WM'},
 ];
 
+// Aircon & Compressor symbols (Singapore practice)
+const AIRCON_TYPES = [
+  {id:'CU',  label:'Compressor (Outdoor)', color:'#0369a1', defaultPrefix:'CU'},
+  {id:'FCU', label:'Fan Coil Unit (Indoor)', color:'#0891b2', defaultPrefix:'FC'},
+  {id:'VRV', label:'VRV/VRF System',        color:'#0e7490', defaultPrefix:'VR'},
+  {id:'EV',  label:'Expansion Valve',       color:'#6366f1', defaultPrefix:'EV'},
+];
+
+const AIRCON_PIPE_TYPES = [
+  {id:'CPP', label:'Coolant Pipe',          color:'#ea580c'},
+  {id:'DRP', label:'Condensate Drain Pipe', color:'#64748b'},
+];
+
+// Painting & Wallpaper line types (8 user-renameable slots)
+const PAINT_TYPES = [
+  {id:'PA', label:'Paint A',     color:'#ef4444'},
+  {id:'PB', label:'Paint B',     color:'#f97316'},
+  {id:'PC', label:'Paint C',     color:'#eab308'},
+  {id:'PD', label:'Paint D',     color:'#22c55e'},
+  {id:'PE', label:'Paint E',     color:'#06b6d4'},
+  {id:'PF', label:'Paint F',     color:'#8b5cf6'},
+  {id:'PG', label:'Wallpaper A', color:'#ec4899'},
+  {id:'PH', label:'Wallpaper B', color:'#f59e0b'},
+];
+
+// Floor Finishing area types
+const FLOOR_TYPES = [
+  {id:'TL', label:'Tiles',        color:'#93c5fd'},
+  {id:'WD', label:'Wood/Parquet', color:'#fcd34d'},
+  {id:'VC', label:'Vinyl/Carpet', color:'#c4b5fd'},
+  {id:'SC', label:'Screeded',     color:'#cbd5e1'},
+  {id:'MR', label:'Marble',       color:'#e2e8f0'},
+  {id:'GR', label:'Granite',      color:'#94a3b8'},
+];
+
 // Colors cycled per circuit (one color per unique switch in switch-leg mode)
 const CIRCUIT_COLORS=['#e11d48','#2563eb','#d97706','#9333ea','#0891b2','#c026d3','#0369a1','#15803d','#ea580c','#6366f1'];
 
@@ -300,6 +335,28 @@ function drawTakeoffSymbol(ctx, typeId, cx, cy, sz, color, alpha=1){
       [-h*0.35,0,h*0.35].forEach(dy=>{
         ctx.beginPath();ctx.moveTo(cx-h+3,cy+dy);ctx.lineTo(cx+h-3,cy+dy);ctx.stroke();
       });
+      break;
+    // ── Aircon symbols ───────────────────────────────────────────────────────
+    case 'CU': // Compressor / Outdoor unit — wide rect with fin lines
+      ctx.strokeRect(cx-h,cy-h*0.65,sz,sz*0.65);
+      [-h*0.3,-h*0.05,h*0.2].forEach(dy=>{
+        ctx.beginPath();ctx.moveTo(cx-h+3,cy+dy);ctx.lineTo(cx+h-3,cy+dy);ctx.stroke();
+      });
+      break;
+    case 'FCU': // Fan coil unit / Indoor unit — square with fan circle
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      ctx.beginPath();ctx.arc(cx,cy,h*0.52,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy,h*0.17,0,Math.PI*2);ctx.fill();
+      break;
+    case 'VRV': // VRV/VRF system — rectangle with VRV text
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      ctx.font=`bold ${Math.round(sz*0.3)}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('VRV',cx,cy+1);
+      break;
+    case 'EV': // Expansion valve — circle with X cross
+      ctx.beginPath();ctx.arc(cx,cy,h,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx-h*0.6,cy-h*0.6);ctx.lineTo(cx+h*0.6,cy+h*0.6);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx+h*0.6,cy-h*0.6);ctx.lineTo(cx-h*0.6,cy+h*0.6);ctx.stroke();
       break;
     // ── Plumbing symbols ─────────────────────────────────────────────────────
     case 'CW': // Cold water — circle with C
@@ -2188,10 +2245,10 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
   const [filter,setFilter]=useState('All');
   const [confirmPerm,setConfirmPerm]=useState(null);
   const daysLeft=d=>Math.max(0,Math.ceil((new Date(d).getTime()+365*24*60*60*1000-Date.now())/864e5));
-  const TL={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup'};
-  const TI={project:FolderOpen,invoice:Receipt,payment:CreditCard,user:Users,staffClaim:DollarSign,quote:FileSpreadsheet,sitereport:ClipboardList,lighting:Zap,power:Plug,network:Wifi,plumbing:Wrench};
-  const TC={project:T.info,invoice:T.warning,payment:T.success,user:T.danger,staffClaim:'#7c3aed',quote:T.accent,sitereport:'#0891b2',lighting:'#ca8a04',power:'#dc2626',network:'#0891b2',plumbing:'#2563eb'};
-  const counts={All:trash.length,project:0,invoice:0,payment:0,user:0,staffClaim:0,quote:0,sitereport:0,lighting:0,power:0,network:0,plumbing:0};
+  const TL={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup',aircon:'Aircon Markup',painting:'Painting Markup',floor:'Floor Markup'};
+  const TI={project:FolderOpen,invoice:Receipt,payment:CreditCard,user:Users,staffClaim:DollarSign,quote:FileSpreadsheet,sitereport:ClipboardList,lighting:Zap,power:Plug,network:Wifi,plumbing:Wrench,aircon:Wind,painting:Palette,floor:LayoutGrid};
+  const TC={project:T.info,invoice:T.warning,payment:T.success,user:T.danger,staffClaim:'#7c3aed',quote:T.accent,sitereport:'#0891b2',lighting:'#ca8a04',power:'#dc2626',network:'#0891b2',plumbing:'#2563eb',aircon:'#0369a1',painting:'#8b5cf6',floor:'#3b82f6'};
+  const counts={All:trash.length,project:0,invoice:0,payment:0,user:0,staffClaim:0,quote:0,sitereport:0,lighting:0,power:0,network:0,plumbing:0,aircon:0,painting:0,floor:0};
   trash.forEach(t=>{if(counts[t._trashType]!==undefined)counts[t._trashType]++;});
   const shown=[...(filter==='All'?trash:trash.filter(t=>t._trashType===filter))].sort((a,b)=>new Date(b._deletedAt)-new Date(a._deletedAt));
 
@@ -2211,7 +2268,7 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
         </div>
       )}
       <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-        {['All','project','quote','sitereport','invoice','payment','staffClaim','user','lighting','power','network','plumbing'].map(f=>(
+        {['All','project','quote','sitereport','invoice','payment','staffClaim','user','lighting','power','network','plumbing','aircon','painting','floor'].map(f=>(
           <button key={f} onClick={()=>setFilter(f)} style={{padding:'6px 14px',borderRadius:20,
             border:`1px solid ${filter===f?T.text:T.borderLight}`,
             background:filter===f?T.text:'transparent',
@@ -9621,16 +9678,25 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
   const [powers,setPowers]=useState([]);
   const [networks,setNetworks]=useState([]);
   const [plumbings,setPlumbings]=useState([]);
+  const [aircons,setAircons]=useState([]);
+  const [paintings,setPaintings]=useState([]);
+  const [floors,setFloors]=useState([]);
   const [loaded,setLoaded]=useState(false);
   const [editing,setEditing]=useState(null);
   const [editingKind,setEditingKind]=useState('lighting');
 
   useEffect(()=>{
-    Promise.all([loadS('lighting',[]),loadS('power',[]),loadS('network',[]),loadS('plumbings',[])]).then(([lt,pw,nw,pl])=>{
+    Promise.all([
+      loadS('lighting',[]),loadS('power',[]),loadS('network',[]),loadS('plumbings',[]),
+      loadS('aircon',[]),loadS('painting',[]),loadS('floor',[]),
+    ]).then(([lt,pw,nw,pl,ac,pt,fl])=>{
       setLightings(Array.isArray(lt)?lt:[]);
       setPowers(Array.isArray(pw)?pw:[]);
       setNetworks(Array.isArray(nw)?nw:[]);
       setPlumbings(Array.isArray(pl)?pl:[]);
+      setAircons(Array.isArray(ac)?ac:[]);
+      setPaintings(Array.isArray(pt)?pt:[]);
+      setFloors(Array.isArray(fl)?fl:[]);
       setLoaded(true);
     });
   },[]);
@@ -9654,6 +9720,12 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
   const delNetwork=makeDel(networks,setNetworks,'network','network');
   const savePlumbing=makeSave(plumbings,setPlumbings,'plumbings','plumbing','Plumbing markup saved');
   const delPlumbing=makeDel(plumbings,setPlumbings,'plumbings','plumbing');
+  const saveAircon=makeSave(aircons,setAircons,'aircon','aircon','Aircon markup saved');
+  const delAircon=makeDel(aircons,setAircons,'aircon','aircon');
+  const savePainting=makeSave(paintings,setPaintings,'painting','painting','Painting markup saved');
+  const delPainting=makeDel(paintings,setPaintings,'painting','painting');
+  const saveFloor=makeSave(floors,setFloors,'floor','floor','Floor markup saved');
+  const delFloor=makeDel(floors,setFloors,'floor','floor');
 
   const newBlank=()=>({id:uid(),name:'',pdfFilename:'',pdfUrl:'',markers:[],prefixes:{},createdAt:new Date().toISOString()});
 
@@ -9669,6 +9741,18 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
     if(editingKind==='network') return(
       <TakeoffEditor key={editing?.id||'new-nw'} takeoff={editing} symbolTypes={NETWORK_TYPES}
         onSave={(t)=>{saveNetwork(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
+    );
+    if(editingKind==='aircon') return(
+      <TakeoffEditor key={editing?.id||'new-ac'} takeoff={editing} symbolTypes={AIRCON_TYPES} toolKind="aircon"
+        onSave={(t)=>{saveAircon(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
+    );
+    if(editingKind==='painting') return(
+      <TakeoffEditor key={editing?.id||'new-pt'} takeoff={editing} symbolTypes={[]} toolKind="painting"
+        onSave={(t)=>{savePainting(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
+    );
+    if(editingKind==='floor') return(
+      <TakeoffEditor key={editing?.id||'new-fl'} takeoff={editing} symbolTypes={FLOOR_TYPES} toolKind="floor"
+        onSave={(t)=>{saveFloor(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
     );
     return(
       <TakeoffEditor key={editing?.id||'new-lt'} takeoff={editing} symbolTypes={LIGHTING_TYPES}
@@ -9743,8 +9827,17 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
           title="Network & Data" kind="network" label="New Network Markup"
           desc="Mark data points, telephone, TV outlet, fiber, routers, network switches, access points and servers."/>
         <ToolCard icon={Wrench} iconBg="rgba(37,99,235,0.1)" iconColor="#2563eb"
-          title="Plumbing PDF Markup" kind="plumbing" label="New Plumbing Markup"
+          title="Plumbing & Sanitary" kind="plumbing" label="New Plumbing Markup"
           desc="Mark water points, valves, drains and fixtures with Singapore standard plumbing symbols (SS 636)."/>
+        <ToolCard icon={Wind} iconBg="rgba(3,105,161,0.1)" iconColor="#0369a1"
+          title="Aircon & Compressor" kind="aircon" label="New Aircon Markup"
+          desc="Mark compressor units, fan coil units, VRV systems and draw coolant/drain pipe routes on your plan."/>
+        <ToolCard icon={Palette} iconBg="rgba(139,92,246,0.1)" iconColor="#8b5cf6"
+          title="Painting & Wallpaper" kind="painting" label="New Painting Markup"
+          desc="Draw thick lines along walls to indicate paint colours or wallpaper references for each area."/>
+        <ToolCard icon={LayoutGrid} iconBg="rgba(147,197,253,0.25)" iconColor="#3b82f6"
+          title="Floor Finishing" kind="floor" label="New Floor Markup"
+          desc="Mark out floor areas, auto-calculate square footage and indicate finishing material type."/>
       </div>
 
       {loaded&&lightings.length>0&&(
@@ -9770,9 +9863,30 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
       )}
       {loaded&&plumbings.length>0&&(
         <div style={{marginBottom:28}}>
-          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Plumbing Markups</div>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Plumbing & Sanitary Markups</div>
           <SavedList items={plumbings} symTypes={PLUMBING_TYPES} accentColor="#2563eb"
             onOpen={t=>{setEditingKind('plumbing');setEditing(t);}} onDelete={delPlumbing}/>
+        </div>
+      )}
+      {loaded&&aircons.length>0&&(
+        <div style={{marginBottom:28}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Aircon Markups</div>
+          <SavedList items={aircons} symTypes={AIRCON_TYPES} accentColor="#0369a1"
+            onOpen={t=>{setEditingKind('aircon');setEditing(t);}} onDelete={delAircon}/>
+        </div>
+      )}
+      {loaded&&paintings.length>0&&(
+        <div style={{marginBottom:28}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Painting Markups</div>
+          <SavedList items={paintings} symTypes={[]} accentColor="#8b5cf6"
+            onOpen={t=>{setEditingKind('painting');setEditing(t);}} onDelete={delPainting}/>
+        </div>
+      )}
+      {loaded&&floors.length>0&&(
+        <div style={{marginBottom:28}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Floor Markups</div>
+          <SavedList items={floors} symTypes={FLOOR_TYPES} accentColor="#3b82f6"
+            onOpen={t=>{setEditingKind('floor');setEditing(t);}} onDelete={delFloor}/>
         </div>
       )}
     </div>
@@ -9780,25 +9894,40 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
 }
 
 // ─── TAKEOFF EDITOR ──────────────────────────────────────────────────────────
-function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolTypes=TAKEOFF_TYPES, toolKind='electrical'}){
+function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolTypes=TAKEOFF_TYPES, toolKind='electrical', pipeTypes:pipeTypesProp}){
+  // Resolve which pipe/line types to use based on toolKind (override via prop)
+  const activePipeTypeList = pipeTypesProp !== undefined ? pipeTypesProp :
+    toolKind==='aircon' ? AIRCON_PIPE_TYPES :
+    toolKind==='painting' ? PAINT_TYPES :
+    PIPE_TYPES;
+
   const [name,setName]=useState(takeoff?.name||'');
   const [markers,setMarkers]=useState(takeoff?.markers||[]);
   const [prefixes,setPrefixes]=useState(()=>{
-    const d={}; symbolTypes.forEach(t=>d[t.id]=t.defaultPrefix); return {...d,...(takeoff?.prefixes||{})};
+    const d={};
+    symbolTypes.forEach(t=>{d[t.id]=t.defaultPrefix;});
+    if(toolKind==='painting') activePipeTypeList.forEach(t=>{d[t.id]=t.label;});
+    return {...d,...(takeoff?.prefixes||{})};
   });
   const [symSize,setSymSize]=useState(takeoff?.symSize||20);
-  // globalPrefix: used by plumbing for sequential D01…Dxx labelling; undefined = per-type mode (electrical)
   const [globalPrefix,setGlobalPrefix]=useState(
     toolKind==='plumbing' ? (takeoff?.globalPrefix??'D') : undefined
   );
-  const [activeTool,setActiveTool]=useState(symbolTypes[0].id);
-  const [mode,setMode]=useState('place'); // 'place' | 'select' | 'link'
+  const [activeTool,setActiveTool]=useState(symbolTypes.length>0 ? symbolTypes[0].id : null);
+  const hasPipeMode=toolKind==='plumbing'||toolKind==='aircon'||toolKind==='painting';
+  const hasAreaMode=toolKind==='floor';
+  const [mode,setMode]=useState(
+    toolKind==='painting' ? 'pipe' : toolKind==='floor' ? 'area' : 'place'
+  );
   const [selectedIds,setSelectedIds]=useState(new Set());
-  const [links,setLinks]=useState(takeoff?.links||[]); // [{id,fromId,toId,page}]
-  const [linkStartId,setLinkStartId]=useState(null); // pending link source markerId
-  const [pipes,setPipes]=useState(takeoff?.pipes||[]); // [{id,type,points:[{x,y}],page}]
-  const [pipeInProgress,setPipeInProgress]=useState(null); // pipe being drawn
-  const [activePipeType,setActivePipeType]=useState('CWP');
+  const [links,setLinks]=useState(takeoff?.links||[]);
+  const [linkStartId,setLinkStartId]=useState(null);
+  const [pipes,setPipes]=useState(takeoff?.pipes||[]);
+  const [pipeInProgress,setPipeInProgress]=useState(null);
+  const [activePipeType,setActivePipeType]=useState(()=>activePipeTypeList[0]?.id||'CWP');
+  const [areas,setAreas]=useState(takeoff?.areas||[]);  // [{id,page,points,typeId,sqft,note}]
+  const [areaInProgress,setAreaInProgress]=useState(null);
+  const [activeAreaType,setActiveAreaType]=useState(FLOOR_TYPES[0]?.id||'TL');
   const [currentPage,setCurrentPage]=useState(1);
   const [totalPages,setTotalPages]=useState(0);
   const [scale,setScale]=useState(1.5);
@@ -10036,48 +10165,101 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         ctx.restore();
       }
     }
-    if(cursorPos&&mode==='place'){
+    if(cursorPos&&mode==='place'&&activeTool){
       const cx=cursorPos.x*canvas.width, cy=cursorPos.y*canvas.height;
       const tt=symbolTypes.find(t=>t.id===activeTool);
       drawTakeoffSymbol(ctx,activeTool,cx,cy,sz,(tt?.color||'#000'),0.45);
     }
-    // ── Pipe runs ─────────────────────────────────────────────────────────────
-    const drawPipePolyline=(pts,color,alpha=1)=>{
+    // ── Pipe / paint line runs ─────────────────────────────────────────────────
+    const getPipeColor=(typeId)=>activePipeTypeList.find(p=>p.id===typeId)?.color||'#2563eb';
+    const drawPipePolyline=(pts,color,alpha=1,label=null,thick=false)=>{
       if(pts.length<1) return;
       ctx.save();
       ctx.globalAlpha=alpha;
-      ctx.strokeStyle=color; ctx.lineWidth=Math.max(2,sz/10); ctx.setLineDash([]); ctx.lineCap='round'; ctx.lineJoin='round';
+      ctx.strokeStyle=color; ctx.lineWidth=thick?Math.max(5,sz/5):Math.max(2,sz/10);
+      ctx.setLineDash([]); ctx.lineCap='round'; ctx.lineJoin='round';
       ctx.beginPath();
       pts.forEach((pt,i)=>{
         if(i===0) ctx.moveTo(pt.x*canvas.width,pt.y*canvas.height);
         else ctx.lineTo(pt.x*canvas.width,pt.y*canvas.height);
       });
       ctx.stroke();
-      // Junction dots at each vertex
-      ctx.fillStyle='#fff'; ctx.setLineDash([]); ctx.lineWidth=1.5; ctx.strokeStyle=color;
-      pts.forEach(pt=>{
-        ctx.beginPath();ctx.arc(pt.x*canvas.width,pt.y*canvas.height,3.5,0,Math.PI*2);
-        ctx.fill(); ctx.stroke();
-      });
+      if(!thick){
+        ctx.fillStyle='#fff'; ctx.setLineDash([]); ctx.lineWidth=1.5; ctx.strokeStyle=color;
+        pts.forEach(pt=>{
+          ctx.beginPath();ctx.arc(pt.x*canvas.width,pt.y*canvas.height,3.5,0,Math.PI*2);
+          ctx.fill(); ctx.stroke();
+        });
+      }
+      if(label&&pts.length>=2){
+        const mid=pts[Math.floor(pts.length/2)];
+        const mx=mid.x*canvas.width, my=mid.y*canvas.height;
+        const fs=Math.max(9,Math.round(sz*0.55));
+        ctx.font=`bold ${fs}px Arial`; ctx.textAlign='left'; ctx.textBaseline='middle';
+        const tw=ctx.measureText(label).width;
+        ctx.fillStyle='rgba(255,255,255,0.88)'; ctx.fillRect(mx+4,my-fs*0.62,tw+6,fs*1.24);
+        ctx.fillStyle=color; ctx.fillText(label,mx+6,my+1);
+      }
       ctx.restore();
     };
+    const isPainting=toolKind==='painting';
     pipes.filter(p=>p.page===currentPage).forEach(p=>{
-      drawPipePolyline(p.points,p.type==='HWP'?'#dc2626':'#2563eb');
+      const label=isPainting?(prefixes[p.type]||activePipeTypeList.find(t=>t.id===p.type)?.label||p.type):null;
+      drawPipePolyline(p.points,getPipeColor(p.type),1,label,isPainting);
     });
     if(pipeInProgress&&pipeInProgress.page===currentPage){
-      const color=pipeInProgress.type==='HWP'?'#dc2626':'#2563eb';
+      const color=getPipeColor(pipeInProgress.type);
       const pts=cursorPos?[...pipeInProgress.points,cursorPos]:pipeInProgress.points;
-      drawPipePolyline(pts,color,0.75);
+      drawPipePolyline(pts,color,0.75,null,isPainting);
     }
     if(cursorPos&&mode==='pipe'){
-      const color=activePipeType==='HWP'?'#dc2626':'#2563eb';
+      const color=getPipeColor(activePipeType);
       ctx.save(); ctx.fillStyle=color; ctx.globalAlpha=0.8;
       ctx.beginPath(); ctx.arc(cursorPos.x*canvas.width,cursorPos.y*canvas.height,4,0,Math.PI*2); ctx.fill();
       ctx.restore();
     }
+    // ── Floor areas ───────────────────────────────────────────────────────────
+    if(toolKind==='floor'){
+      const drawArea=(pts,fillColor,strokeColor,label,alpha=1)=>{
+        if(pts.length<2) return;
+        ctx.save(); ctx.globalAlpha=alpha;
+        ctx.fillStyle=fillColor; ctx.strokeStyle=strokeColor; ctx.lineWidth=2; ctx.setLineDash([]);
+        ctx.beginPath();
+        pts.forEach((pt,i)=>{
+          if(i===0) ctx.moveTo(pt.x*canvas.width,pt.y*canvas.height);
+          else ctx.lineTo(pt.x*canvas.width,pt.y*canvas.height);
+        });
+        if(pts.length>=3) ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        if(label&&pts.length>=3){
+          const cx=pts.reduce((s,p)=>s+p.x,0)/pts.length*canvas.width;
+          const cy=pts.reduce((s,p)=>s+p.y,0)/pts.length*canvas.height;
+          const fs=Math.max(9,Math.round(sz*0.6));
+          ctx.font=`bold ${fs}px Arial`; ctx.textAlign='center'; ctx.textBaseline='middle';
+          const tw=ctx.measureText(label).width;
+          ctx.fillStyle='rgba(255,255,255,0.88)'; ctx.fillRect(cx-tw/2-3,cy-fs*0.62,tw+6,fs*1.24);
+          ctx.fillStyle=strokeColor; ctx.fillText(label,cx,cy+1);
+        }
+        ctx.restore();
+      };
+      areas.filter(a=>a.page===currentPage).forEach(a=>{
+        const ft=FLOOR_TYPES.find(t=>t.id===a.typeId);
+        const fill=ft?.color+'88'||'rgba(148,163,184,0.5)';
+        const stroke=ft?.color||'#64748b';
+        const lbl=`${ft?.label||a.typeId}${a.sqft?' — '+a.sqft+' sqft':''}`;
+        drawArea(a.points,fill,stroke,lbl);
+      });
+      if(areaInProgress&&areaInProgress.page===currentPage){
+        const ft=FLOOR_TYPES.find(t=>t.id===areaInProgress.typeId);
+        const fill=ft?.color+'44'||'rgba(148,163,184,0.27)';
+        const stroke=ft?.color||'#64748b';
+        const pts=cursorPos?[...areaInProgress.points,cursorPos]:areaInProgress.points;
+        drawArea(pts,fill,stroke,null,0.7);
+      }
+    }
     // ── Legend preview (draggable) ────────────────────────────────────────────
     const usedForLegend=symbolTypes.filter(tt=>counts[tt.id]>0);
-    const usedPipeTypes=PIPE_TYPES.filter(pt=>pipes.some(p=>p.type===pt.id));
+    const usedPipeTypes=activePipeTypeList.filter(pt=>pipes.some(p=>p.type===pt.id));
     const totalLegendRows=usedForLegend.length+usedPipeTypes.length;
     if(totalLegendRows>0){
       const rowH=18, padX=8, boxW=164, boxH=18+totalLegendRows*rowH+8;
@@ -10124,7 +10306,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const getLegendBox=useCallback(()=>{
     const canvas=overlayRef.current; if(!canvas) return null;
     const symRows=symbolTypes.filter(tt=>counts[tt.id]>0).length;
-    const pipeRows=PIPE_TYPES.filter(pt=>pipes.some(p=>p.type===pt.id)).length;
+    const pipeRows=activePipeTypeList.filter(pt=>pipes.some(p=>p.type===pt.id)).length;
     if(!symRows&&!pipeRows) return null;
     const rowH=18, boxH=18+(symRows+pipeRows)*rowH+8;
     return{x:legendPos.x*canvas.width,y:legendPos.y*canvas.height,w:164,h:boxH};
@@ -10200,7 +10382,13 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         return {...prev,points:[...prev.points,{x:nx,y:ny}]};
       });
       return;
-    } else if(mode==='place'){
+    } else if(mode==='area'){
+      setAreaInProgress(prev=>{
+        if(!prev||prev.page!==currentPage) return {typeId:activeAreaType,points:[{x:nx,y:ny}],page:currentPage};
+        return {...prev,points:[...prev.points,{x:nx,y:ny}]};
+      });
+      return;
+    } else if(mode==='place'&&activeTool){
       pushHistory([...markers,{id:uid(),page:currentPage,x:nx,y:ny,type:activeTool}]);
     } else if(mode==='link'){
       if(!hit){setLinkStartId(null);return;} // click empty → cancel
@@ -10245,7 +10433,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       const url=await pdfUploadRef.current;
       if(url) finalPdfUrl=url;
     }
-    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,fileType,markers,links,pipes,prefixes,globalPrefix,symSize,legendPos,
+    onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,fileType,markers,links,pipes,areas,prefixes,globalPrefix,symSize,legendPos,
       updatedAt:new Date().toISOString(),createdAt:takeoff?.createdAt||new Date().toISOString()});
     setSaving(false);
   };
@@ -10310,6 +10498,11 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'NS': dR(); dL(-h+1,h*0.3,h-1,h*0.3); dL(-h+1,0,h-1,0); break;
             case 'AP': dC(h); dC(h*0.6); dC(h*0.28); break;
             case 'SV': dR(); dL(-h+1,h*0.35,h-1,h*0.35); dL(-h+1,0,h-1,0); dL(-h+1,-h*0.35,h-1,-h*0.35); break;
+            // ── Aircon ────────────────────────────────────────────────────────
+            case 'CU': dR(); dL(-h+1,-h*0.3,h-1,-h*0.3); dL(-h+1,0,h-1,0); dL(-h+1,h*0.3,h-1,h*0.3); break;
+            case 'FCU': dR(); dC(h*0.52); break;
+            case 'VRV': dR(); dT('VRV',h*0.8); break;
+            case 'EV': dC(h); dL(-h*0.6,-h*0.6,h*0.6,h*0.6); dL(h*0.6,-h*0.6,-h*0.6,h*0.6); break;
             // ── Plumbing ──────────────────────────────────────────────────────
             case 'CW': dC(h); dT('C',h*1.1); break;
             case 'HW': dC(h); dT('H',h*1.1); break;
@@ -10361,7 +10554,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           page.drawText('SW',{x:bx-4,y:by-3,size:5,font,color:rgb(1,1,1)});
         });
       });
-      // ── Pipe runs ─────────────────────────────────────────────────────────
+      // ── Pipe / paint line runs ─────────────────────────────────────────────
       const pipesByPage={};
       pipes.forEach(p=>{(pipesByPage[p.page]||(pipesByPage[p.page]=[])).push(p);});
       Object.entries(pipesByPage).forEach(([pg,pList])=>{
@@ -10369,25 +10562,54 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         const pw=page.getWidth(), ph=page.getHeight();
         pList.forEach(p=>{
           if(p.points.length<2) return;
-          const hexColor=p.type==='HWP'?'#dc2626':'#2563eb';
+          const ptDef=activePipeTypeList.find(t=>t.id===p.type);
+          const hexColor=ptDef?.color||'#2563eb';
           const [pr,pg2,pb]=hexToRgbF(hexColor); const col=rgb(pr,pg2,pb);
+          const thick=toolKind==='painting';
           for(let i=0;i<p.points.length-1;i++){
             const x1=p.points[i].x*pw, y1=ph-p.points[i].y*ph;
             const x2=p.points[i+1].x*pw, y2=ph-p.points[i+1].y*ph;
-            page.drawLine({start:{x:x1,y:y1},end:{x:x2,y:y2},color:col,thickness:1.5});
+            page.drawLine({start:{x:x1,y:y1},end:{x:x2,y:y2},color:col,thickness:thick?4:1.5});
           }
-          // Junction dots at each vertex
-          p.points.forEach(pt=>{
-            const px2=pt.x*pw, py2=ph-pt.y*ph;
-            page.drawCircle({x:px2,y:py2,size:2.5,borderColor:col,borderWidth:1,color:rgb(1,1,1)});
-          });
+          if(!thick){
+            p.points.forEach(pt=>{
+              const px2=pt.x*pw, py2=ph-pt.y*ph;
+              page.drawCircle({x:px2,y:py2,size:2.5,borderColor:col,borderWidth:1,color:rgb(1,1,1)});
+            });
+          } else {
+            const midPt=p.points[Math.floor(p.points.length/2)];
+            const lbl=prefixes[p.type]||ptDef?.label||p.type;
+            page.drawText(lbl,{x:midPt.x*pw+4,y:ph-midPt.y*ph-3,size:6,font,color:col});
+          }
         });
       });
+      // ── Floor areas ───────────────────────────────────────────────────────
+      if(toolKind==='floor'){
+        const areasByPage={};
+        areas.forEach(a=>{(areasByPage[a.page]||(areasByPage[a.page]=[])).push(a);});
+        Object.entries(areasByPage).forEach(([pg,aList])=>{
+          const page=pages[parseInt(pg)-1]; if(!page) return;
+          const pw=page.getWidth(), ph=page.getHeight();
+          aList.forEach(a=>{
+            if(a.points.length<3) return;
+            const ft=FLOOR_TYPES.find(t=>t.id===a.typeId);
+            const [fr,fg,fb]=hexToRgbF(ft?.color||'#94a3b8'); const col=rgb(fr,fg,fb);
+            for(let i=0;i<a.points.length;i++){
+              const p1=a.points[i], p2=a.points[(i+1)%a.points.length];
+              page.drawLine({start:{x:p1.x*pw,y:ph-p1.y*ph},end:{x:p2.x*pw,y:ph-p2.y*ph},color:col,thickness:1.5});
+            }
+            const cx=a.points.reduce((s,p)=>s+p.x,0)/a.points.length*pw;
+            const cy=ph-a.points.reduce((s,p)=>s+p.y,0)/a.points.length*ph;
+            const lbl=`${ft?.label||a.typeId}${a.sqft?' '+a.sqft+' sqft':''}${a.note?' ('+a.note+')':''}`;
+            page.drawText(lbl,{x:cx-lbl.length*2,y:cy,size:8,font,color:col});
+          });
+        });
+      }
       // ── Legend (bottom-right, page 1) ──────────────────────────────────────
       const lp=pages[0];
       const lpw=lp.getWidth(), lph=lp.getHeight();
       const usedTypes=symbolTypes.filter(tt=>counts[tt.id]>0);
-      const usedPdfPipes=PIPE_TYPES.filter(pt=>pipes.some(p=>p.type===pt.id));
+      const usedPdfPipes=activePipeTypeList.filter(pt=>pipes.some(p=>p.type===pt.id));
       if(usedTypes.length>0||usedPdfPipes.length>0){
         const rowH=13, padX=8, padY=6, legendW=175;
         const legendH=padY*2+16+(usedTypes.length+usedPdfPipes.length)*rowH;
@@ -10424,6 +10646,11 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'NS': dR2(); dL2(-ss/2+1,ss*0.18,ss/2-1,ss*0.18); break;
             case 'AP': dC2(ss/2); dC2(ss*0.32); break;
             case 'SV': dR2(); dL2(-ss/2+1,ss*0.2,ss/2-1,ss*0.2); dL2(-ss/2+1,-ss*0.2,ss/2-1,-ss*0.2); break;
+            // ── Aircon ──────────────────────────────────────────────────────────
+            case 'CU': dR2(); dL2(-ss/2+1,ss*0.18,ss/2-1,ss*0.18); dL2(-ss/2+1,-ss*0.18,ss/2-1,-ss*0.18); break;
+            case 'FCU': dR2(); dC2(ss*0.35); break;
+            case 'VRV': dR2(); break;
+            case 'EV': dC2(ss/2); dL2(-ss*0.35,-ss*0.35,ss*0.35,ss*0.35); dL2(ss*0.35,-ss*0.35,-ss*0.35,ss*0.35); break;
             // ── Plumbing ────────────────────────────────────────────────────────
             case 'CW': dC2(ss/2); break;
             case 'HW': dC2(ss/2); break;
@@ -10487,16 +10714,33 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         </button>
         {/* Mode */}
         <div style={{display:'flex',border:`1px solid ${T.borderLight}`,borderRadius:8,overflow:'hidden'}}>
-          {[['place','Place',PenLine],['select','Select',MousePointer],
-            ...(toolKind==='plumbing'?[['pipe','Draw Pipe',PenLine]]:([['link','Switch Leg',Link2]]))
-          ].map(([m,l,Icon])=>(
-            <button key={m} onClick={()=>{setMode(m);setSelectedIds(new Set());setLinkStartId(null);setPipeInProgress(null);}}
+          {!hasPipeMode&&!hasAreaMode&&(
+            <button onClick={()=>{setMode('place');setSelectedIds(new Set());setLinkStartId(null);setPipeInProgress(null);}}
               style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
-                background:mode===m?T.text:'transparent',color:mode===m?T.bg:T.muted,transition:'all 0.15s'}}>
-              <Icon size={11}/>{l}
+                background:mode==='place'?T.text:'transparent',color:mode==='place'?T.bg:T.muted,transition:'all 0.15s'}}>
+              <PenLine size={11}/>Place
             </button>
-          ))}
-          {toolKind==='electrical'&&(
+          )}
+          <button onClick={()=>{setMode('select');setSelectedIds(new Set());setLinkStartId(null);setPipeInProgress(null);setAreaInProgress(null);}}
+            style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
+              background:mode==='select'?T.text:'transparent',color:mode==='select'?T.bg:T.muted,transition:'all 0.15s'}}>
+            <MousePointer size={11}/>Select
+          </button>
+          {hasPipeMode&&(
+            <button onClick={()=>{setMode('pipe');setSelectedIds(new Set());setLinkStartId(null);}}
+              style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
+                background:mode==='pipe'?T.text:'transparent',color:mode==='pipe'?T.bg:T.muted,transition:'all 0.15s'}}>
+              <PenLine size={11}/>{toolKind==='painting'?'Draw Line':'Draw Pipe'}
+            </button>
+          )}
+          {hasAreaMode&&(
+            <button onClick={()=>{setMode('area');setSelectedIds(new Set());setLinkStartId(null);setPipeInProgress(null);}}
+              style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
+                background:mode==='area'?T.text:'transparent',color:mode==='area'?T.bg:T.muted,transition:'all 0.15s'}}>
+              <PenLine size={11}/>Mark Area
+            </button>
+          )}
+          {(toolKind==='electrical'||toolKind==='lighting'||toolKind==='power'||toolKind==='network')&&(
             <button onClick={()=>{setMode('link');setSelectedIds(new Set());setLinkStartId(null);}}
               style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
                 background:mode==='link'?T.text:'transparent',color:mode==='link'?T.bg:T.muted,transition:'all 0.15s'}}>
@@ -10504,21 +10748,26 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             </button>
           )}
         </div>
-        {/* Pipe type picker (plumbing) */}
-        {mode==='pipe'&&toolKind==='plumbing'&&(
-          <div style={{display:'flex',gap:6,alignItems:'center'}}>
-            {PIPE_TYPES.map(pt=>(
+        {/* Pipe/line type picker */}
+        {mode==='pipe'&&hasPipeMode&&(
+          <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+            {activePipeTypeList.map(pt=>(
               <button key={pt.id} onClick={()=>setActivePipeType(pt.id)}
                 style={{padding:'4px 10px',borderRadius:7,border:`2px solid ${activePipeType===pt.id?pt.color:T.borderLight}`,
                   cursor:'pointer',fontSize:11,fontWeight:700,color:activePipeType===pt.id?pt.color:T.muted,
                   background:activePipeType===pt.id?pt.color+'18':'transparent',fontFamily:'inherit'}}>
-                {pt.id==='CWP'?'● Cold Water':'● Hot Water'}
+                ● {toolKind==='painting'?(prefixes[pt.id]||pt.label):pt.label}
               </button>
             ))}
             <span style={{fontSize:11,color:T.muted,fontStyle:'italic'}}>
-              {pipeInProgress?'Click to add points — right-click to finish':'Click to start drawing a pipe'}
+              {pipeInProgress?'Click to add — right-click to finish':'Click to start'}
             </span>
           </div>
+        )}
+        {mode==='area'&&hasAreaMode&&(
+          <span style={{fontSize:11,color:T.muted,fontStyle:'italic'}}>
+            {areaInProgress?`${areaInProgress.points.length} points — right-click to close polygon`:'Click to start marking a floor area'}
+          </span>
         )}
         {/* Link mode instructions */}
         {mode==='link'&&(
@@ -10598,9 +10847,72 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             </div>
           )}
 
-          {/* Point types */}
-          <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:8}}>Point Types</div>
-          {symbolTypes.map(tt=>(
+          {/* Painting: line type palette with editable labels */}
+          {toolKind==='painting'&&(
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:8}}>Paint / Wallpaper</div>
+              {activePipeTypeList.map(pt=>(
+                <div key={pt.id} onClick={()=>{setActivePipeType(pt.id);setMode('pipe');}}
+                  style={{display:'flex',alignItems:'center',gap:8,padding:'7px 8px',borderRadius:8,marginBottom:4,cursor:'pointer',
+                    border:`1px solid ${activePipeType===pt.id&&mode==='pipe'?pt.color:T.borderLight}`,
+                    background:activePipeType===pt.id&&mode==='pipe'?pt.color+'14':'transparent',transition:'all 0.12s'}}>
+                  <div style={{width:20,height:6,background:pt.color,borderRadius:3,flexShrink:0}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <input value={prefixes[pt.id]||pt.label} maxLength={20}
+                      onChange={e=>setPrefixes(p=>({...p,[pt.id]:e.target.value}))}
+                      onClick={ev=>ev.stopPropagation()}
+                      style={{width:'100%',border:'none',background:'transparent',fontSize:11,fontWeight:600,color:T.text,fontFamily:'inherit',padding:0,outline:'none'}}/>
+                  </div>
+                  <span style={{fontSize:10,color:T.dim}}>×{pipes.filter(p=>p.type===pt.id).length}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Floor: material type picker + area list */}
+          {toolKind==='floor'&&(
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:8}}>Floor Material</div>
+              {FLOOR_TYPES.map(ft=>(
+                <div key={ft.id} onClick={()=>{setActiveAreaType(ft.id);setMode('area');}}
+                  style={{display:'flex',alignItems:'center',gap:8,padding:'6px 8px',borderRadius:8,marginBottom:4,cursor:'pointer',
+                    border:`1px solid ${activeAreaType===ft.id&&mode==='area'?'#64748b':T.borderLight}`,
+                    background:activeAreaType===ft.id&&mode==='area'?ft.color+'66':'transparent',transition:'all 0.12s'}}>
+                  <div style={{width:14,height:14,background:ft.color,borderRadius:3,border:'1px solid #94a3b8',flexShrink:0}}/>
+                  <span style={{fontSize:11,fontWeight:600,color:T.text,flex:1}}>{ft.label}</span>
+                  <span style={{fontSize:10,color:T.dim}}>×{areas.filter(a=>a.typeId===ft.id).length}</span>
+                </div>
+              ))}
+              {areas.filter(a=>a.page===currentPage).length>0&&(
+                <div style={{borderTop:`1px solid ${T.borderLight}`,marginTop:8,paddingTop:8}}>
+                  <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:6}}>Areas This Page</div>
+                  {areas.filter(a=>a.page===currentPage).map(a=>{
+                    const ft=FLOOR_TYPES.find(t=>t.id===a.typeId);
+                    return(
+                      <div key={a.id} style={{background:T.bg,borderRadius:8,padding:'8px',border:`1px solid ${T.borderLight}`,marginBottom:6}}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:5}}>
+                          <span style={{fontSize:11,fontWeight:700,color:ft?.color||T.text,display:'flex',alignItems:'center',gap:5}}>
+                            <div style={{width:10,height:10,background:ft?.color,borderRadius:2}}/>
+                            {ft?.label||a.typeId}
+                          </span>
+                          <button onClick={()=>setAreas(as=>as.filter(x=>x.id!==a.id))}
+                            style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'2px',lineHeight:1,fontSize:12}}>✕</button>
+                        </div>
+                        <input placeholder="Area sqft" value={a.sqft||''} onChange={e=>setAreas(as=>as.map(x=>x.id===a.id?{...x,sqft:e.target.value}:x))}
+                          style={{width:'100%',border:`1px solid ${T.borderLight}`,borderRadius:5,padding:'3px 6px',fontSize:11,background:T.bg,color:T.text,fontFamily:'inherit',marginBottom:3}}/>
+                        <input placeholder="Material note (optional)" value={a.note||''} onChange={e=>setAreas(as=>as.map(x=>x.id===a.id?{...x,note:e.target.value}:x))}
+                          style={{width:'100%',border:`1px solid ${T.borderLight}`,borderRadius:5,padding:'3px 6px',fontSize:11,background:T.bg,color:T.text,fontFamily:'inherit'}}/>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Point types (hidden for painting/floor) */}
+          {toolKind!=='painting'&&toolKind!=='floor'&&<div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:8}}>Point Types</div>}
+          {toolKind!=='painting'&&toolKind!=='floor'&&symbolTypes.map(tt=>(
             <div key={tt.id}
               onClick={()=>{setActiveTool(tt.id);if(mode==='select')setMode('place');}}
               style={{display:'flex',alignItems:'center',gap:8,padding:'7px 8px',borderRadius:8,marginBottom:4,cursor:'pointer',
@@ -10627,11 +10939,11 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             </div>
           ))}
 
-          {/* Pipe runs (plumbing only) */}
-          {toolKind==='plumbing'&&pipes.length>0&&(
+          {/* Pipe / paint runs */}
+          {(toolKind==='plumbing'||toolKind==='aircon')&&pipes.length>0&&(
             <div style={{borderTop:`1px solid ${T.borderLight}`,marginTop:8,paddingTop:8}}>
-              <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:6}}>Pipe Runs</div>
-              {PIPE_TYPES.map(pt=>{
+              <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:6}}>{toolKind==='aircon'?'AC Pipe Runs':'Pipe Runs'}</div>
+              {activePipeTypeList.map(pt=>{
                 const cnt=pipes.filter(p=>p.type===pt.id).length;
                 if(!cnt) return null;
                 return(
@@ -10640,7 +10952,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
                     <span style={{fontSize:10,color:T.muted,flex:1}}>{pt.label}</span>
                     <span style={{fontSize:11,fontWeight:700,color:pt.color}}>×{cnt}</span>
                     <button onClick={()=>setPipes(ps=>ps.filter(p=>!(p.type===pt.id&&p.page===currentPage)))}
-                      title={`Delete ${pt.label} on this page`}
+                      title={`Delete on this page`}
                       style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'2px',lineHeight:1}}>✕</button>
                   </div>
                 );
@@ -10650,7 +10962,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
 
           {/* Status + page nav */}
           <div style={{borderTop:`1px solid ${T.borderLight}`,marginTop:8,paddingTop:8}}>
-            <div style={{fontSize:11,fontWeight:700,color:T.text}}>Total: {markers.length} points</div>
+            <div style={{fontSize:11,fontWeight:700,color:T.text}}>
+              {toolKind==='floor'?`${areas.length} area${areas.length!==1?'s':''}`:toolKind==='painting'?`${pipes.length} line${pipes.length!==1?'s':''}`:
+              `Total: ${markers.length} points`}
+            </div>
             {selCount>0&&<div style={{fontSize:10,color:T.info,marginTop:2}}>{selCount} selected · Shift+click to add</div>}
             <div style={{fontSize:10,color:T.dim,marginTop:2}}>Page {currentPage}/{totalPages||'—'}</div>
           </div>
@@ -10727,6 +11042,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
                   if(mode==='pipe'&&pipeInProgress){
                     if(pipeInProgress.points.length>=2) setPipes(ps=>[...ps,{...pipeInProgress,id:uid()}]);
                     setPipeInProgress(null);
+                  }
+                  if(mode==='area'&&areaInProgress){
+                    if(areaInProgress.points.length>=3) setAreas(as=>[...as,{...areaInProgress,id:uid(),sqft:'',note:''}]);
+                    setAreaInProgress(null);
                   }
                 }}
               />
@@ -14472,7 +14791,7 @@ export default function App(){
 
   const handleSoftDelete = useCallback((item)=>{
     setTrash(prev=>{const upd=[...prev,item];saveS('trash',upd);return upd;});
-    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup'}[item._trashType]||item._trashType;
+    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup',aircon:'Aircon Markup',painting:'Painting Markup',floor:'Floor Markup'}[item._trashType]||item._trashType;
     const label=item.name||item.invoiceNo||item.quoteNo||item.title||item.email||item.id;
     logAction(`DELETE_${(item._trashType||'').toUpperCase()}`, `Deleted ${typeName}: ${label}`, item);
   },[logAction]);
@@ -14507,8 +14826,11 @@ export default function App(){
     else if(_trashType==='power'){loadS('power',[]).then(existing=>{const u=[...existing,orig];saveS('power',u);});}
     else if(_trashType==='network'){loadS('network',[]).then(existing=>{const u=[...existing,orig];saveS('network',u);});}
     else if(_trashType==='plumbing'){loadS('plumbings',[]).then(existing=>{const u=[...existing,orig];saveS('plumbings',u);});}
+    else if(_trashType==='aircon'){loadS('aircon',[]).then(existing=>{const u=[...existing,orig];saveS('aircon',u);});}
+    else if(_trashType==='painting'){loadS('painting',[]).then(existing=>{const u=[...existing,orig];saveS('painting',u);});}
+    else if(_trashType==='floor'){loadS('floor',[]).then(existing=>{const u=[...existing,orig];saveS('floor',u);});}
     setTrash(prev=>{const upd=prev.filter(t=>t.id!==item.id);saveS('trash',upd);return upd;});
-    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup'}[_trashType]||_trashType;
+    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup',aircon:'Aircon Markup',painting:'Painting Markup',floor:'Floor Markup'}[_trashType]||_trashType;
     const label=orig.name||orig.invoiceNo||orig.quoteNo||orig.title||orig.email||orig.id;
     logAction(`RESTORE_${(_trashType||'').toUpperCase()}`, `Restored ${typeName}: ${label}`, orig);
   },[logAction]);
@@ -14517,7 +14839,7 @@ export default function App(){
     setTrash(prev=>{
       const item=prev.find(t=>t.id===id);
       if(item){
-        const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup'}[item._trashType]||item._trashType;
+        const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup',aircon:'Aircon Markup',painting:'Painting Markup',floor:'Floor Markup'}[item._trashType]||item._trashType;
         logAction('PERMANENT_DELETE', `Permanently deleted ${typeName}: ${item.name||item.invoiceNo||item.quoteNo||item.title||item.email||id}`, item);
       }
       const upd=prev.filter(t=>t.id!==id);saveS('trash',upd);return upd;
