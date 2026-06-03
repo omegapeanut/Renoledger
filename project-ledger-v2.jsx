@@ -10457,6 +10457,15 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       if(vp){const [x,y]=vp.convertToPdfPoint(nx*vp.width,ny*vp.height);return {x,y};}
       return {x:nx*pw,y:ph*(1-ny)};
     };
+    // Convert a display-space offset (dRight, dDown) to PDF MediaBox offset given page rotation.
+    // vp.rotation is CW degrees (0/90/180/270) matching the PDF /Rotate entry.
+    const dispOff=(dRight,dDown,rot)=>{
+      if(rot===90)  return {dx:dDown,   dy:dRight};
+      if(rot===180) return {dx:-dRight, dy:dDown};
+      if(rot===270) return {dx:-dDown,  dy:-dRight};
+      return               {dx:dRight,  dy:-dDown};
+    };
+    const pageRot=(pageNum)=>(pdfjsVps[pageNum]?.rotation||0);
     try{
       const {PDFDocument,rgb,StandardFonts}=window.PDFLib;
       let doc, pages;
@@ -10480,6 +10489,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         const page=pages[parseInt(pg)-1]; if(!page) return;
         const pw=page.getWidth(), ph=page.getHeight();
         const h=symSzPt/2;
+        const rot=pageRot(parseInt(pg));
         mList.forEach(m=>{
           const {x:px,y:py}=toPdfPt(m.x,m.y,pw,ph,parseInt(pg));
           const tt=symbolTypes.find(t=>t.id===m.type);
@@ -10536,7 +10546,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'WM': dR(); dC(h*0.5); break;
             default:   dR(); break;
           }
-          page.drawText(getTakeoffLabel(m,markers,prefixes,globalPrefix),{x:px+h+2,y:py-3,size:Math.max(5,symSzPt*0.55),font,color:col});
+          const {dx:lbdx,dy:lbdy}=dispOff(h+2,3,rot);
+          page.drawText(getTakeoffLabel(m,markers,prefixes,globalPrefix),{x:px+lbdx,y:py+lbdy,size:Math.max(5,symSzPt*0.55),font,color:col});
         });
       });
       // ── Switch leg curves ──────────────────────────────────────────────────
@@ -10595,7 +10606,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             const midPt=p.points[Math.floor(p.points.length/2)];
             const {x:mlx,y:mly}=toPdfPt(midPt.x,midPt.y,pw,ph,parseInt(pg));
             const lbl=prefixes[p.type]||ptDef?.label||p.type;
-            page.drawText(lbl,{x:mlx+4,y:mly-3,size:6,font,color:col});
+            const {dx:pldx,dy:pldy}=dispOff(4,3,pageRot(parseInt(pg)));
+            page.drawText(lbl,{x:mlx+pldx,y:mly+pldy,size:6,font,color:col});
           }
         });
       });
