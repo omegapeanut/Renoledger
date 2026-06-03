@@ -10677,7 +10677,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       const usedTypes=symbolTypes.filter(tt=>counts[tt.id]>0);
       const usedPdfPipes=activePipeTypeList.filter(pt=>pipes.some(p=>p.type===pt.id));
       if(usedTypes.length>0||usedPdfPipes.length>0){
-        const ss=7,rowH=15,padX=10,legendW=200,hdrH=20;
+        const ss=7,rowH=14,padX=10,legendW=195,hdrH=14;
         const totalRowsN=usedTypes.length+usedPdfPipes.length;
         const legendH=hdrH+totalRowsN*rowH+rowH; // header + data rows + total row
         const W=legendW,H=legendH;
@@ -10693,8 +10693,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         const hx=Math.min(...hCrns.map(c=>c.x)),hy=Math.min(...hCrns.map(c=>c.y));
         const hw=Math.max(...hCrns.map(c=>c.x))-hx,hh=Math.max(...hCrns.map(c=>c.y))-hy;
         lp.drawRectangle({x:hx,y:hy,width:hw,height:hh,color:rgb(0.08,0.19,0.37),borderWidth:0});
-        const{x:hTx,y:hTy}=lpt(padX,5);
-        lp.drawText('LEGEND',{x:hTx,y:hTy,size:9,font,color:rgb(1,1,1),rotate:tDeg(p1Rot)});
+        const{x:hTx,y:hTy}=lpt(padX,hdrH*0.65);
+        lp.drawText('LEGEND',{x:hTx,y:hTy,size:8,font,color:rgb(1,1,1),rotate:tDeg(p1Rot)});
         // Symbol type rows
         usedTypes.forEach((tt,i)=>{
           const[r,g,b]=hexToRgbF(tt.color);const col=rgb(r,g,b);
@@ -10764,11 +10764,11 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         const ta=lpt(0,totDD),tb=lpt(W,totDD);
         lp.drawLine({start:ta,end:tb,color:rgb(0.5,0.5,0.5),thickness:0.8});
         const{x:tltx,y:tlty}=lpt(padX,totDD+rowH*0.62);
-        lp.drawText('TOTAL',{x:tltx,y:tlty,size:7,font,color:rgb(0.1,0.1,0.1),rotate:tDeg(p1Rot)});
+        lp.drawText('TOTAL',{x:tltx,y:tlty,size:6.5,font,color:rgb(0.1,0.1,0.1),rotate:tDeg(p1Rot)});
         const totNumTxt=`${markers.length}`;
-        const totNumW=font.widthOfTextAtSize(totNumTxt,8);
+        const totNumW=font.widthOfTextAtSize(totNumTxt,7);
         const{x:tnx,y:tny}=lpt(W-padX-totNumW,totDD+rowH*0.62);
-        lp.drawText(totNumTxt,{x:tnx,y:tny,size:8,font,color:rgb(0.08,0.19,0.37),rotate:tDeg(p1Rot)});
+        lp.drawText(totNumTxt,{x:tnx,y:tny,size:7,font,color:rgb(0.08,0.19,0.37),rotate:tDeg(p1Rot)});
       }
       const bytes=await doc.save();
       const blob=new Blob([bytes],{type:'application/pdf'});
