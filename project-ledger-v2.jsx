@@ -10266,7 +10266,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       }
     }
     // ── Legend preview (draggable) ────────────────────────────────────────────
-    const usedForLegend=symbolTypes.filter(tt=>counts[tt.id]>0);
+    const areaCnts=toolKind==='floor'?FLOOR_TYPES.reduce((a,t)=>{a[t.id]=areas.filter(r=>r.typeId===t.id).length;return a;},{}):null;
+    const usedForLegend=toolKind==='floor'?symbolTypes.filter(tt=>areaCnts[tt.id]>0):symbolTypes.filter(tt=>counts[tt.id]>0);
     const usedPipeTypes=activePipeTypeList.filter(pt=>pipes.some(p=>p.type===pt.id));
     const totalLegendRows=usedForLegend.length+usedPipeTypes.length;
     if(totalLegendRows>0){
@@ -10284,11 +10285,15 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       ctx.beginPath(); ctx.moveTo(lx,ly+16); ctx.lineTo(lx+boxW,ly+16); ctx.stroke();
       usedForLegend.forEach((tt,i)=>{
         const ry=ly+16+i*rowH+rowH/2;
-        drawTakeoffSymbol(ctx,tt.id,lx+padX+7,ry,12,tt.color);
+        if(toolKind==='floor'){
+          ctx.save();ctx.fillStyle=tt.color;ctx.globalAlpha=0.55;ctx.fillRect(lx+padX,ry-5,14,10);ctx.globalAlpha=1;ctx.strokeStyle=tt.color;ctx.lineWidth=1;ctx.strokeRect(lx+padX,ry-5,14,10);ctx.restore();
+        } else {
+          drawTakeoffSymbol(ctx,tt.id,lx+padX+7,ry,12,tt.color);
+        }
         ctx.fillStyle='#222'; ctx.font='9px sans-serif';
         ctx.fillText(`${tt.label}`,lx+padX+18,ry+3);
         ctx.fillStyle=tt.color; ctx.font='bold 9px sans-serif';
-        ctx.fillText(`×${counts[tt.id]}`,lx+boxW-28,ry+3);
+        ctx.fillText(`×${toolKind==='floor'?areaCnts[tt.id]:counts[tt.id]}`,lx+boxW-28,ry+3);
       });
       usedPipeTypes.forEach((pt,i)=>{
         const row=usedForLegend.length+i;
@@ -10305,7 +10310,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       ctx.strokeStyle='#ddd'; ctx.lineWidth=0.8;
       ctx.beginPath(); ctx.moveTo(lx,ly+boxH-10); ctx.lineTo(lx+boxW,ly+boxH-10); ctx.stroke();
       ctx.fillStyle='#222'; ctx.font='bold 9px sans-serif';
-      ctx.fillText(`Total: ${markers.length}`,lx+padX,ly+boxH-2);
+      const legendTotal=toolKind==='floor'?areas.length:toolKind==='painting'?pipes.length:markers.length;
+      ctx.fillText(`Total: ${legendTotal}`,lx+padX,ly+boxH-2);
       ctx.restore();
     }
   };
@@ -10313,7 +10319,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   // ── Legend drag helpers ───────────────────────────────────────────────────
   const getLegendBox=useCallback(()=>{
     const canvas=overlayRef.current; if(!canvas) return null;
-    const symRows=symbolTypes.filter(tt=>counts[tt.id]>0).length;
+    const symRows=toolKind==='floor'
+      ?symbolTypes.filter(tt=>areas.filter(r=>r.typeId===tt.id).length>0).length
+      :symbolTypes.filter(tt=>counts[tt.id]>0).length;
     const pipeRows=activePipeTypeList.filter(pt=>pipes.some(p=>p.type===pt.id)).length;
     if(!symRows&&!pipeRows) return null;
     const rowH=18, boxH=18+(symRows+pipeRows)*rowH+8;
@@ -10674,7 +10682,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       const {x:lax,y:lay}=toPdfPt(legendPos.x,legendPos.y,lpw,lph,1);
       // lpt(dr,dd): PDF point at display-offset (dr right, dd down) from anchor
       const lpt=(dr,dd)=>{const{dx,dy}=dispOff(dr,dd,p1Rot);return{x:lax+dx,y:lay+dy};};
-      const usedTypes=symbolTypes.filter(tt=>counts[tt.id]>0);
+      const pdfAreaCnts=toolKind==='floor'?FLOOR_TYPES.reduce((a,t)=>{a[t.id]=areas.filter(r=>r.typeId===t.id).length;return a;},{}):null;
+      const usedTypes=toolKind==='floor'?symbolTypes.filter(tt=>pdfAreaCnts[tt.id]>0):symbolTypes.filter(tt=>counts[tt.id]>0);
       const usedPdfPipes=activePipeTypeList.filter(pt=>pipes.some(p=>p.type===pt.id));
       if(usedTypes.length>0||usedPdfPipes.length>0){
         const ss=7,rowH=14,padX=10,legendW=195,hdrH=14;
@@ -10705,7 +10714,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           const dR2=()=>lp.drawRectangle({x:sx-ss/2,y:sy-ss/2,width:ss,height:ss,borderColor:col,borderWidth:0.9,color:undefined});
           const dL2=(x1,y1,x2,y2)=>lp.drawLine({start:{x:sx+x1,y:sy+y1},end:{x:sx+x2,y:sy+y2},color:col,thickness:0.9});
           const dC2=(rad)=>lp.drawCircle({x:sx,y:sy,size:rad,borderColor:col,borderWidth:0.9,color:undefined});
-          switch(tt.id){
+          if(toolKind==='floor'){
+            const[fr,fg,fb2]=hexToRgbF(tt.color);
+            lp.drawRectangle({x:sx-ss/2,y:sy-ss/2,width:ss,height:ss,color:rgb(fr,fg,fb2),opacity:0.55,borderColor:rgb(fr,fg,fb2),borderWidth:0.9});
+          } else {switch(tt.id){
             case 'SP': dR2(); dL2(-ss/2+1,0,ss/2-1,0); break;
             case 'DP': dR2(); dL2(-ss/2+1,ss*0.2,ss/2-1,ss*0.2); dL2(-ss/2+1,-ss*0.2,ss/2-1,-ss*0.2); break;
             case 'LP': dC2(ss/2); dL2(0,-ss/2,0,ss/2); dL2(-ss/2,0,ss/2,0); break;
@@ -10736,10 +10748,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'BV': dC2(ss*0.38); dL2(-ss/2,0,ss/2,0); dL2(0,ss*0.38,0,ss/2); break;
             case 'WM': dR2(); dC2(ss*0.3); break;
             default: dR2(); break;
-          }
+          }}
           // Label (left) + count right-aligned in symbol colour
-          const labelTxt=globalPrefix!==undefined?tt.label:`${prefixes[tt.id]||tt.defaultPrefix} — ${tt.label}`;
-          const cntTxt=`×${counts[tt.id]}`;
+          const labelTxt=toolKind==='floor'?tt.label:(globalPrefix!==undefined?tt.label:`${prefixes[tt.id]||tt.defaultPrefix} — ${tt.label}`);
+          const cntTxt=toolKind==='floor'?`×${pdfAreaCnts[tt.id]}`:`×${counts[tt.id]}`;
           const cntW=fontReg.widthOfTextAtSize(cntTxt,6.5);
           const{x:lbx,y:lby}=lpt(padX+ss+5,rowDD+rowH*0.62);
           lp.drawText(labelTxt,{x:lbx,y:lby,size:6.5,font:fontReg,color:rgb(0.1,0.1,0.1),rotate:tDeg(p1Rot)});
@@ -10765,7 +10777,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         lp.drawLine({start:ta,end:tb,color:rgb(0.5,0.5,0.5),thickness:0.8});
         const{x:tltx,y:tlty}=lpt(padX,totDD+rowH*0.62);
         lp.drawText('TOTAL',{x:tltx,y:tlty,size:6.5,font,color:rgb(0.1,0.1,0.1),rotate:tDeg(p1Rot)});
-        const totNumTxt=`${markers.length}`;
+        const totNumTxt=`${toolKind==='floor'?areas.length:toolKind==='painting'?pipes.length:markers.length}`;
         const totNumW=font.widthOfTextAtSize(totNumTxt,7);
         const{x:tnx,y:tny}=lpt(W-padX-totNumW,totDD+rowH*0.62);
         lp.drawText(totNumTxt,{x:tnx,y:tny,size:7,font,color:rgb(0.08,0.19,0.37),rotate:tDeg(p1Rot)});
