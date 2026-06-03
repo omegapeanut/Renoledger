@@ -10443,21 +10443,19 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     if(!pdfBytes){alert('File is still loading, please wait a moment.');return;}
     if(!window.PDFLib){alert('Export library not loaded, please wait.');return;}
     setExporting(true);
-    // Convert normalised (0-1) canvas coords to PDF-lib point coords,
-    // accounting for the page's Rotate attribute (CW degrees per PDF spec).
-    //
-    // For each rotation, pdf.js maps PDF content → canvas as follows,
-    // so here we invert that mapping (canvas → PDF content):
-    //
-    //   Rotate=0:   canvas(cx,cy) = (x*s,  (ph-y)*s)  → x=nx*pw,      y=ph*(1-ny)
-    //   Rotate=90:  canvas(cx,cy) = (y*s,  x*s)        → x=ny*pw,      y=nx*ph
-    //   Rotate=180: canvas(cx,cy) = ((pw-x)*s, y*s)    → x=pw*(1-nx),  y=ny*ph
-    //   Rotate=270: canvas(cx,cy) = ((ph-y)*s,(pw-x)*s)→ x=pw*(1-ny),  y=ph*(1-nx)
-    const toPdfPt=(nx,ny,pw,ph,rot)=>{
-      if(rot===90)  return {x:pw*ny,       y:ph*nx};
-      if(rot===180) return {x:pw*(1-nx),   y:ph*ny};
-      if(rot===270) return {x:pw*(1-ny),   y:ph*(1-nx)};
-      return         {x:nx*pw,             y:ph*(1-ny)};
+    // Pre-compute pdf.js viewports (scale=1) for each page so we can use
+    // convertToPdfPoint — this correctly inverts whatever transform pdf.js
+    // applied (including inherited Rotate entries that pdf-lib doesn't traverse).
+    const pdfjsVps={};
+    if(pdfDoc&&fileType!=='image'){
+      for(let i=1;i<=totalPages;i++){
+        try{const p=await pdfDoc.getPage(i);pdfjsVps[i]=p.getViewport({scale:1.0});}catch(e){}
+      }
+    }
+    const toPdfPt=(nx,ny,pw,ph,pageNum)=>{
+      const vp=pdfjsVps[pageNum];
+      if(vp){const [x,y]=vp.convertToPdfPoint(nx*vp.width,ny*vp.height);return {x,y};}
+      return {x:nx*pw,y:ph*(1-ny)};
     };
     try{
       const {PDFDocument,rgb,StandardFonts}=window.PDFLib;
@@ -10481,10 +10479,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       Object.entries(byPage).forEach(([pg,mList])=>{
         const page=pages[parseInt(pg)-1]; if(!page) return;
         const pw=page.getWidth(), ph=page.getHeight();
-        const rot=(page.getRotation?.()?.angle||0)%360;
         const h=symSzPt/2;
         mList.forEach(m=>{
-          const {x:px,y:py}=toPdfPt(m.x,m.y,pw,ph,rot);
+          const {x:px,y:py}=toPdfPt(m.x,m.y,pw,ph,parseInt(pg));
           const tt=symbolTypes.find(t=>t.id===m.type);
           const [r,g,b]=hexToRgbF(tt?.color||'#000');
           const col=rgb(r,g,b);
@@ -10548,12 +10545,11 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       Object.entries(linksByPage).forEach(([pg,lList])=>{
         const page=pages[parseInt(pg)-1]; if(!page) return;
         const pw=page.getWidth(), ph=page.getHeight();
-        const rot=(page.getRotation?.()?.angle||0)%360;
         lList.forEach(l=>{
           const fm=markers.find(m=>m.id===l.fromId), tm=markers.find(m=>m.id===l.toId);
           if(!fm||!tm) return;
-          const {x:x1,y:y1}=toPdfPt(fm.x,fm.y,pw,ph,rot);
-          const {x:x2,y:y2}=toPdfPt(tm.x,tm.y,pw,ph,rot);
+          const {x:x1,y:y1}=toPdfPt(fm.x,fm.y,pw,ph,parseInt(pg));
+          const {x:x2,y:y2}=toPdfPt(tm.x,tm.y,pw,ph,parseInt(pg));
           const hexColor=circuitColorMap[getCircuitKey(l)]||'#16a34a';
           const [cr,cg,cb]=hexToRgbF(hexColor); const col=rgb(cr,cg,cb);
           // Approximate quadratic bezier with dashed segments
@@ -10579,7 +10575,6 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       Object.entries(pipesByPage).forEach(([pg,pList])=>{
         const page=pages[parseInt(pg)-1]; if(!page) return;
         const pw=page.getWidth(), ph=page.getHeight();
-        const rot=(page.getRotation?.()?.angle||0)%360;
         pList.forEach(p=>{
           if(p.points.length<2) return;
           const ptDef=activePipeTypeList.find(t=>t.id===p.type);
@@ -10587,18 +10582,18 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           const [pr,pg2,pb]=hexToRgbF(hexColor); const col=rgb(pr,pg2,pb);
           const thick=toolKind==='painting';
           for(let i=0;i<p.points.length-1;i++){
-            const {x:x1,y:y1}=toPdfPt(p.points[i].x,p.points[i].y,pw,ph,rot);
-            const {x:x2,y:y2}=toPdfPt(p.points[i+1].x,p.points[i+1].y,pw,ph,rot);
+            const {x:x1,y:y1}=toPdfPt(p.points[i].x,p.points[i].y,pw,ph,parseInt(pg));
+            const {x:x2,y:y2}=toPdfPt(p.points[i+1].x,p.points[i+1].y,pw,ph,parseInt(pg));
             page.drawLine({start:{x:x1,y:y1},end:{x:x2,y:y2},color:col,thickness:thick?4:1.5});
           }
           if(!thick){
             p.points.forEach(pt=>{
-              const {x:px2,y:py2}=toPdfPt(pt.x,pt.y,pw,ph,rot);
+              const {x:px2,y:py2}=toPdfPt(pt.x,pt.y,pw,ph,parseInt(pg));
               page.drawCircle({x:px2,y:py2,size:2.5,borderColor:col,borderWidth:1,color:rgb(1,1,1)});
             });
           } else {
             const midPt=p.points[Math.floor(p.points.length/2)];
-            const {x:mlx,y:mly}=toPdfPt(midPt.x,midPt.y,pw,ph,rot);
+            const {x:mlx,y:mly}=toPdfPt(midPt.x,midPt.y,pw,ph,parseInt(pg));
             const lbl=prefixes[p.type]||ptDef?.label||p.type;
             page.drawText(lbl,{x:mlx+4,y:mly-3,size:6,font,color:col});
           }
@@ -10611,20 +10606,19 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         Object.entries(areasByPage).forEach(([pg,aList])=>{
           const page=pages[parseInt(pg)-1]; if(!page) return;
           const pw=page.getWidth(), ph=page.getHeight();
-          const rot=(page.getRotation?.()?.angle||0)%360;
           aList.forEach(a=>{
             if(a.points.length<3) return;
             const ft=FLOOR_TYPES.find(t=>t.id===a.typeId);
             const [fr,fg,fb]=hexToRgbF(ft?.color||'#94a3b8'); const col=rgb(fr,fg,fb);
             for(let i=0;i<a.points.length;i++){
               const p1=a.points[i], p2=a.points[(i+1)%a.points.length];
-              const {x:fx1,y:fy1}=toPdfPt(p1.x,p1.y,pw,ph,rot);
-              const {x:fx2,y:fy2}=toPdfPt(p2.x,p2.y,pw,ph,rot);
+              const {x:fx1,y:fy1}=toPdfPt(p1.x,p1.y,pw,ph,parseInt(pg));
+              const {x:fx2,y:fy2}=toPdfPt(p2.x,p2.y,pw,ph,parseInt(pg));
               page.drawLine({start:{x:fx1,y:fy1},end:{x:fx2,y:fy2},color:col,thickness:1.5});
             }
             const acx=a.points.reduce((s,p)=>s+p.x,0)/a.points.length;
             const acy=a.points.reduce((s,p)=>s+p.y,0)/a.points.length;
-            const {x:cx,y:cy}=toPdfPt(acx,acy,pw,ph,rot);
+            const {x:cx,y:cy}=toPdfPt(acx,acy,pw,ph,parseInt(pg));
             const lbl=`${ft?.label||a.typeId}${a.sqft?' '+a.sqft+' sqft':''}${a.note?' ('+a.note+')':''}`;
             page.drawText(lbl,{x:cx-lbl.length*2,y:cy,size:8,font,color:col});
           });
