@@ -8,7 +8,8 @@ import {
   RotateCcw, Trash, AlertCircle, Info,
   Building, FileSpreadsheet, Calendar, Download, Settings,
   LogIn, LogOut, Star, Terminal, Database, RefreshCw, ClipboardList,
-  Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine, Link2
+  Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine, Link2,
+  Zap, Plug, Wifi
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -103,6 +104,38 @@ const TAKEOFF_TYPES = [
   {id:'AC',  label:'Air-Con Point',        color:'#0d9488', defaultPrefix:'A'},
   {id:'EL',  label:'Emergency Light',      color:'#9f1239', defaultPrefix:'M'},
   {id:'EX',  label:'Exhaust Fan',          color:'#92400e', defaultPrefix:'F'},
+];
+
+// Lighting & switch symbols
+const LIGHTING_TYPES = [
+  {id:'LP',  label:'Lighting Point',    color:'#ca8a04', defaultPrefix:'L'},
+  {id:'DL',  label:'Downlight',         color:'#f59e0b', defaultPrefix:'DL'},
+  {id:'SW',  label:'Switch (1-Gang)',   color:'#16a34a', defaultPrefix:'S'},
+  {id:'S2',  label:'Switch (2-Gang)',   color:'#15803d', defaultPrefix:'S2'},
+  {id:'S3',  label:'Switch (3-Gang)',   color:'#166534', defaultPrefix:'S3'},
+  {id:'EL',  label:'Emergency Light',  color:'#9f1239', defaultPrefix:'M'},
+  {id:'EX',  label:'Exhaust Fan',      color:'#92400e', defaultPrefix:'F'},
+];
+
+// Power socket & distribution symbols
+const POWER_TYPES = [
+  {id:'SP',  label:'Single Power Socket',  color:'#dc2626', defaultPrefix:'E'},
+  {id:'DP',  label:'Double Power Socket',  color:'#ea580c', defaultPrefix:'E'},
+  {id:'WP',  label:'Weatherproof Socket',  color:'#b91c1c', defaultPrefix:'WP'},
+  {id:'AC',  label:'Air-Con Point',        color:'#0d9488', defaultPrefix:'A'},
+  {id:'DB',  label:'Distribution Board',   color:'#1d4ed8', defaultPrefix:'DB'},
+];
+
+// Network & data symbols
+const NETWORK_TYPES = [
+  {id:'DA',  label:'Data Point',            color:'#2563eb', defaultPrefix:'D'},
+  {id:'TP',  label:'Telephone Point',       color:'#7c3aed', defaultPrefix:'T'},
+  {id:'TV',  label:'TV Outlet',             color:'#0891b2', defaultPrefix:'V'},
+  {id:'FB',  label:'Fiber Termination Box', color:'#6366f1', defaultPrefix:'FB'},
+  {id:'RT',  label:'Router',                color:'#0284c7', defaultPrefix:'RT'},
+  {id:'NS',  label:'Network Switch',        color:'#0369a1', defaultPrefix:'NS'},
+  {id:'AP',  label:'Access Point',          color:'#06b6d4', defaultPrefix:'AP'},
+  {id:'SV',  label:'Server',               color:'#334155', defaultPrefix:'SV'},
 ];
 
 // Pipe run types (drawn as polylines, not point markers)
@@ -201,6 +234,72 @@ function drawTakeoffSymbol(ctx, typeId, cx, cy, sz, color, alpha=1){
         ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*h*0.3,cy+Math.sin(a)*h*0.3);
         ctx.lineTo(cx+Math.cos(a)*h,cy+Math.sin(a)*h);ctx.stroke();
       }
+      break;
+    // ── Lighting extras ──────────────────────────────────────────────────────
+    case 'DL': // Downlight — circle with filled centre dot
+      ctx.beginPath();ctx.arc(cx,cy,h,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy,h*0.35,0,Math.PI*2);ctx.fill();
+      break;
+    case 'S2': // 2-Gang switch — circle with diagonal + "2"
+      ctx.beginPath();ctx.arc(cx,cy,h-1,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx-h*0.5,cy+h*0.5);ctx.lineTo(cx+h*0.5,cy-h*0.5);ctx.stroke();
+      ctx.font=`bold ${Math.round(sz*0.38)}px Arial`;ctx.textAlign='left';ctx.textBaseline='top';
+      ctx.fillText('2',cx+h*0.2,cy-h*0.8);
+      break;
+    case 'S3': // 3-Gang switch — circle with diagonal + "3"
+      ctx.beginPath();ctx.arc(cx,cy,h-1,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx-h*0.5,cy+h*0.5);ctx.lineTo(cx+h*0.5,cy-h*0.5);ctx.stroke();
+      ctx.font=`bold ${Math.round(sz*0.38)}px Arial`;ctx.textAlign='left';ctx.textBaseline='top';
+      ctx.fillText('3',cx+h*0.2,cy-h*0.8);
+      break;
+    // ── Power extras ─────────────────────────────────────────────────────────
+    case 'WP': // Weatherproof socket — socket with WP badge
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      ctx.beginPath();ctx.moveTo(cx-h+2,cy+h*0.1);ctx.lineTo(cx+h-2,cy+h*0.1);ctx.stroke();
+      ctx.font=`bold ${Math.round(sz*0.3)}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('WP',cx,cy-h*0.45);
+      break;
+    case 'DB': // Distribution board — filled rect with DB text
+      ctx.fillStyle=color+'28';ctx.fillRect(cx-h,cy-h,sz,sz);
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      ctx.fillStyle=color;
+      ctx.font=`bold ${Math.round(sz*0.36)}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('DB',cx,cy+1);
+      break;
+    // ── Network extras ───────────────────────────────────────────────────────
+    case 'FB': // Fiber termination box — diamond
+      ctx.beginPath();
+      ctx.moveTo(cx,cy-h);ctx.lineTo(cx+h,cy);ctx.lineTo(cx,cy+h);ctx.lineTo(cx-h,cy);
+      ctx.closePath();ctx.stroke();
+      ctx.font=`bold ${Math.round(sz*0.28)}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('FB',cx,cy+1);
+      break;
+    case 'RT': // Router — circle with radiating stubs
+      ctx.beginPath();ctx.arc(cx,cy,h*0.48,0,Math.PI*2);ctx.stroke();
+      for(let i=0;i<6;i++){
+        const a=i*Math.PI/3;
+        ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*h*0.48,cy+Math.sin(a)*h*0.48);
+        ctx.lineTo(cx+Math.cos(a)*h*0.9,cy+Math.sin(a)*h*0.9);ctx.stroke();
+      }
+      break;
+    case 'NS': // Network switch — flat rect with port dots
+      ctx.strokeRect(cx-h,cy-h*0.45,sz,sz*0.45);
+      for(let i=0;i<4;i++){
+        const px2=cx-h*0.55+i*(h*0.37);
+        ctx.beginPath();ctx.arc(px2,cy-h*0.22,h*0.1,0,Math.PI*2);ctx.fill();
+      }
+      break;
+    case 'AP': // Access point — wifi-style arcs
+      ctx.beginPath();ctx.arc(cx,cy+h*0.25,h*0.35,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy+h*0.25,h*0.6,Math.PI*1.1,Math.PI*1.9);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy+h*0.25,h,Math.PI*1.05,Math.PI*1.95);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy+h*0.25,h*0.08,0,Math.PI*2);ctx.fill();
+      break;
+    case 'SV': // Server — rectangle with horizontal rack lines
+      ctx.strokeRect(cx-h,cy-h,sz,sz);
+      [-h*0.35,0,h*0.35].forEach(dy=>{
+        ctx.beginPath();ctx.moveTo(cx-h+3,cy+dy);ctx.lineTo(cx+h-3,cy+dy);ctx.stroke();
+      });
       break;
     // ── Plumbing symbols ─────────────────────────────────────────────────────
     case 'CW': // Cold water — circle with C
@@ -2089,10 +2188,10 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
   const [filter,setFilter]=useState('All');
   const [confirmPerm,setConfirmPerm]=useState(null);
   const daysLeft=d=>Math.max(0,Math.ceil((new Date(d).getTime()+365*24*60*60*1000-Date.now())/864e5));
-  const TL={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'Electrical Markup',plumbing:'Plumbing Markup'};
-  const TI={project:FolderOpen,invoice:Receipt,payment:CreditCard,user:Users,staffClaim:DollarSign,quote:FileSpreadsheet,sitereport:ClipboardList,takeoff:Wrench,plumbing:Wrench};
-  const TC={project:T.info,invoice:T.warning,payment:T.success,user:T.danger,staffClaim:'#7c3aed',quote:T.accent,sitereport:'#0891b2',takeoff:'#7c3aed',plumbing:'#2563eb'};
-  const counts={All:trash.length,project:0,invoice:0,payment:0,user:0,staffClaim:0,quote:0,sitereport:0,takeoff:0,plumbing:0};
+  const TL={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup'};
+  const TI={project:FolderOpen,invoice:Receipt,payment:CreditCard,user:Users,staffClaim:DollarSign,quote:FileSpreadsheet,sitereport:ClipboardList,lighting:Zap,power:Plug,network:Wifi,plumbing:Wrench};
+  const TC={project:T.info,invoice:T.warning,payment:T.success,user:T.danger,staffClaim:'#7c3aed',quote:T.accent,sitereport:'#0891b2',lighting:'#ca8a04',power:'#dc2626',network:'#0891b2',plumbing:'#2563eb'};
+  const counts={All:trash.length,project:0,invoice:0,payment:0,user:0,staffClaim:0,quote:0,sitereport:0,lighting:0,power:0,network:0,plumbing:0};
   trash.forEach(t=>{if(counts[t._trashType]!==undefined)counts[t._trashType]++;});
   const shown=[...(filter==='All'?trash:trash.filter(t=>t._trashType===filter))].sort((a,b)=>new Date(b._deletedAt)-new Date(a._deletedAt));
 
@@ -2112,7 +2211,7 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
         </div>
       )}
       <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-        {['All','project','quote','sitereport','invoice','payment','staffClaim','user','takeoff','plumbing'].map(f=>(
+        {['All','project','quote','sitereport','invoice','payment','staffClaim','user','lighting','power','network','plumbing'].map(f=>(
           <button key={f} onClick={()=>setFilter(f)} style={{padding:'6px 14px',borderRadius:20,
             border:`1px solid ${filter===f?T.text:T.borderLight}`,
             background:filter===f?T.text:'transparent',
@@ -9518,43 +9617,43 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
 
 // ─── TOOLS HUB ───────────────────────────────────────────────────────────────
 function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
-  const [takeoffs,setTakeoffs]=useState([]);
+  const [lightings,setLightings]=useState([]);
+  const [powers,setPowers]=useState([]);
+  const [networks,setNetworks]=useState([]);
   const [plumbings,setPlumbings]=useState([]);
   const [loaded,setLoaded]=useState(false);
-  const [editing,setEditing]=useState(null);       // {data, kind}
-  const [editingKind,setEditingKind]=useState('electrical');
+  const [editing,setEditing]=useState(null);
+  const [editingKind,setEditingKind]=useState('lighting');
 
   useEffect(()=>{
-    Promise.all([loadS('takeoffs',[]),loadS('plumbings',[])]).then(([e,p])=>{
-      setTakeoffs(Array.isArray(e)?e:[]);
-      setPlumbings(Array.isArray(p)?p:[]);
+    Promise.all([loadS('lighting',[]),loadS('power',[]),loadS('network',[]),loadS('plumbings',[])]).then(([lt,pw,nw,pl])=>{
+      setLightings(Array.isArray(lt)?lt:[]);
+      setPowers(Array.isArray(pw)?pw:[]);
+      setNetworks(Array.isArray(nw)?nw:[]);
+      setPlumbings(Array.isArray(pl)?pl:[]);
       setLoaded(true);
     });
   },[]);
 
-  const saveTakeoff=(t)=>{
-    const exists=takeoffs.find(x=>x.id===t.id);
-    const upd=exists?takeoffs.map(x=>x.id===t.id?t:x):[...takeoffs,t];
-    setTakeoffs(upd); saveS('takeoffs',upd);
-    onShowToast?.('Takeoff saved');
+  const makeSave=(list,setList,key,kind,msg)=>(t)=>{
+    const exists=list.find(x=>x.id===t.id);
+    const upd=exists?list.map(x=>x.id===t.id?t:x):[...list,t];
+    setList(upd); saveS(key,upd); onShowToast?.(msg);
   };
-  const deleteTakeoff=(t)=>{
-    const upd=takeoffs.filter(x=>x.id!==t.id);
-    setTakeoffs(upd); saveS('takeoffs',upd);
-    onSoftDelete?.({...t,_trashType:'takeoff',_deletedAt:new Date().toISOString()});
+  const makeDel=(list,setList,key,kind)=>(t)=>{
+    const upd=list.filter(x=>x.id!==t.id);
+    setList(upd); saveS(key,upd);
+    onSoftDelete?.({...t,_trashType:kind,_deletedAt:new Date().toISOString()});
   };
 
-  const savePlumbing=(t)=>{
-    const exists=plumbings.find(x=>x.id===t.id);
-    const upd=exists?plumbings.map(x=>x.id===t.id?t:x):[...plumbings,t];
-    setPlumbings(upd); saveS('plumbings',upd);
-    onShowToast?.('Plumbing markup saved');
-  };
-  const deletePlumbing=(t)=>{
-    const upd=plumbings.filter(x=>x.id!==t.id);
-    setPlumbings(upd); saveS('plumbings',upd);
-    onSoftDelete?.({...t,_trashType:'plumbing',_deletedAt:new Date().toISOString()});
-  };
+  const saveLighting=makeSave(lightings,setLightings,'lighting','lighting','Lighting markup saved');
+  const delLighting=makeDel(lightings,setLightings,'lighting','lighting');
+  const savePower=makeSave(powers,setPowers,'power','power','Power markup saved');
+  const delPower=makeDel(powers,setPowers,'power','power');
+  const saveNetwork=makeSave(networks,setNetworks,'network','network','Network markup saved');
+  const delNetwork=makeDel(networks,setNetworks,'network','network');
+  const savePlumbing=makeSave(plumbings,setPlumbings,'plumbings','plumbing','Plumbing markup saved');
+  const delPlumbing=makeDel(plumbings,setPlumbings,'plumbings','plumbing');
 
   const newBlank=()=>({id:uid(),name:'',pdfFilename:'',pdfUrl:'',markers:[],prefixes:{},createdAt:new Date().toISOString()});
 
@@ -9563,8 +9662,17 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
       <TakeoffEditor key={editing?.id||'new-p'} takeoff={editing} symbolTypes={PLUMBING_TYPES} toolKind="plumbing"
         onSave={(t)=>{savePlumbing(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
     );
+    if(editingKind==='power') return(
+      <TakeoffEditor key={editing?.id||'new-pw'} takeoff={editing} symbolTypes={POWER_TYPES}
+        onSave={(t)=>{savePower(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
+    );
+    if(editingKind==='network') return(
+      <TakeoffEditor key={editing?.id||'new-nw'} takeoff={editing} symbolTypes={NETWORK_TYPES}
+        onSave={(t)=>{saveNetwork(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
+    );
     return(
-      <TakeoffEditor key={editing?.id||'new'} takeoff={editing} onSave={(t)=>{saveTakeoff(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
+      <TakeoffEditor key={editing?.id||'new-lt'} takeoff={editing} symbolTypes={LIGHTING_TYPES}
+        onSave={(t)=>{saveLighting(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
     );
   }
 
@@ -9601,9 +9709,22 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
     </div>
   );
 
+  const ToolCard=({icon:Icon,iconBg,iconColor,title,desc,label,kind})=>(
+    <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:20,cursor:'pointer',transition:'all 0.15s'}}
+      onClick={()=>{setEditingKind(kind);setEditing(newBlank());}}>
+      <div style={{width:44,height:44,background:iconBg,borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12}}>
+        <Icon size={22} style={{color:iconColor}}/>
+      </div>
+      <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:4}}>{title}</div>
+      <div style={{fontSize:12,color:T.muted,lineHeight:1.5}}>{desc}</div>
+      <div style={{marginTop:12,fontSize:11,fontWeight:600,color:iconColor,display:'flex',alignItems:'center',gap:4}}>
+        <Plus size={11}/>{label}
+      </div>
+    </div>
+  );
+
   return(
     <div style={{maxWidth:900,margin:'0 auto',padding:'4px 0 40px'}}>
-      {/* Header */}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20,flexWrap:'wrap',gap:10}}>
         <div>
           <div style={{fontSize:22,fontWeight:800,color:T.text,letterSpacing:'-0.03em'}}>Tools</div>
@@ -9611,51 +9732,47 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
         </div>
       </div>
 
-      {/* Tool cards */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:14,marginBottom:32}}>
-        {/* Electrical */}
-        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:20,cursor:'pointer',transition:'all 0.15s'}}
-          onClick={()=>{setEditingKind('electrical');setEditing(newBlank());}}>
-          <div style={{width:44,height:44,background:'rgba(8,145,178,0.1)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12}}>
-            <Layers size={22} style={{color:'#0891b2'}}/>
-          </div>
-          <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:4}}>Electrical PDF Markup</div>
-          <div style={{fontSize:12,color:T.muted,lineHeight:1.5}}>Upload a PDF layout plan and count electrical, data, lighting points with Singapore standard symbols.</div>
-          <div style={{marginTop:12,fontSize:11,fontWeight:600,color:'#0891b2',display:'flex',alignItems:'center',gap:4}}>
-            <Plus size={11}/>New Takeoff
-          </div>
-        </div>
-        {/* Plumbing */}
-        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:20,cursor:'pointer',transition:'all 0.15s'}}
-          onClick={()=>{setEditingKind('plumbing');setEditing(newBlank());}}>
-          <div style={{width:44,height:44,background:'rgba(37,99,235,0.1)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12}}>
-            <Wrench size={22} style={{color:'#2563eb'}}/>
-          </div>
-          <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:4}}>Plumbing PDF Markup</div>
-          <div style={{fontSize:12,color:T.muted,lineHeight:1.5}}>Upload a PDF layout plan and mark water points, valves, drains, and fixtures with Singapore standard plumbing symbols (SS 636).</div>
-          <div style={{marginTop:12,fontSize:11,fontWeight:600,color:'#2563eb',display:'flex',alignItems:'center',gap:4}}>
-            <Plus size={11}/>New Markup
-          </div>
-        </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:14,marginBottom:32}}>
+        <ToolCard icon={Zap} iconBg="rgba(202,138,4,0.1)" iconColor="#ca8a04"
+          title="Lighting & Switches" kind="lighting" label="New Lighting Markup"
+          desc="Mark lighting points, downlights, 1/2/3-gang switches, emergency lights and exhaust fans on your PDF plan."/>
+        <ToolCard icon={Plug} iconBg="rgba(220,38,38,0.1)" iconColor="#dc2626"
+          title="Power & Distribution" kind="power" label="New Power Markup"
+          desc="Mark single/double power sockets, weatherproof sockets, air-con points and distribution boards on your PDF plan."/>
+        <ToolCard icon={Wifi} iconBg="rgba(8,145,178,0.1)" iconColor="#0891b2"
+          title="Network & Data" kind="network" label="New Network Markup"
+          desc="Mark data points, telephone, TV outlet, fiber, routers, network switches, access points and servers."/>
+        <ToolCard icon={Wrench} iconBg="rgba(37,99,235,0.1)" iconColor="#2563eb"
+          title="Plumbing PDF Markup" kind="plumbing" label="New Plumbing Markup"
+          desc="Mark water points, valves, drains and fixtures with Singapore standard plumbing symbols (SS 636)."/>
       </div>
 
-      {/* Saved electrical takeoffs */}
-      {loaded&&takeoffs.length>0&&(
+      {loaded&&lightings.length>0&&(
         <div style={{marginBottom:28}}>
-          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Electrical Takeoffs</div>
-          <SavedList items={takeoffs} symTypes={TAKEOFF_TYPES} accentColor="#0891b2"
-            onOpen={t=>{setEditingKind('electrical');setEditing(t);}}
-            onDelete={deleteTakeoff}/>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Lighting Markups</div>
+          <SavedList items={lightings} symTypes={LIGHTING_TYPES} accentColor="#ca8a04"
+            onOpen={t=>{setEditingKind('lighting');setEditing(t);}} onDelete={delLighting}/>
         </div>
       )}
-
-      {/* Saved plumbing markups */}
+      {loaded&&powers.length>0&&(
+        <div style={{marginBottom:28}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Power Markups</div>
+          <SavedList items={powers} symTypes={POWER_TYPES} accentColor="#dc2626"
+            onOpen={t=>{setEditingKind('power');setEditing(t);}} onDelete={delPower}/>
+        </div>
+      )}
+      {loaded&&networks.length>0&&(
+        <div style={{marginBottom:28}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Network Markups</div>
+          <SavedList items={networks} symTypes={NETWORK_TYPES} accentColor="#0891b2"
+            onOpen={t=>{setEditingKind('network');setEditing(t);}} onDelete={delNetwork}/>
+        </div>
+      )}
       {loaded&&plumbings.length>0&&(
-        <div>
+        <div style={{marginBottom:28}}>
           <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Plumbing Markups</div>
           <SavedList items={plumbings} symTypes={PLUMBING_TYPES} accentColor="#2563eb"
-            onOpen={t=>{setEditingKind('plumbing');setEditing(t);}}
-            onDelete={deletePlumbing}/>
+            onOpen={t=>{setEditingKind('plumbing');setEditing(t);}} onDelete={delPlumbing}/>
         </div>
       )}
     </div>
@@ -10141,6 +10258,23 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'LP': dC(h); dL(0,-h,0,h); dL(-h,0,h,0); break;
             case 'SW': dC(h-0.5); dL(-h*0.5,-h*0.5,h*0.5,h*0.5); break;
             case 'EX': dC(h); dC(h*0.3); break;
+            // ── Lighting extras ───────────────────────────────────────────────
+            case 'DL': dC(h); dC(h*0.35); break;
+            case 'S2': dC(h-0.5); dL(-h*0.5,-h*0.5,h*0.5,h*0.5); dT('2',h*0.9); break;
+            case 'S3': dC(h-0.5); dL(-h*0.5,-h*0.5,h*0.5,h*0.5); dT('3',h*0.9); break;
+            // ── Power extras ──────────────────────────────────────────────────
+            case 'WP': dR(); dL(-h+1,h*0.1,h-1,h*0.1); dT('WP',h*0.7); break;
+            case 'DB': dR(); dT('DB',h); break;
+            // ── Network extras ────────────────────────────────────────────────
+            case 'FB':
+              page.drawLine({start:{x:px,y:py+h},end:{x:px+h,y:py},color:col,thickness:1});
+              page.drawLine({start:{x:px+h,y:py},end:{x:px,y:py-h},color:col,thickness:1});
+              page.drawLine({start:{x:px,y:py-h},end:{x:px-h,y:py},color:col,thickness:1});
+              page.drawLine({start:{x:px-h,y:py},end:{x:px,y:py+h},color:col,thickness:1}); break;
+            case 'RT': dC(h*0.48); dC(h); break;
+            case 'NS': dR(); dL(-h+1,h*0.3,h-1,h*0.3); dL(-h+1,0,h-1,0); break;
+            case 'AP': dC(h); dC(h*0.6); dC(h*0.28); break;
+            case 'SV': dR(); dL(-h+1,h*0.35,h-1,h*0.35); dL(-h+1,0,h-1,0); dL(-h+1,-h*0.35,h-1,-h*0.35); break;
             // ── Plumbing ──────────────────────────────────────────────────────
             case 'CW': dC(h); dT('C',h*1.1); break;
             case 'HW': dC(h); dT('H',h*1.1); break;
@@ -10242,6 +10376,19 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'LP': dC2(ss/2); dL2(0,-ss/2,0,ss/2); dL2(-ss/2,0,ss/2,0); break;
             case 'SW': dC2(ss/2-0.5); dL2(-ss*0.3,-ss*0.3,ss*0.3,ss*0.3); break;
             case 'EX': dC2(ss/2); dC2(ss*0.2); break;
+            // ── Lighting extras ──────────────────────────────────────────────────
+            case 'DL': dC2(ss/2); dC2(ss*0.22); break;
+            case 'S2': dC2(ss/2); dL2(-ss*0.3,-ss*0.3,ss*0.3,ss*0.3); break;
+            case 'S3': dC2(ss/2); dL2(-ss*0.3,-ss*0.3,ss*0.3,ss*0.3); break;
+            // ── Power extras ────────────────────────────────────────────────────
+            case 'WP': dR2(); dL2(-ss/2+1,0,ss/2-1,0); break;
+            case 'DB': dR2(); break;
+            // ── Network extras ──────────────────────────────────────────────────
+            case 'FB': dL2(0,-ss/2,-ss/2,0); dL2(-ss/2,0,0,ss/2); dL2(0,ss/2,ss/2,0); dL2(ss/2,0,0,-ss/2); break;
+            case 'RT': dC2(ss/2); dC2(ss*0.28); break;
+            case 'NS': dR2(); dL2(-ss/2+1,ss*0.18,ss/2-1,ss*0.18); break;
+            case 'AP': dC2(ss/2); dC2(ss*0.32); break;
+            case 'SV': dR2(); dL2(-ss/2+1,ss*0.2,ss/2-1,ss*0.2); dL2(-ss/2+1,-ss*0.2,ss/2-1,-ss*0.2); break;
             // ── Plumbing ────────────────────────────────────────────────────────
             case 'CW': dC2(ss/2); break;
             case 'HW': dC2(ss/2); break;
@@ -14290,7 +14437,7 @@ export default function App(){
 
   const handleSoftDelete = useCallback((item)=>{
     setTrash(prev=>{const upd=[...prev,item];saveS('trash',upd);return upd;});
-    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'PDF Markup'}[item._trashType]||item._trashType;
+    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup'}[item._trashType]||item._trashType;
     const label=item.name||item.invoiceNo||item.quoteNo||item.title||item.email||item.id;
     logAction(`DELETE_${(item._trashType||'').toUpperCase()}`, `Deleted ${typeName}: ${label}`, item);
   },[logAction]);
@@ -14321,10 +14468,12 @@ export default function App(){
     }
     else if(_trashType==='quote'){setQuotes(p=>{const u=[...p,orig];saveS('quotes',u);return u;});}
     else if(_trashType==='sitereport'){setSiteReports(p=>{const u=[...p,orig];saveS('siteReports',u);return u;});}
-    else if(_trashType==='takeoff'){loadS('takeoffs',[]).then(existing=>{const u=[...existing,orig];saveS('takeoffs',u);});}
+    else if(_trashType==='lighting'){loadS('lighting',[]).then(existing=>{const u=[...existing,orig];saveS('lighting',u);});}
+    else if(_trashType==='power'){loadS('power',[]).then(existing=>{const u=[...existing,orig];saveS('power',u);});}
+    else if(_trashType==='network'){loadS('network',[]).then(existing=>{const u=[...existing,orig];saveS('network',u);});}
     else if(_trashType==='plumbing'){loadS('plumbings',[]).then(existing=>{const u=[...existing,orig];saveS('plumbings',u);});}
     setTrash(prev=>{const upd=prev.filter(t=>t.id!==item.id);saveS('trash',upd);return upd;});
-    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'Electrical Markup',plumbing:'Plumbing Markup'}[_trashType]||_trashType;
+    const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup'}[_trashType]||_trashType;
     const label=orig.name||orig.invoiceNo||orig.quoteNo||orig.title||orig.email||orig.id;
     logAction(`RESTORE_${(_trashType||'').toUpperCase()}`, `Restored ${typeName}: ${label}`, orig);
   },[logAction]);
@@ -14333,7 +14482,7 @@ export default function App(){
     setTrash(prev=>{
       const item=prev.find(t=>t.id===id);
       if(item){
-        const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',takeoff:'Electrical Markup',plumbing:'Plumbing Markup'}[item._trashType]||item._trashType;
+        const typeName={project:'Project',invoice:'Invoice',payment:'Payment',user:'User',staffClaim:'Expense Claim',quote:'Quotation/VO',sitereport:'Site Meeting',lighting:'Lighting Markup',power:'Power Markup',network:'Network Markup',plumbing:'Plumbing Markup'}[item._trashType]||item._trashType;
         logAction('PERMANENT_DELETE', `Permanently deleted ${typeName}: ${item.name||item.invoiceNo||item.quoteNo||item.title||item.email||id}`, item);
       }
       const upd=prev.filter(t=>t.id!==id);saveS('trash',upd);return upd;
