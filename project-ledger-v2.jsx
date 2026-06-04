@@ -110,11 +110,23 @@ const TAKEOFF_TYPES = [
 const LIGHTING_TYPES = [
   {id:'LP',  label:'Lighting Point',    color:'#ca8a04', defaultPrefix:'L'},
   {id:'DL',  label:'Downlight',         color:'#f59e0b', defaultPrefix:'DL'},
+  {id:'CL',  label:'Ceiling Light',     color:'#fcd34d', defaultPrefix:'CL'},
+  {id:'PL',  label:'Pendant Light',     color:'#fbbf24', defaultPrefix:'PL'},
+  {id:'WL',  label:'Wall Light',        color:'#d97706', defaultPrefix:'WL'},
+  {id:'CF',  label:'Ceiling Fan',       color:'#38bdf8', defaultPrefix:'CF'},
+  {id:'WF',  label:'Wall Fan',          color:'#0284c7', defaultPrefix:'WF'},
   {id:'SW',  label:'Switch (1-Gang)',   color:'#16a34a', defaultPrefix:'S'},
   {id:'S2',  label:'Switch (2-Gang)',   color:'#15803d', defaultPrefix:'S2'},
   {id:'S3',  label:'Switch (3-Gang)',   color:'#166534', defaultPrefix:'S3'},
   {id:'EL',  label:'Emergency Light',  color:'#9f1239', defaultPrefix:'M'},
   {id:'EX',  label:'Exhaust Fan',      color:'#92400e', defaultPrefix:'F'},
+];
+
+// LED strip line types (drawn as dotted polylines, with user-entered meters)
+const LED_STRIP_TYPES = [
+  {id:'LS1', label:'LED Strip (Cool White)', color:'#fde68a', dotted:true},
+  {id:'LS2', label:'LED Strip (Warm White)', color:'#fb923c', dotted:true},
+  {id:'LS3', label:'LED Strip (RGB Color)',  color:'#c084fc', dotted:true},
 ];
 
 // Power socket & distribution symbols
@@ -274,6 +286,41 @@ function drawTakeoffSymbol(ctx, typeId, cx, cy, sz, color, alpha=1){
     case 'DL': // Downlight — circle with filled centre dot
       ctx.beginPath();ctx.arc(cx,cy,h,0,Math.PI*2);ctx.stroke();
       ctx.beginPath();ctx.arc(cx,cy,h*0.35,0,Math.PI*2);ctx.fill();
+      break;
+    case 'CL': // Ceiling Light — circle with X cross + centre dot
+      ctx.beginPath();ctx.arc(cx,cy,h,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx-h*0.65,cy-h*0.65);ctx.lineTo(cx+h*0.65,cy+h*0.65);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx+h*0.65,cy-h*0.65);ctx.lineTo(cx-h*0.65,cy+h*0.65);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy,h*0.2,0,Math.PI*2);ctx.fill();
+      break;
+    case 'PL': // Pendant Light — shade circle + cord + ceiling line
+      ctx.beginPath();ctx.moveTo(cx-h*0.4,cy-h);ctx.lineTo(cx+h*0.4,cy-h);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx,cy-h);ctx.lineTo(cx,cy-h*0.25);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy+h*0.15,h*0.55,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy+h*0.15,h*0.2,0,Math.PI*2);ctx.fill();
+      break;
+    case 'WL': // Wall Light — vertical wall line + right-opening D arc + bulb
+      ctx.beginPath();ctx.moveTo(cx-h*0.3,cy-h);ctx.lineTo(cx-h*0.3,cy+h);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx-h*0.3,cy,h*0.75,Math.PI*1.5,Math.PI*0.5);ctx.stroke();
+      ctx.beginPath();ctx.arc(cx+h*0.15,cy,h*0.22,0,Math.PI*2);ctx.fill();
+      break;
+    case 'CF': // Ceiling Fan — centre hub + 4 oval blades
+      ctx.beginPath();ctx.arc(cx,cy,h*0.22,0,Math.PI*2);ctx.fill();
+      for(let i=0;i<4;i++){
+        ctx.save();ctx.translate(cx,cy);ctx.rotate(i*Math.PI/2);
+        ctx.beginPath();ctx.ellipse(h*0.55,0,h*0.38,h*0.18,0,0,Math.PI*2);ctx.stroke();
+        ctx.restore();
+      }
+      break;
+    case 'WF': // Wall Fan — box frame + 3-blade fan inside
+      ctx.strokeRect(cx-h,cy-h*0.72,sz,sz*0.72);
+      ctx.beginPath();ctx.arc(cx,cy-h*0.36,h*0.42,0,Math.PI*2);ctx.stroke();
+      for(let i=0;i<3;i++){
+        const a=i*Math.PI*2/3-Math.PI/2;
+        ctx.beginPath();ctx.moveTo(cx,cy-h*0.36);
+        ctx.lineTo(cx+Math.cos(a)*h*0.4,cy-h*0.36+Math.sin(a)*h*0.4);ctx.stroke();
+      }
+      ctx.beginPath();ctx.moveTo(cx-h*0.45,cy+h*0.4);ctx.lineTo(cx+h*0.45,cy+h*0.4);ctx.stroke();
       break;
     case 'S2': // 2-Gang switch — circle with diagonal + "2"
       ctx.beginPath();ctx.arc(cx,cy,h-1,0,Math.PI*2);ctx.stroke();
@@ -9899,6 +9946,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const activePipeTypeList = pipeTypesProp !== undefined ? pipeTypesProp :
     toolKind==='aircon' ? AIRCON_PIPE_TYPES :
     toolKind==='painting' ? PAINT_TYPES :
+    toolKind==='lighting' ? LED_STRIP_TYPES :
     PIPE_TYPES;
 
   const [name,setName]=useState(takeoff?.name||'');
@@ -9914,7 +9962,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     toolKind==='plumbing' ? (takeoff?.globalPrefix??'D') : undefined
   );
   const [activeTool,setActiveTool]=useState(symbolTypes.length>0 ? symbolTypes[0].id : null);
-  const hasPipeMode=toolKind==='plumbing'||toolKind==='aircon'||toolKind==='painting';
+  const hasPipeMode=toolKind==='plumbing'||toolKind==='aircon'||toolKind==='painting'||toolKind==='lighting';
   const hasAreaMode=toolKind==='floor';
   const [mode,setMode]=useState(
     toolKind==='painting' ? 'pipe' : toolKind==='floor' ? 'area' : 'place'
@@ -10180,23 +10228,31 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     }
     // ── Pipe / paint line runs ─────────────────────────────────────────────────
     const getPipeColor=(typeId)=>activePipeTypeList.find(p=>p.id===typeId)?.color||'#2563eb';
-    const drawPipePolyline=(pts,color,alpha=1,label=null,thick=false)=>{
+    const drawPipePolyline=(pts,color,alpha=1,label=null,thick=false,dotted=false)=>{
       if(pts.length<1) return;
       ctx.save();
       ctx.globalAlpha=alpha;
       ctx.strokeStyle=color; ctx.lineWidth=thick?Math.max(5,sz/5):Math.max(2,sz/10);
-      ctx.setLineDash([]); ctx.lineCap='round'; ctx.lineJoin='round';
+      ctx.setLineDash(dotted?[7,5]:[]); ctx.lineCap='round'; ctx.lineJoin='round';
       ctx.beginPath();
       pts.forEach((pt,i)=>{
         if(i===0) ctx.moveTo(pt.x*canvas.width,pt.y*canvas.height);
         else ctx.lineTo(pt.x*canvas.width,pt.y*canvas.height);
       });
       ctx.stroke();
-      if(!thick){
-        ctx.fillStyle='#fff'; ctx.setLineDash([]); ctx.lineWidth=1.5; ctx.strokeStyle=color;
+      ctx.setLineDash([]);
+      if(!thick&&!dotted){
+        ctx.fillStyle='#fff'; ctx.lineWidth=1.5; ctx.strokeStyle=color;
         pts.forEach(pt=>{
           ctx.beginPath();ctx.arc(pt.x*canvas.width,pt.y*canvas.height,3.5,0,Math.PI*2);
           ctx.fill(); ctx.stroke();
+        });
+      } else if(dotted){
+        // diamond nodes at endpoints
+        [pts[0],pts[pts.length-1]].forEach(pt=>{
+          const px2=pt.x*canvas.width,py2=pt.y*canvas.height;
+          ctx.beginPath();ctx.arc(px2,py2,4,0,Math.PI*2);
+          ctx.fillStyle=color;ctx.fill();
         });
       }
       if(label&&pts.length>=2){
@@ -10211,14 +10267,19 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       ctx.restore();
     };
     const isPainting=toolKind==='painting';
+    const isLighting=toolKind==='lighting';
     pipes.filter(p=>p.page===currentPage).forEach(p=>{
-      const label=isPainting?(prefixes[p.type]||activePipeTypeList.find(t=>t.id===p.type)?.label||p.type):null;
-      drawPipePolyline(p.points,getPipeColor(p.type),1,label,isPainting);
+      const ptDef=activePipeTypeList.find(t=>t.id===p.type);
+      const isDotted=!!ptDef?.dotted;
+      const label=isPainting?(prefixes[p.type]||ptDef?.label||p.type)
+        :isDotted&&p.meters?`${p.meters}m`:null;
+      drawPipePolyline(p.points,getPipeColor(p.type),1,label,isPainting,isDotted);
     });
     if(pipeInProgress&&pipeInProgress.page===currentPage){
       const color=getPipeColor(pipeInProgress.type);
       const pts=cursorPos?[...pipeInProgress.points,cursorPos]:pipeInProgress.points;
-      drawPipePolyline(pts,color,0.75,null,isPainting);
+      const isDotted=!!(activePipeTypeList.find(t=>t.id===pipeInProgress.type)?.dotted);
+      drawPipePolyline(pts,color,0.75,null,isPainting,isDotted);
     }
     if(cursorPos&&mode==='pipe'){
       const color=getPipeColor(activePipeType);
@@ -10299,19 +10360,37 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         const row=usedForLegend.length+i;
         const ry=ly+16+row*rowH+rowH/2;
         ctx.save();
-        ctx.strokeStyle=pt.color; ctx.lineWidth=2; ctx.setLineDash([]); ctx.lineCap='round';
-        ctx.beginPath(); ctx.moveTo(lx+padX,ry); ctx.lineTo(lx+padX+14,ry); ctx.stroke();
-        ctx.fillStyle='#fff'; ctx.strokeStyle=pt.color; ctx.lineWidth=1.2;
-        ctx.beginPath(); ctx.arc(lx+padX+7,ry,2.5,0,Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle=pt.color; ctx.lineWidth=2; ctx.lineCap='round';
+        if(pt.dotted){
+          ctx.setLineDash([5,4]);
+          ctx.beginPath(); ctx.moveTo(lx+padX,ry); ctx.lineTo(lx+padX+14,ry); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle=pt.color;
+          ctx.beginPath(); ctx.arc(lx+padX+7,ry,2.5,0,Math.PI*2); ctx.fill();
+        } else {
+          ctx.setLineDash([]);
+          ctx.beginPath(); ctx.moveTo(lx+padX,ry); ctx.lineTo(lx+padX+14,ry); ctx.stroke();
+          ctx.fillStyle='#fff'; ctx.strokeStyle=pt.color; ctx.lineWidth=1.2;
+          ctx.beginPath(); ctx.arc(lx+padX+7,ry,2.5,0,Math.PI*2); ctx.fill(); ctx.stroke();
+        }
         ctx.restore();
         ctx.fillStyle='#222'; ctx.font='9px sans-serif';
-        ctx.fillText(pt.label,lx+padX+18,ry+3);
+        const ptRuns=pipes.filter(p=>p.type===pt.id);
+        const ptM=ptRuns.reduce((s,p)=>s+(parseFloat(p.meters)||0),0);
+        const ptLbl=pt.dotted&&ptM>0?`${pt.label} (${ptM.toFixed(1)}m)`:pt.label;
+        ctx.fillText(ptLbl,lx+padX+18,ry+3);
+        if(pt.dotted){
+          ctx.fillStyle=pt.color; ctx.font='bold 9px sans-serif';
+          ctx.fillText(`×${ptRuns.length}`,lx+boxW-28,ry+3);
+        }
       });
       ctx.strokeStyle='#ddd'; ctx.lineWidth=0.8;
       ctx.beginPath(); ctx.moveTo(lx,ly+boxH-10); ctx.lineTo(lx+boxW,ly+boxH-10); ctx.stroke();
       ctx.fillStyle='#222'; ctx.font='bold 9px sans-serif';
       const legendTotal=toolKind==='floor'?areas.length:toolKind==='painting'?pipes.length:markers.length;
-      ctx.fillText(`Total: ${legendTotal}`,lx+padX,ly+boxH-2);
+      const totalLedM=toolKind==='lighting'?pipes.reduce((s,p)=>s+(parseFloat(p.meters)||0),0):0;
+      const totalLbl=toolKind==='lighting'&&totalLedM>0?`Total: ${legendTotal} pts | ${totalLedM.toFixed(1)}m LED`:`Total: ${legendTotal}`;
+      ctx.fillText(totalLbl,lx+padX,ly+boxH-2);
       ctx.restore();
     }
   };
@@ -10538,6 +10617,20 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'EX': dC(h); dC(h*0.3); break;
             // ── Lighting extras ───────────────────────────────────────────────
             case 'DL': dC(h); dC(h*0.35); break;
+            case 'CL': dC(h); dL(-h*0.65,-h*0.65,h*0.65,h*0.65); dL(h*0.65,-h*0.65,-h*0.65,h*0.65); dC(h*0.2); break;
+            case 'PL':
+              page.drawLine({start:{x:px-h*0.4,y:py+h},end:{x:px+h*0.4,y:py+h},color:col,thickness:1});
+              dL(0,h,0,h*0.25);
+              page.drawCircle({x:px,y:py-h*0.15,size:h*0.55,borderColor:col,borderWidth:1,color:undefined});
+              page.drawCircle({x:px,y:py-h*0.15,size:h*0.2,borderColor:col,borderWidth:0,color:col}); break;
+            case 'WL':
+              page.drawLine({start:{x:px-h*0.3,y:py+h},end:{x:px-h*0.3,y:py-h},color:col,thickness:1});
+              page.drawCircle({x:px-h*0.3,y:py,size:h*0.75,borderColor:col,borderWidth:1,color:undefined});
+              page.drawCircle({x:px+h*0.15,y:py,size:h*0.22,borderColor:col,borderWidth:0,color:col}); break;
+            case 'CF':
+              page.drawCircle({x:px,y:py,size:h*0.22,borderColor:col,borderWidth:0,color:col});
+              dL(-h*0.55,h*0.18,h*0.55,-h*0.18); dL(-h*0.18,-h*0.55,h*0.18,h*0.55); break;
+            case 'WF': dR(); page.drawCircle({x:px,y:py+h*0.1,size:h*0.42,borderColor:col,borderWidth:1,color:undefined}); dL(-h*0.35,h*0.45,h*0.35,h*0.45); break;
             case 'S2': dC(h-0.5); dL(-h*0.5,-h*0.5,h*0.5,h*0.5); dT('2',h*0.9); break;
             case 'S3': dC(h-0.5); dL(-h*0.5,-h*0.5,h*0.5,h*0.5); dT('3',h*0.9); break;
             // ── Power extras ──────────────────────────────────────────────────
@@ -10630,12 +10723,39 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           const hexColor=ptDef?.color||'#2563eb';
           const [pr,pg2,pb]=hexToRgbF(hexColor); const col=rgb(pr,pg2,pb);
           const thick=toolKind==='painting';
+          const isDottedPdf=!!ptDef?.dotted;
           for(let i=0;i<p.points.length-1;i++){
             const {x:x1,y:y1}=toPdfPt(p.points[i].x,p.points[i].y,pw,ph,parseInt(pg));
             const {x:x2,y:y2}=toPdfPt(p.points[i+1].x,p.points[i+1].y,pw,ph,parseInt(pg));
-            page.drawLine({start:{x:x1,y:y1},end:{x:x2,y:y2},color:col,thickness:thick?4:1.5});
+            if(isDottedPdf){
+              // Simulate dashed: draw short segments with gaps
+              const segLen=Math.sqrt((x2-x1)**2+(y2-y1)**2)||1;
+              const dashPt=6, gapPt=5, total=dashPt+gapPt;
+              const steps=Math.ceil(segLen/total);
+              for(let s=0;s<steps;s++){
+                const t0=s*total/segLen, t1=Math.min((s*total+dashPt)/segLen,1);
+                page.drawLine({start:{x:x1+(x2-x1)*t0,y:y1+(y2-y1)*t0},
+                  end:{x:x1+(x2-x1)*t1,y:y1+(y2-y1)*t1},color:col,thickness:2});
+              }
+            } else {
+              page.drawLine({start:{x:x1,y:y1},end:{x:x2,y:y2},color:col,thickness:thick?4:1.5});
+            }
           }
-          if(!thick){
+          if(isDottedPdf){
+            // Endpoint dots
+            [p.points[0],p.points[p.points.length-1]].forEach(pt=>{
+              const {x:px2,y:py2}=toPdfPt(pt.x,pt.y,pw,ph,parseInt(pg));
+              page.drawCircle({x:px2,y:py2,size:3,borderColor:col,borderWidth:0,color:col});
+            });
+            // Meter label near midpoint
+            if(p.meters){
+              const midPt=p.points[Math.floor(p.points.length/2)];
+              const {x:mlx,y:mly}=toPdfPt(midPt.x,midPt.y,pw,ph,parseInt(pg));
+              const mRot=pageRot(parseInt(pg));
+              const {dx:mldx,dy:mldy}=dispOff(3,4,mRot);
+              page.drawText(`${p.meters}m`,{x:mlx+mldx,y:mly+mldy,size:6,font,color:col,rotate:tDeg(mRot)});
+            }
+          } else if(!thick){
             p.points.forEach(pt=>{
               const {x:px2,y:py2}=toPdfPt(pt.x,pt.y,pw,ph,parseInt(pg));
               page.drawCircle({x:px2,y:py2,size:2.5,borderColor:col,borderWidth:1,color:rgb(1,1,1)});
@@ -10724,6 +10844,11 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'SW': dC2(ss/2-0.5); dL2(-ss*0.3,-ss*0.3,ss*0.3,ss*0.3); break;
             case 'EX': dC2(ss/2); dC2(ss*0.2); break;
             case 'DL': dC2(ss/2); dC2(ss*0.22); break;
+            case 'CL': dC2(ss/2); dL2(-ss*0.35,-ss*0.35,ss*0.35,ss*0.35); dL2(ss*0.35,-ss*0.35,-ss*0.35,ss*0.35); break;
+            case 'PL': dL2(0,ss/2,0,ss*0.15); dC2(ss*0.34); break;
+            case 'WL': dL2(-ss*0.28,-ss/2,-ss*0.28,ss/2); dC2(ss*0.38); break;
+            case 'CF': lp.drawCircle({x:sx,y:sy,size:ss*0.12,borderColor:col,borderWidth:0,color:col}); dL2(-ss*0.35,ss*0.12,ss*0.35,-ss*0.12); dL2(-ss*0.12,-ss*0.35,ss*0.12,ss*0.35); break;
+            case 'WF': dR2(); dC2(ss*0.3); break;
             case 'S2': dC2(ss/2); dL2(-ss*0.3,-ss*0.3,ss*0.3,ss*0.3); break;
             case 'S3': dC2(ss/2); dL2(-ss*0.3,-ss*0.3,ss*0.3,ss*0.3); break;
             case 'WP': dR2(); dL2(-ss/2+1,0,ss/2-1,0); break;
@@ -10758,25 +10883,50 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           const{x:ctx2,y:cty2}=lpt(W-padX-cntW,rowDD+rowH*0.62);
           lp.drawText(cntTxt,{x:ctx2,y:cty2,size:6.5,font,color:col,rotate:tDeg(p1Rot)});
         });
-        // Pipe type rows
+        // Pipe / LED strip type rows
         usedPdfPipes.forEach((pt,i)=>{
           const row=usedTypes.length+i,rowDD=hdrH+row*rowH;
           if(row>0){const ra=lpt(padX,rowDD),rb=lpt(W-padX,rowDD);lp.drawLine({start:ra,end:rb,color:rgb(0.88,0.88,0.88),thickness:0.4});}
           const[pr2,pg3,pb2]=hexToRgbF(pt.color);const pcol=rgb(pr2,pg3,pb2);
           const{x:lsx,y:lsy}=lpt(padX+1,rowDD+rowH*0.5);
           const{x:lex,y:ley}=lpt(padX+13,rowDD+rowH*0.5);
-          lp.drawLine({start:{x:lsx,y:lsy},end:{x:lex,y:ley},color:pcol,thickness:1.5});
-          const{x:mcx,y:mcy}=lpt(padX+7,rowDD+rowH*0.5);
-          lp.drawCircle({x:mcx,y:mcy,size:2,borderColor:pcol,borderWidth:0.8,color:rgb(1,1,1)});
+          if(pt.dotted){
+            // Draw dotted line indicator for LED strips
+            for(let ds=0;ds<3;ds++){
+              const t0=ds/3, t1=(ds+0.5)/3;
+              lp.drawLine({start:{x:lsx+(lex-lsx)*t0,y:lsy+(ley-lsy)*t0},
+                end:{x:lsx+(lex-lsx)*t1,y:lsy+(ley-lsy)*t1},color:pcol,thickness:2});
+            }
+            // dot at center
+            const{x:mcx2,y:mcy2}=lpt(padX+7,rowDD+rowH*0.5);
+            lp.drawCircle({x:mcx2,y:mcy2,size:2,borderColor:pcol,borderWidth:0,color:pcol});
+          } else {
+            lp.drawLine({start:{x:lsx,y:lsy},end:{x:lex,y:ley},color:pcol,thickness:1.5});
+            const{x:mcx,y:mcy}=lpt(padX+7,rowDD+rowH*0.5);
+            lp.drawCircle({x:mcx,y:mcy,size:2,borderColor:pcol,borderWidth:0.8,color:rgb(1,1,1)});
+          }
           const{x:ptx,y:pty}=lpt(padX+16,rowDD+rowH*0.62);
-          lp.drawText(pt.label,{x:ptx,y:pty,size:6.5,font:fontReg,color:rgb(0.1,0.1,0.1),rotate:tDeg(p1Rot)});
+          // LED strips: show run count + total meters
+          const ptRuns=pipes.filter(p=>p.type===pt.id);
+          const ptMeters=ptRuns.reduce((s,p)=>s+(parseFloat(p.meters)||0),0);
+          const ptLabel=pt.dotted&&ptMeters>0?`${pt.label}  (${ptMeters.toFixed(1)}m)`:pt.label;
+          lp.drawText(ptLabel,{x:ptx,y:pty,size:6,font:fontReg,color:rgb(0.1,0.1,0.1),rotate:tDeg(p1Rot)});
+          if(pt.dotted){
+            const runsTxt=`×${ptRuns.length}`;
+            const rW=fontReg.widthOfTextAtSize(runsTxt,6.5);
+            const{x:rtx,y:rty}=lpt(W-padX-rW,rowDD+rowH*0.62);
+            lp.drawText(runsTxt,{x:rtx,y:rty,size:6.5,font,color:pcol,rotate:tDeg(p1Rot)});
+          }
         });
         // Total row — dark separator + bold count right-aligned
         const totDD=hdrH+totalRowsN*rowH;
         const ta=lpt(0,totDD),tb=lpt(W,totDD);
         lp.drawLine({start:ta,end:tb,color:rgb(0.5,0.5,0.5),thickness:0.8});
         const{x:tltx,y:tlty}=lpt(padX,totDD+rowH*0.62);
-        lp.drawText('TOTAL',{x:tltx,y:tlty,size:6.5,font,color:rgb(0.1,0.1,0.1),rotate:tDeg(p1Rot)});
+        // For lighting: show total LED strip meters too
+        const totalLedM=toolKind==='lighting'?pipes.reduce((s,p)=>s+(parseFloat(p.meters)||0),0):0;
+        const totLabel=toolKind==='lighting'&&totalLedM>0?`TOTAL  |  ${totalLedM.toFixed(1)}m LED`:'TOTAL';
+        lp.drawText(totLabel,{x:tltx,y:tlty,size:6.5,font,color:rgb(0.1,0.1,0.1),rotate:tDeg(p1Rot)});
         const totNumTxt=`${toolKind==='floor'?areas.length:toolKind==='painting'?pipes.length:markers.length}`;
         const totNumW=font.widthOfTextAtSize(totNumTxt,7);
         const{x:tnx,y:tny}=lpt(W-padX-totNumW,totDD+rowH*0.62);
@@ -10829,7 +10979,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             <button onClick={()=>{setMode('pipe');setSelectedIds(new Set());setLinkStartId(null);}}
               style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
                 background:mode==='pipe'?T.text:'transparent',color:mode==='pipe'?T.bg:T.muted,transition:'all 0.15s'}}>
-              <PenLine size={11}/>{toolKind==='painting'?'Draw Line':'Draw Pipe'}
+              <PenLine size={11}/>{toolKind==='painting'?'Draw Line':toolKind==='lighting'?'LED Strip':'Draw Pipe'}
             </button>
           )}
           {hasAreaMode&&(
@@ -10859,7 +11009,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
               </button>
             ))}
             <span style={{fontSize:11,color:T.muted,fontStyle:'italic'}}>
-              {pipeInProgress?'Click to add — right-click to finish':'Click to start'}
+              {pipeInProgress
+                ?'Click to add points — right-click to finish strip'
+                :toolKind==='lighting'?'Click to start LED strip — right-click to finish'
+                :'Click to start'}
             </span>
           </div>
         )}
@@ -11037,6 +11190,44 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
               </div>
             </div>
           ))}
+
+          {/* LED strip runs — per-run meter input */}
+          {toolKind==='lighting'&&pipes.length>0&&(
+            <div style={{borderTop:`1px solid ${T.borderLight}`,marginTop:8,paddingTop:8}}>
+              <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:6}}>
+                LED Strip Runs
+                <span style={{fontWeight:400,color:T.muted,marginLeft:6,textTransform:'none'}}>
+                  {pipes.reduce((s,p)=>s+(parseFloat(p.meters)||0),0).toFixed(1)}m total
+                </span>
+              </div>
+              {pipes.filter(p=>p.page===currentPage).map((p,idx)=>{
+                const ptDef=activePipeTypeList.find(t=>t.id===p.type);
+                return(
+                  <div key={p.id} style={{display:'flex',alignItems:'center',gap:5,marginBottom:5}}>
+                    <div style={{width:14,height:3,borderTop:`2px dashed ${ptDef?.color||'#fbbf24'}`,borderRadius:1,flexShrink:0}}/>
+                    <span style={{fontSize:10,color:T.muted,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {ptDef?.label||p.type} #{idx+1}
+                    </span>
+                    <input
+                      type="number" min="0" step="0.1"
+                      value={p.meters||''}
+                      placeholder="m"
+                      onChange={e=>setPipes(ps=>ps.map(x=>x.id===p.id?{...x,meters:e.target.value}:x))}
+                      style={{width:46,border:`1px solid ${T.borderLight}`,borderRadius:5,padding:'2px 4px',fontSize:10,fontFamily:'monospace',textAlign:'right',color:ptDef?.color||'#fbbf24',background:T.bg}}
+                    />
+                    <span style={{fontSize:10,color:T.dim}}>m</span>
+                    <button onClick={()=>setPipes(ps=>ps.filter(x=>x.id!==p.id))}
+                      style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'2px',lineHeight:1}}>✕</button>
+                  </div>
+                );
+              })}
+              {pipes.filter(p=>p.page!==currentPage).length>0&&(
+                <div style={{fontSize:9,color:T.dim,fontStyle:'italic'}}>
+                  +{pipes.filter(p=>p.page!==currentPage).length} run(s) on other pages
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Pipe / paint runs */}
           {(toolKind==='plumbing'||toolKind==='aircon')&&pipes.length>0&&(
