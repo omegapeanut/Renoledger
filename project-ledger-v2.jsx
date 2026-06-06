@@ -84,10 +84,10 @@ const ROLE_LABEL = {admin:'Admin',accounts:'Accounts',designer:'Designer',pm:'Pr
 const ROLE_CLR = {admin:'#ef4444',accounts:'#3b82f6',designer:'#7c3aed',pm:'#0891b2',expense_entry:'#059669',superadmin:'#6d28d9'};
 
 const ROLE_DEFAULT_TABS = {
-  admin:       ['dashboard','projects','quotations','sitereports','payments','reports','warranty','invoices','claims','commissions','tools','admin','workers','checkin','accounts','contacts','trash'],
+  admin:       ['dashboard','projects','quotations','sitereports','payments','reports','warranty','invoices','claims','commissions','tools','admin','workers','checkin','accounts','contacts','trash','orgchart'],
   accounts:    ['dashboard','payments','reports','invoices'],
   designer:    ['dashboard','projects','quotations','sitereports','claims'],
-  pm:          ['dashboard','projects','quotations','sitereports','payments','warranty','invoices','claims','workers'],
+  pm:          ['dashboard','projects','quotations','sitereports','payments','warranty','invoices','claims','workers','orgchart'],
   expense_entry:['invoices','claims'],
   site_worker: ['checkin'],
 };
@@ -15064,6 +15064,312 @@ function SystemPanel({projects,invoices,payments,siteWorkers,attendance,users,wa
   );
 }
 
+// ─── ORG CHART ────────────────────────────────────────────────────────────────
+const ORG_NODE_W=180, ORG_NODE_H=84, ORG_H_GAP=30, ORG_V_GAP=68;
+const ORG_COLORS=['#0891b2','#7c3aed','#ef4444','#16a34a','#d97706','#db2777','#0d9488','#4f46e5','#64748b'];
+
+function computeOrgLayout(nodes){
+  if(!nodes.length) return {};
+  const childMap={},nodeMap={},rootIds=[];
+  nodes.forEach(n=>{ nodeMap[n.id]=n; });
+  nodes.forEach(n=>{
+    if(!n.parentId||!nodeMap[n.parentId]) rootIds.push(n.id);
+    else (childMap[n.parentId]=childMap[n.parentId]||[]).push(n.id);
+  });
+  const subtreeW={};
+  function calcW(id){
+    const ch=childMap[id]||[];
+    if(!ch.length){ subtreeW[id]=ORG_NODE_W; return ORG_NODE_W; }
+    const total=ch.reduce((s,c)=>s+calcW(c)+ORG_H_GAP,-ORG_H_GAP);
+    subtreeW[id]=Math.max(ORG_NODE_W,total);
+    return subtreeW[id];
+  }
+  rootIds.forEach(calcW);
+  const pos={};
+  function assign(id,cx,cy){
+    pos[id]={x:cx,y:cy};
+    const ch=childMap[id]||[];
+    if(!ch.length) return;
+    const totalW=ch.reduce((s,c)=>s+subtreeW[c]+ORG_H_GAP,-ORG_H_GAP);
+    let x=cx-totalW/2;
+    ch.forEach(cid=>{ assign(cid,x+subtreeW[cid]/2,cy+ORG_NODE_H+ORG_V_GAP); x+=subtreeW[cid]+ORG_H_GAP; });
+  }
+  if(rootIds.length===1){ assign(rootIds[0],0,0); }
+  else{
+    const totalRootW=rootIds.reduce((s,r)=>s+(subtreeW[r]||ORG_NODE_W)+ORG_H_GAP*2,-ORG_H_GAP*2);
+    let rx=-totalRootW/2;
+    rootIds.forEach(rid=>{ const rw=subtreeW[rid]||ORG_NODE_W; assign(rid,rx+rw/2,0); rx+=rw+ORG_H_GAP*2; });
+  }
+  return pos;
+}
+
+function OrgNodeEditModal({node,onSave,onClose,nodes}){
+  const isNew=!nodes.find(n=>n.id===node.id);
+  const [form,setForm]=useState({...node});
+  const [photoLoading,setPhotoLoading]=useState(false);
+  const handlePhoto=async(e)=>{
+    const file=e.target.files?.[0]; if(!file) return;
+    setPhotoLoading(true);
+    try{ const c=await compressImageFile(file); setForm(f=>({...f,photo:c})); }
+    finally{ setPhotoLoading(false); }
+  };
+  const getDescIds=(id)=>{
+    const r=new Set([id]),q=[id];
+    while(q.length){ const c=q.shift(); nodes.filter(n=>n.parentId===c).forEach(n=>{r.add(n.id);q.push(n.id);}); }
+    return r;
+  };
+  const parentOpts=nodes.filter(n=>!getDescIds(node.id).has(n.id));
+  const initials=(form.name||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  return(
+    <Modal title={isNew?'Add Person':'Edit Person'} onClose={onClose}>
+      <div style={{display:'flex',flexDirection:'column',gap:14}}>
+        <div style={{display:'flex',alignItems:'center',gap:14}}>
+          <div style={{width:58,height:58,borderRadius:'50%',background:(form.color||'#64748b')+'22',
+            border:`2px solid ${form.color||'#64748b'}`,display:'flex',alignItems:'center',
+            justifyContent:'center',overflow:'hidden',flexShrink:0}}>
+            {form.photo?<img src={form.photo} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+              :<span style={{fontSize:20,fontWeight:700,color:form.color||'#64748b'}}>{initials}</span>}
+          </div>
+          <div>
+            <label style={{fontSize:12,fontWeight:600,color:T.muted,display:'block',marginBottom:4}}>Photo (optional)</label>
+            <label style={{fontSize:12,padding:'6px 12px',background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,cursor:'pointer',color:T.muted,display:'inline-block'}}>
+              {photoLoading?'Compressing…':'Choose photo'}
+              <input type="file" accept="image/*" style={{display:'none'}} onChange={handlePhoto}/>
+            </label>
+            {form.photo&&<button type="button" onClick={()=>setForm(f=>({...f,photo:null}))}
+              style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:T.danger,marginLeft:8}}>Remove</button>}
+          </div>
+        </div>
+        <div><label style={{fontSize:12,fontWeight:600,color:T.muted,display:'block',marginBottom:4}}>Full Name *</label>
+          <input value={form.name||''} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="e.g. John Doe" style={iStyle}/></div>
+        <div><label style={{fontSize:12,fontWeight:600,color:T.muted,display:'block',marginBottom:4}}>Job Title / Position</label>
+          <input value={form.title||''} onChange={e=>setForm(f=>({...f,title:e.target.value}))} placeholder="e.g. Chief Executive Officer" style={iStyle}/></div>
+        <div><label style={{fontSize:12,fontWeight:600,color:T.muted,display:'block',marginBottom:4}}>Department</label>
+          <input value={form.department||''} onChange={e=>setForm(f=>({...f,department:e.target.value}))} placeholder="e.g. Management, Operations" style={iStyle}/></div>
+        <div><label style={{fontSize:12,fontWeight:600,color:T.muted,display:'block',marginBottom:4}}>Reports To</label>
+          <select value={form.parentId||''} onChange={e=>setForm(f=>({...f,parentId:e.target.value||null}))} style={iStyle}>
+            <option value="">— Top Level (no parent) —</option>
+            {parentOpts.map(n=><option key={n.id} value={n.id}>{n.name}{n.title?` — ${n.title}`:''}</option>)}
+          </select></div>
+        <div><label style={{fontSize:12,fontWeight:600,color:T.muted,display:'block',marginBottom:6}}>Colour</label>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            {ORG_COLORS.map(c=>(
+              <button key={c} type="button" onClick={()=>setForm(f=>({...f,color:c}))}
+                style={{width:28,height:28,borderRadius:'50%',background:c,cursor:'pointer',
+                  border:form.color===c?'3px solid #1e293b':'3px solid transparent',outline:'none'}}/>
+            ))}
+          </div></div>
+        <div style={{display:'flex',justifyContent:'flex-end',gap:10,marginTop:4}}>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={()=>form.name?.trim()&&onSave(form)} disabled={!form.name?.trim()}>
+            <CheckCircle size={13}/>{isNew?'Add Person':'Save Changes'}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function OrgChart({orgNodes,setOrgNodes,acctSettings,isAdmin}){
+  const [editNode,setEditNode]=useState(null);
+  const [selected,setSelected]=useState(null);
+  const [pan,setPan]=useState({x:500,y:80});
+  const [zoom,setZoom]=useState(1);
+  const [panDrag,setPanDrag]=useState(null);
+  const svgRef=useRef(null);
+  const layout=useMemo(()=>computeOrgLayout(orgNodes),[orgNodes]);
+  const saveNodes=n=>{ setOrgNodes(n); saveS('orgChart',n); };
+  const addNode=(parentId=null)=>{
+    setEditNode({id:uid(),name:'',title:'',department:'',photo:null,parentId,color:ORG_COLORS[orgNodes.length%ORG_COLORS.length]});
+    setSelected(null);
+  };
+  const deleteNode=(id)=>{
+    const parent=orgNodes.find(n=>n.id===id)?.parentId||null;
+    saveNodes(orgNodes.filter(n=>n.id!==id).map(n=>n.parentId===id?{...n,parentId:parent}:n));
+    setSelected(null);
+  };
+  const onSaveNode=(node)=>{
+    const exists=orgNodes.find(n=>n.id===node.id);
+    saveNodes(exists?orgNodes.map(n=>n.id===node.id?node:n):[...orgNodes,node]);
+    setEditNode(null);
+  };
+  const handlePrint=()=>{
+    const positions=Object.values(layout);
+    if(!positions.length) return;
+    const m=60;
+    const minX=Math.min(...positions.map(p=>p.x))-ORG_NODE_W/2-m;
+    const minY=Math.min(...positions.map(p=>p.y))-m;
+    const maxX=Math.max(...positions.map(p=>p.x))+ORG_NODE_W/2+m;
+    const maxY=Math.max(...positions.map(p=>p.y))+ORG_NODE_H+m;
+    const vw=maxX-minX,vh=maxY-minY;
+    const co=acctSettings?.companyName||'Organisation Chart';
+    const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const linesSvg=orgNodes.filter(n=>n.parentId).map(n=>{
+      const from=layout[n.parentId],to=layout[n.id]; if(!from||!to) return '';
+      const x1=from.x,y1=from.y+ORG_NODE_H,x2=to.x,y2=to.y,cy=(y1+y2)/2;
+      return `<path d="M${x1},${y1} C${x1},${cy} ${x2},${cy} ${x2},${y2}" fill="none" stroke="#cbd5e1" stroke-width="1.5"/>`;
+    }).join('');
+    const nodesSvg=orgNodes.map(n=>{
+      const p=layout[n.id]; if(!p) return '';
+      const nx=p.x-ORG_NODE_W/2,ny=p.y,color=n.color||'#94a3b8';
+      const ini=(n.name||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+      const hy=ORG_NODE_H/2;
+      const nm=esc(n.name.length>18?n.name.slice(0,17)+'…':n.name);
+      const tt=esc((n.title||'').length>22?(n.title||'').slice(0,21)+'…':(n.title||''));
+      const dp=esc((n.department||'').length>24?(n.department||'').slice(0,23)+'…':(n.department||''));
+      const photoEl=n.photo
+        ?`<clipPath id="cp${n.id}"><circle cx="32" cy="${hy}" r="18"/></clipPath><image href="${n.photo}" x="14" y="${hy-18}" width="36" height="36" clip-path="url(#cp${n.id})"/>`
+        :`<text x="32" y="${hy+5}" text-anchor="middle" font-size="13" font-weight="700" fill="${color}" font-family="Helvetica Neue,Arial,sans-serif">${ini}</text>`;
+      return `<g transform="translate(${nx},${ny})">
+        <rect width="${ORG_NODE_W}" height="${ORG_NODE_H}" rx="10" ry="10" fill="white" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)"/>
+        <rect x="0" y="0" width="5" height="${ORG_NODE_H}" rx="3" fill="${color}"/>
+        <circle cx="32" cy="${hy}" r="18" fill="${color}22" stroke="${color}" stroke-width="1.5"/>
+        ${photoEl}
+        <text x="58" y="${hy-8}" font-size="12" font-weight="700" fill="#1e293b" font-family="Helvetica Neue,Arial,sans-serif">${nm}</text>
+        ${tt?`<text x="58" y="${hy+7}" font-size="10" fill="#64748b" font-family="Helvetica Neue,Arial,sans-serif">${tt}</text>`:''}
+        ${dp?`<text x="58" y="${hy+20}" font-size="9" fill="${color}" font-family="Helvetica Neue,Arial,sans-serif">${dp}</text>`:''}
+      </g>`;
+    }).join('');
+    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${esc(co)} — Org Chart</title>
+<style>@page{size:A4 landscape;margin:12mm}body{margin:0;padding:8px 0;font-family:'Helvetica Neue',Arial,sans-serif}
+.hdr{text-align:center;padding:4px 0 14px}.co{font-size:20px;font-weight:700;color:#1e293b}
+.dt{font-size:12px;color:#64748b;margin-top:2px}svg{display:block;width:100%;height:auto}</style></head>
+<body><div class="hdr"><div class="co">${esc(co)}</div>
+<div class="dt">Organisation Chart · ${new Date().toLocaleDateString('en-SG',{day:'2-digit',month:'long',year:'numeric'})}</div></div>
+<svg viewBox="${minX} ${minY} ${vw} ${vh}" xmlns="http://www.w3.org/2000/svg">
+<defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#00000018"/></filter></defs>
+${linesSvg}${nodesSvg}</svg></body></html>`;
+    const pw=window.open('','_blank','width=960,height=700');
+    if(pw){ pw.document.write(html); pw.document.close(); pw.focus(); setTimeout(()=>pw.print(),600); }
+  };
+
+  return(
+    <div>
+      <div style={{display:'flex',gap:10,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
+        {isAdmin&&<Btn onClick={()=>addNode(null)}><Plus size={13}/>Add Top-Level Node</Btn>}
+        <button onClick={handlePrint} style={{display:'flex',alignItems:'center',gap:6,padding:'8px 14px',
+          borderRadius:10,border:`1px solid ${T.borderLight}`,background:T.bg,cursor:'pointer',
+          fontSize:13,color:T.muted,fontFamily:'inherit',fontWeight:500}}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M6 9V2h12v7"/><rect x="6" y="14" width="12" height="8"/>
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+          </svg>
+          Print / Export
+        </button>
+        <button onClick={()=>{setPan({x:500,y:80});setZoom(1);}}
+          style={{padding:'8px 14px',borderRadius:10,border:`1px solid ${T.borderLight}`,background:T.bg,
+            cursor:'pointer',fontSize:13,color:T.muted,fontFamily:'inherit',fontWeight:500}}>
+          ⟳ Reset View
+        </button>
+        <div style={{flex:1}}/>
+        <div style={{fontSize:11,color:T.dim,textAlign:'right',lineHeight:1.5}}>
+          {isAdmin&&<>Click to select · Dbl-click to edit · <br/></>}
+          Drag background to pan · Scroll to zoom
+        </div>
+      </div>
+
+      <div style={{background:T.card,borderRadius:16,border:`1px solid ${T.borderLight}`,
+        overflow:'hidden',position:'relative',height:'calc(100vh - 220px)',minHeight:420}}>
+        <svg ref={svgRef} style={{width:'100%',height:'100%',userSelect:'none',cursor:panDrag?'grabbing':'default'}}
+          onMouseDown={e=>{ if(e.target===svgRef.current||e.target.tagName==='svg'||e.target.tagName==='SVG')
+            setPanDrag({sx:e.clientX-pan.x,sy:e.clientY-pan.y}); }}
+          onMouseMove={e=>{ if(panDrag) setPan({x:e.clientX-panDrag.sx,y:e.clientY-panDrag.sy}); }}
+          onMouseUp={()=>setPanDrag(null)}
+          onMouseLeave={()=>setPanDrag(null)}
+          onWheel={e=>{ e.preventDefault(); setZoom(z=>Math.min(2.5,Math.max(0.2,z-e.deltaY*0.001))); },{passive:false}}
+        >
+          <defs>
+            <filter id="orgshadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx={0} dy={2} stdDeviation={4} floodColor="#00000018"/>
+            </filter>
+          </defs>
+          <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}
+            onClick={e=>{ if(e.target===e.currentTarget) setSelected(null); }}>
+            {orgNodes.filter(n=>n.parentId).map(n=>{
+              const from=layout[n.parentId],to=layout[n.id]; if(!from||!to) return null;
+              const x1=from.x,y1=from.y+ORG_NODE_H,x2=to.x,y2=to.y,cy=(y1+y2)/2;
+              return <path key={`c${n.id}`} d={`M${x1},${y1} C${x1},${cy} ${x2},${cy} ${x2},${y2}`}
+                fill="none" stroke={T.borderLight} strokeWidth={1.5}/>;
+            })}
+            {orgNodes.map(node=>{
+              const pos=layout[node.id]; if(!pos) return null;
+              const isSel=selected===node.id,color=node.color||'#94a3b8';
+              const initials=(node.name||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+              const nx=pos.x-ORG_NODE_W/2,ny=pos.y,hy=ORG_NODE_H/2;
+              const hasTitle=!!(node.title),hasDept=!!(node.department);
+              const nameY=hy+(hasTitle||hasDept?-10:0);
+              return(
+                <g key={node.id} transform={`translate(${nx},${ny})`} style={{cursor:'pointer'}}
+                  onClick={e=>{e.stopPropagation();setSelected(isSel?null:node.id);}}
+                  onDoubleClick={e=>{e.stopPropagation();if(isAdmin)setEditNode(node);}}>
+                  <rect width={ORG_NODE_W} height={ORG_NODE_H} rx={10} ry={10}
+                    fill={T.card} stroke={isSel?color:T.borderLight} strokeWidth={isSel?2:1} filter="url(#orgshadow)"/>
+                  <rect x={0} y={0} width={5} height={ORG_NODE_H} rx={3} fill={color}/>
+                  <circle cx={34} cy={hy} r={20} fill={color+'18'} stroke={color} strokeWidth={1.5}/>
+                  {node.photo
+                    ?<><defs><clipPath id={`avcp${node.id}`}><circle cx={34} cy={hy} r={20}/></clipPath></defs>
+                      <image href={node.photo} x={14} y={hy-20} width={40} height={40} clipPath={`url(#avcp${node.id})`}/></>
+                    :<text x={34} y={hy+5} textAnchor="middle" fontSize={13} fontWeight={700}
+                      fill={color} fontFamily="DM Sans,sans-serif">{initials}</text>
+                  }
+                  <text x={62} y={nameY} fontSize={12} fontWeight={700} fill={T.text} fontFamily="DM Sans,sans-serif">
+                    {(node.name||'').length>17?(node.name||'').slice(0,16)+'…':node.name}
+                  </text>
+                  {hasTitle&&<text x={62} y={nameY+13} fontSize={10} fill={T.muted} fontFamily="DM Sans,sans-serif">
+                    {node.title.length>20?node.title.slice(0,19)+'…':node.title}</text>}
+                  {hasDept&&<text x={62} y={nameY+(hasTitle?26:13)} fontSize={9} fill={color} fontFamily="DM Sans,sans-serif">
+                    {node.department.length>22?node.department.slice(0,21)+'…':node.department}</text>}
+                  {isSel&&<rect x={-3} y={-3} width={ORG_NODE_W+6} height={ORG_NODE_H+6}
+                    rx={13} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray="5 3" opacity={0.6}/>}
+                  {isSel&&isAdmin&&<>
+                    <g transform={`translate(${ORG_NODE_W/2-12},${ORG_NODE_H+6})`}
+                      onClick={e=>{e.stopPropagation();addNode(node.id);}}>
+                      <circle cx={12} cy={12} r={12} fill={color} style={{cursor:'pointer'}}/>
+                      <text x={12} y={17} textAnchor="middle" fontSize={16} fill="#fff" fontWeight={700}>+</text>
+                    </g>
+                    <g transform={`translate(${ORG_NODE_W-6},-22)`}
+                      onClick={e=>{e.stopPropagation();setEditNode(node);}}>
+                      <circle cx={11} cy={11} r={11} fill="#6366f1" style={{cursor:'pointer'}}/>
+                      <text x={11} y={15} textAnchor="middle" fontSize={11} fill="#fff">✎</text>
+                    </g>
+                    <g transform={`translate(${ORG_NODE_W+5},${ORG_NODE_H/2-11})`}
+                      onClick={e=>{e.stopPropagation();deleteNode(node.id);}}>
+                      <circle cx={11} cy={11} r={11} fill="#ef4444" style={{cursor:'pointer'}}/>
+                      <text x={11} y={15} textAnchor="middle" fontSize={15} fill="#fff">×</text>
+                    </g>
+                  </>}
+                </g>
+              );
+            })}
+          </g>
+        </svg>
+        {!orgNodes.length&&(
+          <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',
+            alignItems:'center',justifyContent:'center',gap:12,pointerEvents:'none'}}>
+            <div style={{fontSize:48,opacity:0.35}}>🏢</div>
+            <div style={{fontSize:16,fontWeight:700,color:T.text,opacity:0.6}}>No organisation chart yet</div>
+            <div style={{fontSize:13,color:T.dim,opacity:0.8}}>Click "Add Top-Level Node" to get started</div>
+          </div>
+        )}
+        <div style={{position:'absolute',bottom:14,right:14,display:'flex',flexDirection:'column',gap:4,alignItems:'center'}}>
+          {[{l:'+',d:0.15},{l:'−',d:-0.15}].map(({l,d})=>(
+            <button key={l} onClick={()=>setZoom(z=>Math.min(2.5,Math.max(0.2,z+d)))}
+              style={{width:32,height:32,borderRadius:8,border:`1px solid ${T.borderLight}`,
+                background:T.card,cursor:'pointer',fontSize:18,fontWeight:700,color:T.muted,
+                display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1,fontFamily:'inherit'}}>{l}</button>
+          ))}
+          <div style={{fontSize:10,color:T.dim,textAlign:'center',marginTop:2}}>{Math.round(zoom*100)}%</div>
+        </div>
+        {orgNodes.length>0&&(
+          <div style={{position:'absolute',top:12,left:12,background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'4px 10px',fontSize:11,color:T.muted}}>
+            {orgNodes.length} {orgNodes.length===1?'person':'people'}
+          </div>
+        )}
+      </div>
+      {editNode&&<OrgNodeEditModal node={editNode} onSave={onSaveNode} onClose={()=>setEditNode(null)} nodes={orgNodes}/>}
+    </div>
+  );
+}
+
 const ALL_NAV=[
   // Group 1 — Project (teal accent)
   {id:'dashboard',   label:'Dashboard',        Icon:LayoutDashboard, group:'project'},
@@ -15079,6 +15385,7 @@ const ALL_NAV=[
   {id:'commissions', label:'Commissions',      Icon:Users,           group:'expenses'},
   // Group 3 — Tools
   {id:'tools',       label:'Tools',            Icon:Wrench,          group:'tools'},
+  {id:'orgchart',    label:'Org Chart',        Icon:Building2,       group:'tools'},
   // Group 4 — Admin (slate accent)
   {id:'admin',       label:'Admin',            Icon:Shield,          group:'admin'},
   {id:'workers',     label:'Site Workers',     Icon:Users,           group:'admin'},
@@ -15163,6 +15470,7 @@ export default function App(){
 
   const [activeUserId,setActiveUserId]=useState(null); // null = not logged in
   const [showOnboarding,setShowOnboarding]=useState(false);
+  const [orgNodes,setOrgNodes]=useState([]);
   const [workerSession,setWorkerSession]=useState(null);
   const [showWorkerLogin,setShowWorkerLogin]=useState(false);
   const [ready,setReady]=useState(false);
@@ -15434,7 +15742,7 @@ export default function App(){
   const loadAllData = useCallback(async()=>{
     setSyncing(true);
     try{
-      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt,sr]=await Promise.all([
+      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt,sr,oc]=await Promise.all([
         loadS('projects',SEED_PROJ),
         loadS('invoices',SEED_INV),
         loadS('payments',SEED_PAY),
@@ -15451,6 +15759,7 @@ export default function App(){
         loadS('notices',[]),
         loadS('quotes',[]),
         loadS('siteReports',[]),
+        loadS('orgChart',[]),
       ]);
       let finalProjects = Array.isArray(p) ? p : SEED_PROJ;
       // Rehydrate quotation files and VO files from separate per-project keys
@@ -15512,6 +15821,7 @@ export default function App(){
       setWarranties(Array.isArray(ws)?ws:SEED_WARRANTIES);
       setQuotes(Array.isArray(qt)?qt:[]);
       setSiteReports(Array.isArray(sr)?sr:[]);
+      setOrgNodes(Array.isArray(oc)?oc:[]);
       setAcctSettings({...SEED_ACCT_SETTINGS,...(as&&typeof as==='object'?as:{})});
       setSiteWorkers(Array.isArray(sw)?sw:SEED_WORKERS);
       setAttendance(Array.isArray(att)?att:SEED_ATTENDANCE);
@@ -15590,6 +15900,7 @@ export default function App(){
     trash:`${trashCount} item${trashCount!==1?'s':''} — items auto-purge after 30 days`,
     admin:'User management, roles, and dashboard visibility controls',
     system:`Developer panel — ${APP_FULL} . Build ${APP_BUILD}`,
+    orgchart:'Visual company hierarchy — adjustable, printable for project submissions',
   };
 
   if(!FIREBASE_CONFIGURED) return <FirebaseSetupBanner/>;
@@ -16044,6 +16355,7 @@ export default function App(){
           {tab==='trash'&&isAdmin&&(<TrashBin trash={trash} onRestore={handleRestore} onPermanentDelete={handlePermanentDelete} isSuperAdmin={isSuperAdmin}/>)}
           {tab==='admin'&&isAdmin&&(<Admin users={users.filter(u=>u.id!=='__sa__')} setUsers={setUsers} projects={projects} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} actionLog={actionLog} onUndoAction={handleRestore} isSuperAdmin={isSuperAdmin}/>)}
           {tab==='system'&&isSuperAdmin&&(<SystemPanel projects={projects} invoices={invoices} payments={payments} siteWorkers={siteWorkers} attendance={attendance} users={users} warranties={warranties} trash={trash} acctSettings={acctSettings} setAcctSettings={setAcctSettings} actionLog={actionLog} setActionLog={setActionLog} logAction={logAction}/>)}
+          {tab==='orgchart'&&<OrgChart orgNodes={orgNodes} setOrgNodes={setOrgNodes} acctSettings={acctSettings} isAdmin={isAdmin}/>}
           {tab==='admin'&&!isAdmin&&(
             <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:60,gap:12,color:T.muted,textAlign:'center'}}>
               <Lock size={20} style={{color:T.dim}}/>
