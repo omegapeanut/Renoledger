@@ -13088,15 +13088,106 @@ function WorkerAdmin({siteWorkers,setSiteWorkers,attendance,setAttendance,projec
   );
 }
 
-function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSettings}){
+function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSettings,staffClaims=[],workerClaims=[],invoiceBatches=[],reconciliation={},setReconciliation=()=>{}}){
   const [tab,setTab]=useState('overview');
   const [settings,setSettings]=useState(acctSettings);
   const [generating,setGenerating]=useState(false);
   const [uploadMonth,setUploadMonth]=useState(null);
   const [reconcileMonth,setReconcileMonth]=useState(null);
-  const [reconChecked,setReconChecked]=useState({});
+  const [stmtData,setStmtData]=useState(null);   // {filename,dataUrl} for the open month
+  const [stmtLoading,setStmtLoading]=useState(false);
   const bankFileRef=useRef();
   const sf=k=>v=>setSettings(p=>{const n={...p,[k]:v};setAcctSettings(n);saveS('acctSettings',n);return n;});
+
+  // ---- Persisted reconciliation state (per calendar month) ----
+  // reconciliation[mKey] = { opening, closing, checked:{key:true}, transit:{key:true},
+  //                          bankItems:[{id,date,dir,amount,label,type}], stmtName, locked, lockedAt }
+  const saveRecon=(next)=>{ setReconciliation(next); saveS('reconciliation',next); };
+  const monthRecon=(mKey)=>reconciliation[mKey]||{opening:'',closing:'',checked:{},transit:{},bankItems:[]};
+  const patchMonth=(mKey,patch)=>{
+    const cur=monthRecon(mKey);
+    saveRecon({...reconciliation,[mKey]:{...cur,...patch}});
+  };
+
+  // Load the open month's bank statement on demand from its own storage key
+  // (falls back to legacy acctSettings.bankStatements for previously-uploaded months)
+  useEffect(()=>{
+    let live=true;
+    if(!reconcileMonth){ setStmtData(null); return; }
+    setStmtLoading(true);
+    loadS(`bankStmt_${reconcileMonth}`,null).then(d=>{
+      if(!live) return;
+      const legacy=(acctSettings.bankStatements||{})[reconcileMonth];
+      setStmtData(d||legacy||null);
+      setStmtLoading(false);
+    });
+    return ()=>{ live=false; };
+  },[reconcileMonth]);
+
+  // Save / remove a bank statement PDF/image for a month under its own document key
+  const saveStatement=(mKey,file)=>{
+    const r=new FileReader();
+    r.onload=ev=>{
+      const rec={filename:file.name,dataUrl:ev.target.result};
+      saveS(`bankStmt_${mKey}`,rec);
+      patchMonth(mKey,{stmtName:file.name});
+      if(mKey===reconcileMonth) setStmtData(rec);
+    };
+    r.readAsDataURL(file);
+  };
+  const removeStatement=(mKey)=>{
+    clearS(`bankStmt_${mKey}`);
+    patchMonth(mKey,{stmtName:''});
+    if(mKey===reconcileMonth) setStmtData(null);
+  };
+
+  // Derive actual cash movements (bank-statement basis) for a calendar month.
+  // Returns {income:[...], expense:[...]} where each = {key,date,amount,label,sub}.
+  const deriveMovements=(mKey)=>{
+    const income=[], expense=[];
+    const proj=id=>projects.find(x=>x.id===id);
+    // 1. Client payments received
+    payments.filter(p=>p.status==='Received'&&p.date?.startsWith(mKey)).forEach(p=>{
+      const pr=proj(p.projectId);
+      income.push({key:`p:${p.id}`,date:p.date,amount:p.amount,label:pr?.client||'Client',sub:`${p.type} payment · ${pr?.name||'—'}`});
+    });
+    // 2. Supplier invoice payments (actual cash out, by payment-record date)
+    invoices.forEach(inv=>{
+      (inv.paymentRecords||[]).filter(r=>r.date?.startsWith(mKey)).forEach(r=>{
+        const pr=proj(inv.projectId);
+        expense.push({key:`ipr:${r.id}`,date:r.date,amount:r.amount,label:inv.supplier||'Supplier',sub:`Invoice ${inv.invoiceNo||''} · ${pr?.name||inv.category||'—'}`});
+      });
+    });
+    // 3. Invoice batch payments
+    (invoiceBatches||[]).forEach(b=>{
+      (b.paymentRecords||[]).filter(r=>r.date?.startsWith(mKey)).forEach(r=>{
+        expense.push({key:`bpr:${r.id}`,date:r.date,amount:r.amount,label:b.supplier||b.label||'Batch',sub:`Batch payment · ${b.label||''}`});
+      });
+    });
+    // 4. Staff reimbursements (personal claims paid back to staff)
+    staffClaims.filter(c=>c.paidBy==='personal'&&c.reimbursed&&c.adminPayment?.date?.startsWith(mKey)).forEach(c=>{
+      expense.push({key:`sc:${c.id}`,date:c.adminPayment.date,amount:c.amount,label:`Reimburse ${c.submittedBy||'staff'}`,sub:`${c.type} claim`});
+    });
+    // 5. Commission payouts (per payout-history entry)
+    projects.forEach(p=>{
+      (p.commissionPayoutHistory||[]).filter(h=>h.date?.startsWith(mKey)).forEach(h=>{
+        const amt=(h.dComm||0)+(h.pmComm||0);
+        if(amt>0) expense.push({key:`cm:${h.id}`,date:h.date,amount:amt,label:`Commission · ${p.name||''}`,sub:[p.designer,p.pm].filter(Boolean).join(' / ')});
+      });
+    });
+    // 6. Worker claims (approved site-worker reimbursements)
+    (workerClaims||[]).filter(c=>c.status==='Approved'&&c.date?.startsWith(mKey)).forEach(c=>{
+      expense.push({key:`wc:${c.id}`,date:c.date,amount:parseFloat(c.amount)||0,label:`Worker claim`,sub:c.type||''});
+    });
+    // 7. Bank-only items (manually added: charges, interest, GST, transfers)
+    (monthRecon(mKey).bankItems||[]).forEach(it=>{
+      const m={key:`bk:${it.id}`,date:it.date||`${mKey}-01`,amount:parseFloat(it.amount)||0,label:it.label||'Bank item',sub:it.type||'bank-only'};
+      (it.dir==='in'?income:expense).push(m);
+    });
+    income.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    expense.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    return {income,expense};
+  };
 
   const today=new Date();
   const fyEnd=new Date(today.getFullYear(),settings.fyEndMonth-1,settings.fyEndDay);
@@ -13143,7 +13234,7 @@ function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSetting
     const label=d.toLocaleDateString('en-SG',{month:'short',year:'numeric'});
     const recv=payments.filter(p=>p.status==='Received'&&p.date?.startsWith(key)).reduce((s,p)=>s+p.amount,0);
     const paid=invoices.filter(i=>i.status==='Paid'&&i.invoiceDate?.startsWith(key)).reduce((s,i)=>s+i.total,0);
-    const hasStatement=!!(settings.bankStatements||{})[key];
+    const hasStatement=!!(reconciliation[key]?.stmtName)||!!(settings.bankStatements||{})[key];
     months.push({key,label,recv,paid,net:recv-paid,hasStatement});
   }
 
@@ -13549,7 +13640,7 @@ function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSetting
           <div style={{background:T.accentLight,border:`1px solid ${T.accent}20`,borderRadius:14,padding:'14px 18px',display:'flex',gap:12}}>
             <Info size={16} style={{color:T.accent,flexShrink:0,marginTop:1}}/>
             <div style={{fontSize:13,color:T.text,lineHeight:1.6}}>
-              <strong>How reconciliation works:</strong> Each month, compare what the app recorded against your actual bank statement. Tick each transaction once you've confirmed it appears on the bank statement. Any unticked items are your reconciling differences to investigate.
+              <strong>How to reconcile a month:</strong> enter the <strong>opening &amp; closing balance</strong> from your bank statement, then tick each transaction as you find it on the statement. Add any bank-only lines (charges, interest, GST, transfers). The month is reconciled when the balance check reads <strong style={{color:T.success}}>Balanced</strong> and nothing is left unmatched. Items still in the app but not yet on the bank can be marked <strong>In&nbsp;transit</strong> to carry forward. Your ticks are saved automatically.
             </div>
           </div>
 
@@ -13559,46 +13650,46 @@ function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSetting
             <input ref={bankFileRef} type="file" accept="application/pdf,image/*" style={{display:'none'}}
               onChange={e=>{
                 const f=e.target.files?.[0];
-                if(f&&uploadMonth){
-                  const r=new FileReader();
-                  r.onload=ev=>{
-                    const upd={...settings,bankStatements:{...(settings.bankStatements||{}),[uploadMonth]:{filename:f.name,dataUrl:ev.target.result}}};
-                    setSettings(upd);setAcctSettings(upd);saveS('acctSettings',upd);
-                  };
-                  r.readAsDataURL(f);
-                }
+                if(f&&uploadMonth) saveStatement(uploadMonth,f);
                 e.target.value='';
               }}/>
             <div style={{overflowX:'auto'}}>
               <table style={{width:'100%',fontSize:13,borderCollapse:'collapse'}}>
                 <thead>
                   <tr style={{color:T.dim,fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.06em',background:T.bg}}>
-                    {['Month','Income','Expenses','Net','Statement','Reconciled',''].map(h=>(
-                      <th key={h} style={{textAlign:['Income','Expenses','Net'].includes(h)?'right':'left',padding:'9px 14px',whiteSpace:'nowrap'}}>{h}</th>
+                    {['Month','Money In','Money Out','Net','Statement','Status',''].map(h=>(
+                      <th key={h} style={{textAlign:['Money In','Money Out','Net'].includes(h)?'right':'left',padding:'9px 14px',whiteSpace:'nowrap'}}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {months.map(m=>{
-                    // Count reconciled items for this month
-                    const mKey = m.key;
-                    const mPayments = payments.filter(p=>p.status==='Received'&&p.date?.startsWith(mKey));
-                    const mInvoices = invoices.filter(i=>i.status==='Paid'&&i.invoiceDate?.startsWith(mKey));
-                    const totalItems = mPayments.length + mInvoices.length;
-                    const checkedItems = Object.keys(reconChecked).filter(k=>k.startsWith(mKey+':')&&reconChecked[k]).length;
-                    const allReconciled = totalItems > 0 && checkedItems === totalItems;
-                    const isSelected = reconcileMonth === mKey;
-
+                    const mKey=m.key;
+                    const {income,expense}=deriveMovements(mKey);
+                    const R=monthRecon(mKey);
+                    const cs=R.checked||{},ts=R.transit||{};
+                    const inc=income.reduce((s,x)=>s+x.amount,0);
+                    const exp=expense.reduce((s,x)=>s+x.amount,0);
+                    const all=[...income,...expense];
+                    const unmatched=all.filter(x=>!cs[x.key]&&!ts[x.key]).length;
+                    const hasBal=R.opening!==''&&R.opening!=null&&R.closing!==''&&R.closing!=null;
+                    const opening=parseFloat(R.opening)||0,closing=parseFloat(R.closing)||0;
+                    const tIn=income.filter(x=>cs[x.key]&&!ts[x.key]).reduce((s,x)=>s+x.amount,0);
+                    const tOut=expense.filter(x=>cs[x.key]&&!ts[x.key]).reduce((s,x)=>s+x.amount,0);
+                    const balanced=hasBal&&Math.abs(closing-(opening+tIn-tOut))<0.005;
+                    const reconciled=balanced&&unmatched===0;
+                    const locked=!!R.locked;
+                    const isSelected=reconcileMonth===mKey;
                     return (
                       <tr key={mKey} style={{borderTop:`1px solid ${T.borderLight}`,background:isSelected?T.accentLight:'transparent',cursor:'pointer'}}
                         onClick={()=>setReconcileMonth(isSelected?null:mKey)}>
                         <td style={{padding:'10px 14px',color:T.text,fontWeight:isSelected?700:500}}>{m.label}</td>
-                        <td style={{padding:'10px 14px',textAlign:'right',color:T.success,fontWeight:600}}>{m.recv>0?fmtSGD(m.recv):'—'}</td>
-                        <td style={{padding:'10px 14px',textAlign:'right',color:T.danger,fontWeight:600}}>{m.paid>0?fmtSGD(m.paid):'—'}</td>
-                        <td style={{padding:'10px 14px',textAlign:'right',color:m.net>=0?T.accent:T.danger,fontWeight:700}}>{fmtSGD(m.net)}</td>
+                        <td style={{padding:'10px 14px',textAlign:'right',color:T.success,fontWeight:600}}>{inc>0?fmtSGD(inc):'—'}</td>
+                        <td style={{padding:'10px 14px',textAlign:'right',color:T.danger,fontWeight:600}}>{exp>0?fmtSGD(exp):'—'}</td>
+                        <td style={{padding:'10px 14px',textAlign:'right',color:inc-exp>=0?T.accent:T.danger,fontWeight:700}}>{fmtSGD(inc-exp)}</td>
                         <td style={{padding:'10px 14px'}}>
                           {m.hasStatement
-                            ? <span style={{fontSize:11,color:T.success,display:'flex',alignItems:'center',gap:4,fontWeight:500}}><CheckCircle size={12}/>{(settings.bankStatements||{})[mKey]?.filename||'Uploaded'}</span>
+                            ? <span style={{fontSize:11,color:T.success,display:'flex',alignItems:'center',gap:4,fontWeight:500}}><CheckCircle size={12}/>Uploaded</span>
                             : <button onClick={e=>{e.stopPropagation();setUploadMonth(mKey);bankFileRef.current?.click();}}
                                 style={{background:'none',border:`1px solid ${T.danger}40`,borderRadius:7,padding:'3px 9px',cursor:'pointer',color:T.danger,fontSize:11,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:4}}>
                                 <Upload size={10}/>Upload
@@ -13606,11 +13697,15 @@ function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSetting
                           }
                         </td>
                         <td style={{padding:'10px 14px'}}>
-                          {totalItems===0
-                            ? <span style={{fontSize:11,color:T.dim}}>No transactions</span>
-                            : allReconciled
-                              ? <span style={{fontSize:11,color:T.success,fontWeight:700}}>✓ Reconciled</span>
-                              : <span style={{fontSize:11,color:checkedItems>0?T.warning:T.muted}}>{checkedItems}/{totalItems} checked</span>
+                          {locked
+                            ? <span style={{fontSize:11,color:T.accent,fontWeight:700,display:'flex',alignItems:'center',gap:4}}><Lock size={11}/>Locked</span>
+                            : all.length===0
+                              ? <span style={{fontSize:11,color:T.dim}}>No transactions</span>
+                              : reconciled
+                                ? <span style={{fontSize:11,color:T.success,fontWeight:700}}>✓ Reconciled</span>
+                                : balanced
+                                  ? <span style={{fontSize:11,color:T.warning,fontWeight:600}}>Balanced · {unmatched} unmatched</span>
+                                  : <span style={{fontSize:11,color:unmatched<all.length?T.warning:T.muted}}>{all.length-unmatched}/{all.length} matched</span>
                           }
                         </td>
                         <td style={{padding:'10px 14px'}}>
@@ -13622,172 +13717,217 @@ function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSetting
                 </tbody>
                 <tfoot>
                   <tr style={{borderTop:`2px solid ${T.border}`,background:T.bg}}>
-                    <td style={{padding:'10px 14px',fontWeight:700,color:T.text,fontSize:13}}>FY Total</td>
-                    <td style={{padding:'10px 14px',textAlign:'right',color:T.success,fontWeight:700}}>{fmtSGD(fyRevenue)}</td>
-                    <td style={{padding:'10px 14px',textAlign:'right',color:T.danger,fontWeight:700}}>{fmtSGD(fyCOS)}</td>
-                    <td style={{padding:'10px 14px',textAlign:'right',color:fyRevenue-fyCOS>=0?T.accent:T.danger,fontWeight:700}}>{fmtSGD(fyRevenue-fyCOS)}</td>
-                    <td style={{padding:'10px 14px'}}><span style={{fontSize:11,color:months.every(m=>m.hasStatement)?T.success:T.warning,fontWeight:600}}>{months.filter(m=>m.hasStatement).length}/12 statements</span></td>
-                    <td colSpan={2}/>
+                    <td style={{padding:'10px 14px',fontWeight:700,color:T.text,fontSize:13}}>Statements</td>
+                    <td colSpan={3}/>
+                    <td style={{padding:'10px 14px'}}><span style={{fontSize:11,color:months.every(m=>m.hasStatement)?T.success:T.warning,fontWeight:600}}>{months.filter(m=>m.hasStatement).length}/12 uploaded</span></td>
+                    <td style={{padding:'10px 14px'}}><span style={{fontSize:11,color:months.every(m=>reconciliation[m.key]?.locked)?T.success:T.muted,fontWeight:600}}>{months.filter(m=>reconciliation[m.key]?.locked).length}/12 locked</span></td>
+                    <td/>
                   </tr>
                 </tfoot>
               </table>
+            </div>
+            <div style={{fontSize:11,color:T.dim,marginTop:10,lineHeight:1.5}}>
+              Figures are on a <strong>cash basis</strong> (actual money in/out of the bank), so they match your statement — this is intentionally different from the accrual figures on the Overview tab used for tax.
             </div>
           </div>
 
           {/* Expanded reconciliation detail */}
           {reconcileMonth&&(()=>{
-            const mLabel = months.find(m=>m.key===reconcileMonth)?.label||reconcileMonth;
-            const mPayments = payments
-              .filter(p=>p.status==='Received'&&p.date?.startsWith(reconcileMonth))
-              .sort((a,b)=>a.date.localeCompare(b.date));
-            const mInvoices = invoices
-              .filter(i=>i.status==='Paid'&&i.invoiceDate?.startsWith(reconcileMonth))
-              .sort((a,b)=>(a.invoiceDate||'').localeCompare(b.invoiceDate||''));
+            const mLabel=months.find(m=>m.key===reconcileMonth)?.label||reconcileMonth;
+            const {income,expense}=deriveMovements(reconcileMonth);
+            const R=monthRecon(reconcileMonth);
+            const cs=R.checked||{},ts=R.transit||{};
+            const locked=!!R.locked;
+            const isCk=k=>!!cs[k], isTr=k=>!!ts[k];
 
-            const totalIncome = mPayments.reduce((s,p)=>s+p.amount,0);
-            const totalExpenses = mInvoices.reduce((s,i)=>s+i.total,0);
-            const checkedIncome = mPayments.filter(p=>reconChecked[`${reconcileMonth}:p:${p.id}`]).reduce((s,p)=>s+p.amount,0);
-            const checkedExpenses = mInvoices.filter(i=>reconChecked[`${reconcileMonth}:i:${i.id}`]).reduce((s,i)=>s+i.total,0);
-            const uncheckedIncome = totalIncome - checkedIncome;
-            const uncheckedExpenses = totalExpenses - checkedExpenses;
+            const opening=parseFloat(R.opening)||0, closing=parseFloat(R.closing)||0;
+            const hasBal=R.opening!==''&&R.opening!=null&&R.closing!==''&&R.closing!=null;
+            const tickedIn=income.filter(m=>isCk(m.key)&&!isTr(m.key)).reduce((s,m)=>s+m.amount,0);
+            const tickedOut=expense.filter(m=>isCk(m.key)&&!isTr(m.key)).reduce((s,m)=>s+m.amount,0);
+            const adjusted=opening+tickedIn-tickedOut;
+            const diff=closing-adjusted;
+            const balanced=hasBal&&Math.abs(diff)<0.005;
+            const unmatched=[...income,...expense].filter(m=>!isCk(m.key)&&!isTr(m.key));
+            const transitCount=[...income,...expense].filter(m=>isTr(m.key)).length;
+            const reconciled=balanced&&unmatched.length===0;
 
-            const stmt = (settings.bankStatements||{})[reconcileMonth];
+            const setBal=(field,val)=>patchMonth(reconcileMonth,{[field]:val});
+            const toggleCheck=k=>{ if(locked) return; const c={...cs}; if(c[k]) delete c[k]; else c[k]=true; patchMonth(reconcileMonth,{checked:c}); };
+            const toggleTransit=k=>{ if(locked) return; const t={...ts}; if(t[k]) delete t[k]; else t[k]=true; patchMonth(reconcileMonth,{transit:t}); };
+            const tickAll=(arr,on)=>{ if(locked) return; const c={...cs}; arr.forEach(m=>{ if(on) c[m.key]=true; else delete c[m.key]; }); patchMonth(reconcileMonth,{checked:c}); };
+            const addBankItem=dir=>{ if(locked) return; const items=[...(R.bankItems||[]),{id:uid(),date:`${reconcileMonth}-01`,dir,amount:'',label:'',type:dir==='in'?'interest':'charge'}]; patchMonth(reconcileMonth,{bankItems:items}); };
+            const updBankItem=(id,patch)=>{ const items=(R.bankItems||[]).map(it=>it.id===id?{...it,...patch}:it); patchMonth(reconcileMonth,{bankItems:items}); };
+            const delBankItem=id=>{ const items=(R.bankItems||[]).filter(it=>it.id!==id); const c={...cs};delete c[`bk:${id}`]; const t={...ts};delete t[`bk:${id}`]; patchMonth(reconcileMonth,{bankItems:items,checked:c,transit:t}); };
 
-            const toggle = (key) => setReconChecked(prev=>({...prev,[key]:!prev[key]}));
+            const MoveRow=({m,accent})=>{
+              const ck=isCk(m.key), tr=isTr(m.key);
+              return (
+                <div style={{padding:'11px 16px',borderBottom:`1px solid ${T.borderLight}`,display:'flex',alignItems:'flex-start',gap:10,
+                  background:ck?(accent===T.success?'rgba(29,131,72,0.05)':'rgba(220,38,38,0.04)'):tr?'rgba(180,130,0,0.06)':'transparent',transition:'background 0.12s',opacity:tr?0.75:1}}>
+                  <div onClick={()=>toggleCheck(m.key)} title="Tick when it appears on the bank statement"
+                    style={{width:18,height:18,borderRadius:5,border:`2px solid ${ck?accent:T.borderLight}`,background:ck?accent:'transparent',flexShrink:0,marginTop:2,cursor:locked?'default':'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    {ck&&<span style={{color:'#fff',fontSize:11,fontWeight:700}}>✓</span>}
+                  </div>
+                  <div style={{flex:1,minWidth:0,cursor:locked?'default':'pointer'}} onClick={()=>toggleCheck(m.key)}>
+                    <div style={{fontSize:13,fontWeight:600,color:ck?accent:T.text,textDecoration:ck?'line-through':'none'}}>{fmtSGD(m.amount)}</div>
+                    <div style={{fontSize:11,color:T.muted,marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.label}</div>
+                    <div style={{fontSize:11,color:T.dim}}>{m.date} · {m.sub}</div>
+                  </div>
+                  {!locked&&(
+                    <button onClick={()=>toggleTransit(m.key)} title="Recorded in the app but not yet on this statement — carry to next month"
+                      style={{flexShrink:0,marginTop:2,background:tr?T.warning:'transparent',border:`1px solid ${tr?T.warning:T.borderLight}`,color:tr?'#fff':T.muted,borderRadius:7,padding:'3px 8px',fontSize:10,fontWeight:600,fontFamily:'inherit',cursor:'pointer',whiteSpace:'nowrap'}}>
+                      {tr?'In transit':'In transit?'}
+                    </button>
+                  )}
+                </div>
+              );
+            };
 
             return (
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                <div style={{fontSize:15,fontWeight:700,color:T.text}}>{mLabel} — Reconciliation Detail</div>
-
-                {/* Summary boxes */}
-                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:10}}>
-                  {[
-                    {label:'Total Income',val:fmtSGD(totalIncome),sub:`${mPayments.length} payments`,color:T.success},
-                    {label:'Total Expenses',val:fmtSGD(totalExpenses),sub:`${mInvoices.length} invoices`,color:T.danger},
-                    {label:'Unreconciled Income',val:fmtSGD(uncheckedIncome),sub:'not yet ticked',color:uncheckedIncome>0?T.warning:T.success},
-                    {label:'Unreconciled Expenses',val:fmtSGD(uncheckedExpenses),sub:'not yet ticked',color:uncheckedExpenses>0?T.warning:T.success},
-                  ].map(({label,val,sub,color})=>(
-                    <div key={label} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:12,padding:'14px 16px',boxShadow:T.shadow}}>
-                      <div style={{fontSize:11,color:T.dim,marginBottom:4}}>{label}</div>
-                      <div style={{fontSize:18,fontWeight:700,color}}>{val}</div>
-                      <div style={{fontSize:11,color:T.muted,marginTop:2}}>{sub}</div>
-                    </div>
-                  ))}
+              <div style={{display:'flex',flexDirection:'column',gap:14}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+                  <div style={{fontSize:15,fontWeight:700,color:T.text}}>{mLabel} — Reconciliation</div>
+                  {locked
+                    ? <Btn variant="secondary" size="sm" onClick={()=>patchMonth(reconcileMonth,{locked:false})}><Lock size={12}/>Unlock month</Btn>
+                    : <Btn size="sm" onClick={()=>patchMonth(reconcileMonth,{locked:true,lockedAt:new Date().toISOString()})} disabled={!reconciled} style={!reconciled?{opacity:0.5}:{}}><CheckCircle size={12}/>Lock month</Btn>
+                  }
                 </div>
 
-                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:14}}>
-
-                  {/* Income — client payments */}
-                  <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
-                    <div style={{padding:'12px 16px',background:T.successLight,borderBottom:`1px solid ${T.success}20`,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                      <span style={{fontSize:13,fontWeight:700,color:T.success}}>Income — Client Payments</span>
-                      <span style={{fontSize:12,color:T.success,fontWeight:600}}>{fmtSGD(totalIncome)}</span>
-                    </div>
-                    {mPayments.length===0&&<div style={{padding:20,textAlign:'center',color:T.dim,fontSize:13}}>No client payments this month</div>}
-                    {mPayments.map(p=>{
-                      const proj=projects.find(x=>x.id===p.projectId);
-                      const ck=reconChecked[`${reconcileMonth}:p:${p.id}`];
-                      return(
-                        <div key={p.id} onClick={()=>toggle(`${reconcileMonth}:p:${p.id}`)}
-                          style={{padding:'11px 16px',borderBottom:`1px solid ${T.borderLight}`,
-                            display:'flex',alignItems:'flex-start',gap:10,cursor:'pointer',
-                            background:ck?'rgba(29,131,72,0.05)':'transparent',transition:'background 0.12s'}}>
-                          <div style={{width:18,height:18,borderRadius:5,border:`2px solid ${ck?T.success:T.borderLight}`,
-                            background:ck?T.success:'transparent',flexShrink:0,marginTop:2,
-                            display:'flex',alignItems:'center',justifyContent:'center'}}>
-                            {ck&&<span style={{color:'#fff',fontSize:11,fontWeight:700}}>✓</span>}
-                          </div>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:13,fontWeight:600,color:ck?T.success:T.text,textDecoration:ck?'line-through':'none'}}>{fmtSGD(p.amount)}</div>
-                            <div style={{fontSize:11,color:T.muted,marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{proj?.client||'—'} · {p.type}</div>
-                            <div style={{fontSize:11,color:T.dim}}>{p.date} · {proj?.name||'—'}</div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {mPayments.length>0&&(
-                      <div style={{padding:'10px 16px',background:T.bg,display:'flex',justifyContent:'space-between'}}>
-                        <button onClick={()=>{const u={...reconChecked};mPayments.forEach(p=>{u[`${reconcileMonth}:p:${p.id}`]=true;});setReconChecked(u);}}
-                          style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.accent,fontWeight:600,fontFamily:'inherit'}}>Tick all</button>
-                        <button onClick={()=>{const u={...reconChecked};mPayments.forEach(p=>{delete u[`${reconcileMonth}:p:${p.id}`];});setReconChecked(u);}}
-                          style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.muted,fontFamily:'inherit'}}>Clear all</button>
-                      </div>
-                    )}
+                {/* Balance proof */}
+                <div style={{background:T.card,border:`1px solid ${balanced?T.success:T.borderLight}`,borderRadius:16,padding:18,boxShadow:T.shadow}}>
+                  <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:14,display:'flex',alignItems:'center',gap:8}}>
+                    <DollarSign size={14} style={{color:T.accent}}/>Balance Check
                   </div>
-
-                  {/* Expenses — supplier invoices */}
-                  <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
-                    <div style={{padding:'12px 16px',background:T.dangerLight,borderBottom:`1px solid ${T.danger}20`,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                      <span style={{fontSize:13,fontWeight:700,color:T.danger}}>Expenses — Paid Invoices</span>
-                      <span style={{fontSize:12,color:T.danger,fontWeight:600}}>{fmtSGD(totalExpenses)}</span>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12,marginBottom:14}}>
+                    <div>
+                      <label style={{fontSize:11,color:T.dim,display:'block',marginBottom:5}}>Opening balance (statement)</label>
+                      <input type="number" value={R.opening??''} disabled={locked} onChange={e=>setBal('opening',e.target.value)} placeholder="0.00"
+                        style={{...iStyle,padding:'9px 12px'}}/>
                     </div>
-                    {mInvoices.length===0&&<div style={{padding:20,textAlign:'center',color:T.dim,fontSize:13}}>No paid invoices this month</div>}
-                    {mInvoices.map(i=>{
-                      const proj=projects.find(x=>x.id===i.projectId);
-                      const ck=reconChecked[`${reconcileMonth}:i:${i.id}`];
-                      return(
-                        <div key={i.id} onClick={()=>toggle(`${reconcileMonth}:i:${i.id}`)}
-                          style={{padding:'11px 16px',borderBottom:`1px solid ${T.borderLight}`,
-                            display:'flex',alignItems:'flex-start',gap:10,cursor:'pointer',
-                            background:ck?'rgba(220,38,38,0.04)':'transparent',transition:'background 0.12s'}}>
-                          <div style={{width:18,height:18,borderRadius:5,border:`2px solid ${ck?T.danger:T.borderLight}`,
-                            background:ck?T.danger:'transparent',flexShrink:0,marginTop:2,
-                            display:'flex',alignItems:'center',justifyContent:'center'}}>
-                            {ck&&<span style={{color:'#fff',fontSize:11,fontWeight:700}}>✓</span>}
-                          </div>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:13,fontWeight:600,color:ck?T.danger:T.text,textDecoration:ck?'line-through':'none'}}>{fmtSGD(i.total)}</div>
-                            <div style={{fontSize:11,color:T.muted,marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i.supplier} · {i.category}</div>
-                            <div style={{fontSize:11,color:T.dim}}>{i.invoiceDate} · {proj?.name||'—'}</div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {mInvoices.length>0&&(
-                      <div style={{padding:'10px 16px',background:T.bg,display:'flex',justifyContent:'space-between'}}>
-                        <button onClick={()=>{const u={...reconChecked};mInvoices.forEach(i=>{u[`${reconcileMonth}:i:${i.id}`]=true;});setReconChecked(u);}}
-                          style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.accent,fontWeight:600,fontFamily:'inherit'}}>Tick all</button>
-                        <button onClick={()=>{const u={...reconChecked};mInvoices.forEach(i=>{delete u[`${reconcileMonth}:i:${i.id}`];});setReconChecked(u);}}
-                          style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.muted,fontFamily:'inherit'}}>Clear all</button>
-                      </div>
-                    )}
+                    <div>
+                      <label style={{fontSize:11,color:T.dim,display:'block',marginBottom:5}}>Closing balance (statement)</label>
+                      <input type="number" value={R.closing??''} disabled={locked} onChange={e=>setBal('closing',e.target.value)} placeholder="0.00"
+                        style={{...iStyle,padding:'9px 12px'}}/>
+                    </div>
                   </div>
-                </div>
-
-                {/* Bank statement viewer */}
-                {stmt&&(
-                  <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:18,boxShadow:T.shadow}}>
-                    <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:12,display:'flex',alignItems:'center',gap:8}}>
-                      <FileSpreadsheet size={14} style={{color:T.accent}}/>Bank Statement — {mLabel}
-                      <span style={{fontSize:11,color:T.muted,fontWeight:400}}>({stmt.filename})</span>
-                    </div>
-                    {stmt.dataUrl?.startsWith('data:image')
-                      ? <img src={stmt.dataUrl} alt="Bank statement" style={{width:'100%',borderRadius:8,border:`1px solid ${T.borderLight}`}}/>
-                      : stmt.dataUrl?.startsWith('data:application/pdf')
-                        ? <iframe src={stmt.dataUrl} style={{width:'100%',height:480,border:'none',borderRadius:8}} title="Bank statement"/>
-                        : <div style={{padding:24,textAlign:'center',color:T.muted,fontSize:13}}>Preview not available for this file type</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:10,fontSize:12,color:T.muted,alignItems:'center'}}>
+                    <span>Opening <strong style={{color:T.text}}>{fmtSGD(opening)}</strong></span>
+                    <span style={{color:T.dim}}>+</span>
+                    <span>Ticked in <strong style={{color:T.success}}>{fmtSGD(tickedIn)}</strong></span>
+                    <span style={{color:T.dim}}>−</span>
+                    <span>Ticked out <strong style={{color:T.danger}}>{fmtSGD(tickedOut)}</strong></span>
+                    <span style={{color:T.dim}}>=</span>
+                    <span>Expected closing <strong style={{color:T.text}}>{fmtSGD(adjusted)}</strong></span>
+                  </div>
+                  <div style={{marginTop:12,padding:'11px 14px',borderRadius:10,background:!hasBal?T.bg:balanced?T.successLight:T.dangerLight,
+                    border:`1px solid ${!hasBal?T.borderLight:balanced?T.success+'40':T.danger+'40'}`,display:'flex',alignItems:'center',gap:8}}>
+                    {!hasBal
+                      ? <span style={{fontSize:12,color:T.muted}}>Enter the opening and closing balance from your statement to run the balance check.</span>
+                      : balanced
+                        ? <span style={{fontSize:13,fontWeight:700,color:T.success,display:'flex',alignItems:'center',gap:6}}><CheckCircle size={15}/>Balanced — expected closing matches the statement{unmatched.length>0?` (still ${unmatched.length} unmatched item${unmatched.length>1?'s':''} to tick or carry forward)`:''}</span>
+                        : <span style={{fontSize:13,fontWeight:700,color:T.danger,display:'flex',alignItems:'center',gap:6}}><AlertTriangle size={15}/>Out by {fmtSGD(Math.abs(diff))} — {diff>0?'statement is higher (a receipt may be unticked or missing)':'statement is lower (a payment may be unticked or missing)'}</span>
                     }
                   </div>
-                )}
-                {!stmt&&(
-                  <DropZone accept="application/pdf,image/*" onDrop={f=>{
-                    setUploadMonth(reconcileMonth);
-                    const r=new FileReader();
-                    r.onload=ev=>{
-                      const upd={...settings,bankStatements:{...(settings.bankStatements||{}),[reconcileMonth]:{filename:f.name,dataUrl:ev.target.result}}};
-                      setSettings(upd);setAcctSettings(upd);saveS('acctSettings',upd);
-                    };
-                    r.readAsDataURL(f);
-                  }}>
-                  <div style={{background:T.bg,border:`2px dashed ${T.borderLight}`,borderRadius:14,padding:'24px',textAlign:'center'}}>
-                    <div style={{fontSize:13,color:T.muted,marginBottom:10}}>No bank statement uploaded for {mLabel}</div>
-                    <div style={{fontSize:11,color:T.dim,marginBottom:10}}>Drag & drop a PDF or image here, or click to upload</div>
-                    <Btn variant="secondary" size="sm" onClick={()=>{setUploadMonth(reconcileMonth);bankFileRef.current?.click();}}>
-                      <Upload size={12}/>Upload Bank Statement
-                    </Btn>
+                  {transitCount>0&&<div style={{fontSize:11,color:T.warning,marginTop:8}}>{transitCount} item{transitCount>1?'s':''} marked in transit — excluded here, will appear to carry into next month.</div>}
+                </div>
+
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:14}}>
+                  {/* Money In */}
+                  <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
+                    <div style={{padding:'12px 16px',background:T.successLight,borderBottom:`1px solid ${T.success}20`,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                      <span style={{fontSize:13,fontWeight:700,color:T.success}}>Money In</span>
+                      <span style={{fontSize:12,color:T.success,fontWeight:600}}>{fmtSGD(income.reduce((s,m)=>s+m.amount,0))}</span>
+                    </div>
+                    {income.length===0&&<div style={{padding:20,textAlign:'center',color:T.dim,fontSize:13}}>No money in this month</div>}
+                    {income.map(m=><MoveRow key={m.key} m={m} accent={T.success}/>)}
+                    {!locked&&(
+                      <div style={{padding:'10px 16px',background:T.bg,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <button onClick={()=>addBankItem('in')} style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.accent,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:4}}><Plus size={12}/>Bank-only credit</button>
+                        {income.length>0&&<span><button onClick={()=>tickAll(income,true)} style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.accent,fontWeight:600,fontFamily:'inherit',marginRight:12}}>Tick all</button><button onClick={()=>tickAll(income,false)} style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.muted,fontFamily:'inherit'}}>Clear</button></span>}
+                      </div>
+                    )}
                   </div>
-                  </DropZone>
+
+                  {/* Money Out */}
+                  <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
+                    <div style={{padding:'12px 16px',background:T.dangerLight,borderBottom:`1px solid ${T.danger}20`,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                      <span style={{fontSize:13,fontWeight:700,color:T.danger}}>Money Out</span>
+                      <span style={{fontSize:12,color:T.danger,fontWeight:600}}>{fmtSGD(expense.reduce((s,m)=>s+m.amount,0))}</span>
+                    </div>
+                    {expense.length===0&&<div style={{padding:20,textAlign:'center',color:T.dim,fontSize:13}}>No money out this month</div>}
+                    {expense.map(m=><MoveRow key={m.key} m={m} accent={T.danger}/>)}
+                    {!locked&&(
+                      <div style={{padding:'10px 16px',background:T.bg,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <button onClick={()=>addBankItem('out')} style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.accent,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:4}}><Plus size={12}/>Bank-only debit</button>
+                        {expense.length>0&&<span><button onClick={()=>tickAll(expense,true)} style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.accent,fontWeight:600,fontFamily:'inherit',marginRight:12}}>Tick all</button><button onClick={()=>tickAll(expense,false)} style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.muted,fontFamily:'inherit'}}>Clear</button></span>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bank-only items editor */}
+                {(R.bankItems||[]).length>0&&(
+                  <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:16,boxShadow:T.shadow}}>
+                    <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:10}}>Bank-only items <span style={{fontSize:11,fontWeight:400,color:T.muted}}>— charges, interest, GST, owner transfers not tracked elsewhere</span></div>
+                    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                      {(R.bankItems||[]).map(it=>(
+                        <div key={it.id} style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                          <select value={it.dir} disabled={locked} onChange={e=>updBankItem(it.id,{dir:e.target.value})} style={{...iStyle,width:90,padding:'7px 8px'}}>
+                            <option value="out">Out</option><option value="in">In</option>
+                          </select>
+                          <select value={it.type} disabled={locked} onChange={e=>updBankItem(it.id,{type:e.target.value})} style={{...iStyle,width:130,padding:'7px 8px'}}>
+                            {['charge','interest','gst','transfer','other'].map(t=><option key={t} value={t}>{t==='gst'?'GST':t.charAt(0).toUpperCase()+t.slice(1)}</option>)}
+                          </select>
+                          <input type="date" value={it.date} disabled={locked} onChange={e=>updBankItem(it.id,{date:e.target.value})} style={{...iStyle,width:150,padding:'7px 8px'}}/>
+                          <input value={it.label} disabled={locked} onChange={e=>updBankItem(it.id,{label:e.target.value})} placeholder="Description" style={{...iStyle,flex:1,minWidth:120,padding:'7px 10px'}}/>
+                          <input type="number" value={it.amount} disabled={locked} onChange={e=>updBankItem(it.id,{amount:e.target.value})} placeholder="0.00" style={{...iStyle,width:110,padding:'7px 10px',textAlign:'right'}}/>
+                          {!locked&&<button onClick={()=>delBankItem(it.id)} style={{background:'none',border:'none',cursor:'pointer',color:T.danger,padding:4,display:'flex'}}><Trash2 size={14}/></button>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
+
+                {/* Unmatched warning */}
+                {unmatched.length>0&&hasBal&&(
+                  <div style={{background:T.dangerLight,border:`1px solid ${T.danger}30`,borderRadius:12,padding:'12px 16px',fontSize:12,color:T.text,lineHeight:1.6}}>
+                    <strong style={{color:T.danger}}>{unmatched.length} item{unmatched.length>1?'s':''} not yet matched.</strong> Tick each one you can find on the statement. If something is recorded in the app but hasn't cleared the bank yet, mark it <strong>In transit</strong> to carry it forward. If a statement line has no matching app record, add it as a bank-only item or key it into the relevant module.
+                  </div>
+                )}
+
+                {/* Bank statement viewer */}
+                <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:18,boxShadow:T.shadow}}>
+                  <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:12,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                    <FileSpreadsheet size={14} style={{color:T.accent}}/>Bank Statement — {mLabel}
+                    {stmtData&&<span style={{fontSize:11,color:T.muted,fontWeight:400}}>({stmtData.filename})</span>}
+                    {stmtData&&!locked&&(
+                      <span style={{marginLeft:'auto',display:'flex',gap:8}}>
+                        <button onClick={()=>{setUploadMonth(reconcileMonth);bankFileRef.current?.click();}} style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.accent,fontWeight:600,fontFamily:'inherit'}}>Replace</button>
+                        <button onClick={()=>removeStatement(reconcileMonth)} style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:T.danger,fontFamily:'inherit'}}>Remove</button>
+                      </span>
+                    )}
+                  </div>
+                  {stmtLoading
+                    ? <div style={{padding:24,textAlign:'center',color:T.muted,fontSize:13}}>Loading statement…</div>
+                    : stmtData
+                      ? (stmtData.dataUrl?.startsWith('data:image')
+                          ? <img src={stmtData.dataUrl} alt="Bank statement" style={{width:'100%',borderRadius:8,border:`1px solid ${T.borderLight}`}}/>
+                          : stmtData.dataUrl?.startsWith('data:application/pdf')
+                            ? <iframe src={stmtData.dataUrl} style={{width:'100%',height:480,border:'none',borderRadius:8}} title="Bank statement"/>
+                            : <div style={{padding:24,textAlign:'center',color:T.muted,fontSize:13}}>Preview not available for this file type</div>)
+                      : (
+                        <DropZone accept="application/pdf,image/*" onDrop={f=>saveStatement(reconcileMonth,f)}>
+                          <div style={{background:T.bg,border:`2px dashed ${T.borderLight}`,borderRadius:14,padding:'24px',textAlign:'center'}}>
+                            <div style={{fontSize:13,color:T.muted,marginBottom:10}}>No bank statement uploaded for {mLabel}</div>
+                            <div style={{fontSize:11,color:T.dim,marginBottom:10}}>Drag &amp; drop a PDF or image here, or click to upload</div>
+                            <Btn variant="secondary" size="sm" onClick={()=>{setUploadMonth(reconcileMonth);bankFileRef.current?.click();}}>
+                              <Upload size={12}/>Upload Bank Statement
+                            </Btn>
+                          </div>
+                        </DropZone>
+                      )
+                  }
+                </div>
               </div>
             );
           })()}
@@ -15536,6 +15676,7 @@ export default function App(){
   const [workerClaims,setWorkerClaims]=useState([]);
   const [staffClaims,setStaffClaims]=useState([]);
   const [invoiceBatches,setInvoiceBatches]=useState([]);
+  const [reconciliation,setReconciliation]=useState({});
   const [notices,setNotices]=useState([]);
 
   const [activeUserId,setActiveUserId]=useState(null); // null = not logged in
@@ -15812,7 +15953,7 @@ export default function App(){
   const loadAllData = useCallback(async()=>{
     setSyncing(true);
     try{
-      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt,sr,oc]=await Promise.all([
+      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt,sr,oc,rec]=await Promise.all([
         loadS('projects',SEED_PROJ),
         loadS('invoices',SEED_INV),
         loadS('payments',SEED_PAY),
@@ -15830,6 +15971,7 @@ export default function App(){
         loadS('quotes',[]),
         loadS('siteReports',[]),
         loadS('orgChart',[]),
+        loadS('reconciliation',{}),
       ]);
       let finalProjects = Array.isArray(p) ? p : SEED_PROJ;
       // Rehydrate quotation files and VO files from separate per-project keys
@@ -15898,6 +16040,7 @@ export default function App(){
       setWorkerClaims(Array.isArray(wc)?wc:[]);
       setStaffClaims(Array.isArray(sc)?sc:[]);
       setInvoiceBatches(Array.isArray(ib)?ib:[]);
+      setReconciliation(rec&&typeof rec==='object'&&!Array.isArray(rec)?rec:{});
       setNotices(Array.isArray(no)?no:[]);
       // Trash kept for 12 months (previously 30 days)
       const twelveMonthsAgo=Date.now()-365*24*60*60*1000;
@@ -16420,7 +16563,7 @@ export default function App(){
           {tab==='warranty'&&<Warranty warranties={warranties} setWarranties={setWarranties} projects={projects} isAdmin={isAdmin} acctSettings={acctSettings}/>}
           {tab==='workers'&&<WorkerAdmin siteWorkers={siteWorkers} setSiteWorkers={setSiteWorkers} attendance={attendance} setAttendance={setAttendance} projects={projects} invoices={invoices} setInvoices={setInvoices} claims={workerClaims} setClaims={setWorkerClaims} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='checkin'&&<WorkerLoginScreen siteWorkers={siteWorkers} onLogin={(w)=>setWorkerSession(w)} onAdminLogin={()=>setTab('dashboard')} acctSettings={acctSettings}/>}
-          {tab==='accounts'&&isAdmin&&(<CompanyAccounts projects={projects} invoices={invoices} payments={payments} acctSettings={acctSettings} setAcctSettings={setAcctSettings}/>)}
+          {tab==='accounts'&&isAdmin&&(<CompanyAccounts projects={projects} invoices={invoices} payments={payments} acctSettings={acctSettings} setAcctSettings={setAcctSettings} staffClaims={staffClaims} workerClaims={workerClaims} invoiceBatches={invoiceBatches} reconciliation={reconciliation} setReconciliation={setReconciliation}/>)}
           {tab==='tools'&&<ToolsHub acctSettings={acctSettings} projects={userProjects} isAdmin={isAdmin} onShowToast={handleShowToast} onSoftDelete={handleSoftDelete}/>}
           {tab==='trash'&&isAdmin&&(<TrashBin trash={trash} onRestore={handleRestore} onPermanentDelete={handlePermanentDelete} isSuperAdmin={isSuperAdmin}/>)}
           {tab==='admin'&&isAdmin&&(<Admin users={users.filter(u=>u.id!=='__sa__')} setUsers={setUsers} projects={projects} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} actionLog={actionLog} onUndoAction={handleRestore} isSuperAdmin={isSuperAdmin}/>)}
