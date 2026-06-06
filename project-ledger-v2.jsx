@@ -7697,7 +7697,7 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
     const userRecord = {...form, password:finalPw};
     let upd;
     if(modal==='new'){
-      upd=[...users,{...userRecord,id:uid()}];
+      upd=[...users,{...userRecord,id:uid(),firstLogin:true}];
     } else {
       upd=users.map(u=>u.id===modal?{...userRecord,id:modal}:u);
     }
@@ -14130,6 +14130,190 @@ function WorkerLoginScreen({siteWorkers, onLogin, onAdminLogin, acctSettings}){
 }
 
 
+// ─── ONBOARDING WIZARD ────────────────────────────────────────────────────────
+const ONBOARDING_STEPS = {
+  admin: {
+    icon:'👑', color:'#ef4444',
+    steps:[
+      { title:'Welcome, Admin!',
+        body:"You have full access to every module in RenoLedger — projects, staff, invoices, reports, and system settings. This quick guide will get you up to speed.",
+        tips:[] },
+      { title:'Your Workspace',
+        body:'Use the left sidebar to navigate. Here\'s what each section does:',
+        tips:['📊 Dashboard — live overview of all projects and payments','🏗️ Projects — manage renovation projects end-to-end','📋 Quotations — create client quotes and variation orders','💰 Payments & Invoices — track money in and money out','👥 Admin → Team — create and manage staff accounts'] },
+      { title:'Start Here',
+        body:'First time setting up? Do these three things first:',
+        tips:['1.  Go to Admin → Settings and fill in your company profile (name, UEN, bank details)','2.  Go to Admin → Team and create accounts for your staff, assign their role','3.  Create your first project under Projects → + New Project'] },
+      { title:'Key Rules',
+        body:'As Admin you own the data. A few things to remember:',
+        tips:['🔑 Only Admins can create or delete staff accounts','🗑️ Deleted items go to Trash — recoverable within 30 days','📧 Use Forgot Password on the login screen to reset any staff password','🔒 Never share your admin password with anyone','📞 For system issues contact your developer'] },
+    ],
+  },
+  pm: {
+    icon:'📋', color:'#0891b2',
+    steps:[
+      { title:'Welcome, Project Manager!',
+        body:"You're set up to manage renovation projects from quotation all the way to handover. Your main home is the Projects module.",
+        tips:[] },
+      { title:'Your Workspace',
+        body:'Your key modules in the sidebar:',
+        tips:['🏗️ Projects — your main workspace for tracking status, costs, and timelines','📋 Quotations — issue quotes and variation orders to clients','📝 Site Reports — log site meetings and progress updates','💰 Payments — record and track client collections','🧾 Invoices — log and approve supplier invoices','📐 Tools → Takeoffs — create or view markup plans'] },
+      { title:'Your Workflow',
+        body:'A typical project from start to finish:',
+        tips:['1.  Create project → fill in client info, contract amount, and timeline','2.  Issue a Quotation → get client acknowledgement','3.  Assign a Designer and track their takeoff markups','4.  Log site reports at each milestone','5.  Submit supplier invoices as costs come in','6.  Record client payments → generate Cover Page or Handover document'] },
+      { title:'Key Rules',
+        body:'Things to keep in mind as PM:',
+        tips:['✅ Always assign yourself as PM when creating a project','💸 Submit expense claims linked to the correct project','📸 Attach photos to site reports — clients value documentation','🔔 Check Notifications (bell icon) for overdue payments and expiring documents','📞 Raise issues to Admin if you need access to additional modules'] },
+    ],
+  },
+  designer: {
+    icon:'✏️', color:'#7c3aed',
+    steps:[
+      { title:'Welcome, Designer!',
+        body:"You're set up to work on assigned renovation projects — creating measurement markups, takeoff plans, and submitting expenses.",
+        tips:[] },
+      { title:'Your Workspace',
+        body:'Your modules:',
+        tips:['🏗️ Projects — view your assigned projects','📐 Tools → Takeoffs — create electrical, lighting, plumbing, aircon, and other markups','🧾 Claims — submit expense claims for reimbursement','📝 Site Reports — log site visits for your projects'] },
+      { title:'Creating a Markup',
+        body:'Your main daily task — creating takeoff markups:',
+        tips:['1.  Open a project → go to Tools in the sidebar','2.  Pick the right tool (Electrical, Lighting, Plumbing, Aircon, etc.)','3.  Upload the floor plan PDF or image','4.  Click to place symbols; drag to reposition; right-click to cancel a line','5.  Drag the LEGEND box to position it, then Export PDF to share with your PM'] },
+      { title:'Key Rules',
+        body:'Dos and don\'ts:',
+        tips:['✅ Always save your markup before closing the tab','✅ Attach receipts when submitting expense claims','🔒 You can only see projects that Admin or PM has assigned to you','📞 Ask your PM if you need to be added to a project','🗂️ Name your markups clearly so the PM can find them easily'] },
+    ],
+  },
+  accounts: {
+    icon:'💰', color:'#3b82f6',
+    steps:[
+      { title:'Welcome, Accounts!',
+        body:'Your role covers the financial side of RenoLedger — managing supplier invoices, recording client payments, and running financial reports.',
+        tips:[] },
+      { title:'Your Workspace',
+        body:'Your modules:',
+        tips:['💰 Payments — record and verify client payments per project','🧾 Invoices — manage supplier invoices and batch payment runs','📊 Reports — P&L, collection rates, and financial summaries','📋 Dashboard — financial overview at a glance'] },
+      { title:'Your Workflow',
+        body:'Day-to-day tasks:',
+        tips:['1.  Invoices → upload and categorise supplier invoices, link to project','2.  Payments → record each client payment against the correct project','3.  Reports → run monthly summaries and export for management review'] },
+      { title:'Key Rules',
+        body:'Financial discipline keeps the numbers clean:',
+        tips:['✅ Always link invoices and payments to the correct project','✅ Attach invoice PDFs or photos as proof','🔔 Flag overdue client payments to the PM immediately','📊 Run and review end-of-month reports before the 5th of each month'] },
+    ],
+  },
+  expense_entry: {
+    icon:'🧾', color:'#059669',
+    steps:[
+      { title:'Welcome!',
+        body:"You're set up for expense entry — logging supplier invoices and submitting expense claims for reimbursement.",
+        tips:[] },
+      { title:'Your Workspace',
+        body:'You have access to two modules:',
+        tips:['🧾 Invoices — upload and log supplier invoices','📝 Claims — submit personal expense reimbursement requests'] },
+      { title:'Submitting an Invoice',
+        body:'How to log a supplier invoice:',
+        tips:['1.  Go to Invoices → + Add Invoice','2.  Enter supplier name, amount, date, and link to the correct project','3.  Upload a photo or PDF of the invoice','4.  Save — your PM or Admin will review and approve it'] },
+      { title:'Key Rules',
+        body:'Keep your submissions clean:',
+        tips:['✅ Always attach a photo or scan of the receipt — no receipt, no claim','✅ Link every entry to the correct project','⏳ Submit expenses within 7 days of the transaction date','📞 Contact your PM if you\'re unsure which project to use'] },
+    ],
+  },
+};
+
+function OnboardingWizard({user, onComplete, acctSettings}){
+  const [step, setStep] = useState(0);
+  const role = user?.role||'designer';
+  const data = ONBOARDING_STEPS[role]||ONBOARDING_STEPS.designer;
+  const steps = data.steps;
+  const total = steps.length;
+  const current = steps[step];
+  const isLast = step===total-1;
+  const accentColor = data.color;
+
+  const next = ()=>{ if(!isLast) setStep(s=>s+1); else onComplete(); };
+  const prev = ()=>{ if(step>0) setStep(s=>s-1); };
+
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:9000,background:'rgba(15,20,40,0.82)',backdropFilter:'blur(18px)',WebkitBackdropFilter:'blur(18px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+      <div style={{background:'#fff',borderRadius:24,width:'100%',maxWidth:500,boxShadow:'0 32px 80px rgba(0,0,0,0.35)',overflow:'hidden',position:'relative'}}>
+
+        {/* Header band */}
+        <div style={{background:`linear-gradient(135deg,${accentColor}18,${accentColor}08)`,borderBottom:`1px solid ${accentColor}22`,padding:'28px 28px 20px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:16}}>
+            <div style={{fontSize:36,lineHeight:1}}>{data.icon}</div>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:accentColor,marginBottom:2}}>
+                {ROLE_LABEL[role]||'Staff'} · Getting Started
+              </div>
+              <div style={{fontFamily:'"DM Serif Display",Georgia,serif',fontSize:22,color:'#0f1420',lineHeight:1.1}}>
+                {current.title}
+              </div>
+            </div>
+          </div>
+          {/* Progress dots */}
+          <div style={{display:'flex',gap:6}}>
+            {steps.map((_,i)=>(
+              <div key={i} style={{height:4,flex:1,borderRadius:4,transition:'background 0.3s',
+                background:i<=step?accentColor:'#e2e8f0'}}/>
+            ))}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{padding:'24px 28px 28px'}}>
+          <p style={{fontSize:14,color:'#475569',lineHeight:1.65,marginBottom:current.tips?.length?18:0}}>
+            {current.body}
+          </p>
+          {current.tips?.length>0&&(
+            <ul style={{listStyle:'none',display:'flex',flexDirection:'column',gap:10}}>
+              {current.tips.map((tip,i)=>(
+                <li key={i} style={{display:'flex',gap:10,alignItems:'flex-start',
+                  background:'#f8fafc',borderRadius:10,padding:'10px 14px',
+                  fontSize:13,color:'#334155',lineHeight:1.5}}>
+                  <span style={{flexShrink:0,marginTop:1}}>{tip.slice(0,2).trim()===tip.slice(0,2)?'':''}</span>
+                  <span>{tip}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{padding:'0 28px 24px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <div>
+            {step>0?(
+              <button onClick={prev}
+                style={{background:'none',border:`1px solid #e2e8f0`,borderRadius:10,padding:'9px 18px',
+                  cursor:'pointer',fontSize:13,fontWeight:600,color:'#64748b',fontFamily:'inherit'}}>
+                ← Back
+              </button>
+            ):(
+              <button onClick={onComplete}
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:'#94a3b8',fontFamily:'inherit',padding:'9px 0'}}>
+                Skip for now
+              </button>
+            )}
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <span style={{fontSize:12,color:'#94a3b8'}}>{step+1} / {total}</span>
+            <button onClick={next}
+              style={{background:accentColor,border:'none',borderRadius:10,padding:'9px 22px',
+                cursor:'pointer',fontSize:13,fontWeight:700,color:'#fff',fontFamily:'inherit',
+                boxShadow:`0 4px 12px ${accentColor}40`}}>
+              {isLast?'Get Started →':'Next →'}
+            </button>
+          </div>
+        </div>
+
+        {/* Company name watermark */}
+        <div style={{position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',
+          fontSize:10,color:'#cbd5e1',whiteSpace:'nowrap',pointerEvents:'none'}}>
+          {acctSettings?.companyName||'RenoLedger'} · Staff Guide
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // -- Main Login Screen --
 function LoginScreen({users, siteWorkers, onStaffLogin, onWorkerPortal, acctSettings, onUpdateUsers}){
   const [mode, setMode] = useState('choose'); // 'choose' | 'staff' | 'devpin' | 'forgot' | 'forgotDone'
@@ -14888,6 +15072,7 @@ export default function App(){
   const [notices,setNotices]=useState([]);
 
   const [activeUserId,setActiveUserId]=useState(null); // null = not logged in
+  const [showOnboarding,setShowOnboarding]=useState(false);
   const [workerSession,setWorkerSession]=useState(null);
   const [showWorkerLogin,setShowWorkerLogin]=useState(false);
   const [ready,setReady]=useState(false);
@@ -15032,6 +15217,23 @@ export default function App(){
     const poll = setInterval(readPresence, 20000);
     return ()=>clearInterval(poll);
   },[]);
+
+  // Show onboarding wizard on first login
+  useEffect(()=>{
+    if(activeUserId && !isSuperAdmin){
+      const u=users.find(u=>u.id===activeUserId);
+      if(u?.firstLogin) setShowOnboarding(true);
+    }
+  },[activeUserId]);
+
+  const completeOnboarding=useCallback(()=>{
+    setShowOnboarding(false);
+    setUsers(prev=>{
+      const upd=prev.map(u=>u.id===activeUserId?{...u,firstLogin:false}:u);
+      saveUsers(upd);
+      return upd;
+    });
+  },[activeUserId]);
 
   // Delete own presence on logout
   const logout = useCallback(()=>{
@@ -15379,6 +15581,11 @@ export default function App(){
         select option{background:${T.card};color:${T.text};}
       `}</style>
 
+      {/* ── Onboarding wizard ── */}
+      {showOnboarding&&activeUser&&(
+        <OnboardingWizard user={activeUser} onComplete={completeOnboarding} acctSettings={acctSettings}/>
+      )}
+
       {/* ── Offline banner ── */}
       {!isOnline&&(
         <div style={{position:'fixed',top:0,left:0,right:0,zIndex:999,background:'#9A6A00',
@@ -15502,10 +15709,20 @@ export default function App(){
                 <div style={{fontSize:11,color:T.muted}}>{ROLE_LABEL[activeUser?.role]||'Staff'}</div>
               </div>
             </div>
-            <button onClick={logout} style={{background:'none',border:'none',cursor:'pointer',
-              fontSize:11,color:T.dim,fontFamily:'inherit',padding:'2px 0',whiteSpace:'nowrap'}}>
-              Sign out
-            </button>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginTop:6}}>
+              <button onClick={logout} style={{background:'none',border:'none',cursor:'pointer',
+                fontSize:11,color:T.dim,fontFamily:'inherit',padding:'2px 0',whiteSpace:'nowrap'}}>
+                Sign out
+              </button>
+              {!isSuperAdmin&&(
+                <button onClick={()=>setShowOnboarding(true)}
+                  style={{background:'none',border:`1px solid ${T.borderLight}`,borderRadius:6,
+                    cursor:'pointer',fontSize:10,fontWeight:600,color:T.muted,fontFamily:'inherit',
+                    padding:'2px 8px',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:4}}>
+                  ❓ Guide
+                </button>
+              )}
+            </div>
             {/* Dark mode toggle */}
             <button onClick={()=>setDarkMode(d=>!d)}
               style={{background:'none',border:'none',cursor:'pointer',fontSize:16,padding:'2px 0',lineHeight:1}}
