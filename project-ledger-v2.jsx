@@ -15067,6 +15067,43 @@ function SystemPanel({projects,invoices,payments,siteWorkers,attendance,users,wa
 // ─── ORG CHART ────────────────────────────────────────────────────────────────
 const ORG_NODE_W=180, ORG_NODE_H=84, ORG_H_GAP=30, ORG_V_GAP=68;
 const ORG_COLORS=['#0891b2','#7c3aed','#ef4444','#16a34a','#d97706','#db2777','#0d9488','#4f46e5','#64748b'];
+const ORG_ROLE_DEPT={admin:'Management',pm:'Operations',designer:'Design',accounts:'Finance',expense_entry:'Finance'};
+// Order in which to place new users so parents exist before children
+const ORG_SYNC_ORDER=['admin','accounts','pm','designer','expense_entry'];
+
+// Sync system users into org chart nodes.
+// Existing nodes keep parentId + title + department + color (manual edits preserved).
+// New users are added with role-based default parent. Photo & name always stay in sync.
+function orgSyncFromUsers(currentNodes, usersArr){
+  const byUserId={};
+  currentNodes.forEach(n=>{ if(n.userId) byUserId[n.userId]=n; });
+  let result=[...currentNodes];
+  const sorted=[...usersArr].sort((a,b)=>ORG_SYNC_ORDER.indexOf(a.role)-ORG_SYNC_ORDER.indexOf(b.role));
+  sorted.forEach(user=>{
+    if(byUserId[user.id]){
+      // Already linked — sync name and photo only
+      const idx=result.findIndex(n=>n.userId===user.id);
+      if(idx>=0) result[idx]={...result[idx],name:user.name,photo:user.photo||null};
+    } else {
+      // Auto-place based on role hierarchy
+      const firstOfRole=r=>result.find(n=>n.userId&&usersArr.find(u=>u.id===n.userId)?.role===r);
+      let parentId=null;
+      if(user.role==='pm') parentId=firstOfRole('admin')?.id??null;
+      else if(user.role==='accounts') parentId=firstOfRole('admin')?.id??null;
+      else if(user.role==='designer') parentId=(firstOfRole('pm')??firstOfRole('admin'))?.id??null;
+      else if(user.role==='expense_entry') parentId=(firstOfRole('accounts')??firstOfRole('admin'))?.id??null;
+      result.push({
+        id:uid(),userId:user.id,name:user.name,
+        title:ROLE_LABEL[user.role]||user.role,
+        department:ORG_ROLE_DEPT[user.role]||'',
+        photo:user.photo||null,
+        color:ROLE_CLR[user.role]||ORG_COLORS[result.length%ORG_COLORS.length],
+        parentId,
+      });
+    }
+  });
+  return result;
+}
 
 function computeOrgLayout(nodes){
   if(!nodes.length) return {};
@@ -15103,7 +15140,7 @@ function computeOrgLayout(nodes){
   return pos;
 }
 
-function OrgNodeEditModal({node,onSave,onClose,nodes}){
+function OrgNodeEditModal({node,onSave,onClose,nodes,users=[]}){
   const isNew=!nodes.find(n=>n.id===node.id);
   const [form,setForm]=useState({...node});
   const [photoLoading,setPhotoLoading]=useState(false);
@@ -15120,9 +15157,18 @@ function OrgNodeEditModal({node,onSave,onClose,nodes}){
   };
   const parentOpts=nodes.filter(n=>!getDescIds(node.id).has(n.id));
   const initials=(form.name||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  const linkedUser=form.userId?users.find(u=>u.id===form.userId):null;
   return(
     <Modal title={isNew?'Add Person':'Edit Person'} onClose={onClose}>
       <div style={{display:'flex',flexDirection:'column',gap:14}}>
+        {linkedUser&&(
+          <div style={{background:T.accentLight,border:`1px solid ${T.borderLight}`,borderRadius:10,padding:'8px 12px',
+            display:'flex',alignItems:'center',gap:8,fontSize:12,color:T.muted}}>
+            <span style={{fontSize:14}}>🔗</span>
+            <span>Linked to system user <strong style={{color:T.text}}>{linkedUser.name}</strong>
+            {' '}— name &amp; photo auto-sync from Admin → Team. Title and position are editable.</span>
+          </div>
+        )}
         <div style={{display:'flex',alignItems:'center',gap:14}}>
           <div style={{width:58,height:58,borderRadius:'50%',background:(form.color||'#64748b')+'22',
             border:`2px solid ${form.color||'#64748b'}`,display:'flex',alignItems:'center',
@@ -15169,15 +15215,35 @@ function OrgNodeEditModal({node,onSave,onClose,nodes}){
   );
 }
 
-function OrgChart({orgNodes,setOrgNodes,acctSettings,isAdmin}){
+function OrgChart({orgNodes,setOrgNodes,acctSettings,isAdmin,users=[]}){
   const [editNode,setEditNode]=useState(null);
   const [selected,setSelected]=useState(null);
   const [pan,setPan]=useState({x:500,y:80});
   const [zoom,setZoom]=useState(1);
   const [panDrag,setPanDrag]=useState(null);
+  const [syncMsg,setSyncMsg]=useState('');
   const svgRef=useRef(null);
   const layout=useMemo(()=>computeOrgLayout(orgNodes),[orgNodes]);
   const saveNodes=n=>{ setOrgNodes(n); saveS('orgChart',n); };
+
+  // Auto-sync from users on first load (empty chart)
+  const activeUsers=useMemo(()=>users.filter(u=>u.active!==false&&u.role!=='superadmin'),[users]);
+  useEffect(()=>{
+    if(orgNodes.length===0&&activeUsers.length>0){
+      const synced=orgSyncFromUsers([],activeUsers);
+      saveNodes(synced);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+  const handleSync=()=>{
+    const synced=orgSyncFromUsers(orgNodes,activeUsers);
+    const added=synced.length-orgNodes.length;
+    saveNodes(synced);
+    setSyncMsg(added>0?`${added} new user${added!==1?'s':''} added`:'All users already in chart');
+    setTimeout(()=>setSyncMsg(''),3000);
+  };
+
   const addNode=(parentId=null)=>{
     setEditNode({id:uid(),name:'',title:'',department:'',photo:null,parentId,color:ORG_COLORS[orgNodes.length%ORG_COLORS.length]});
     setSelected(null);
@@ -15245,7 +15311,8 @@ ${linesSvg}${nodesSvg}</svg></body></html>`;
   return(
     <div>
       <div style={{display:'flex',gap:10,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
-        {isAdmin&&<Btn onClick={()=>addNode(null)}><Plus size={13}/>Add Top-Level Node</Btn>}
+        {isAdmin&&<Btn onClick={handleSync}><RefreshCw size={13}/>Sync from Users</Btn>}
+        {isAdmin&&<Btn variant="secondary" onClick={()=>addNode(null)}><Plus size={13}/>Add Node</Btn>}
         <button onClick={handlePrint} style={{display:'flex',alignItems:'center',gap:6,padding:'8px 14px',
           borderRadius:10,border:`1px solid ${T.borderLight}`,background:T.bg,cursor:'pointer',
           fontSize:13,color:T.muted,fontFamily:'inherit',fontWeight:500}}>
@@ -15260,6 +15327,7 @@ ${linesSvg}${nodesSvg}</svg></body></html>`;
             cursor:'pointer',fontSize:13,color:T.muted,fontFamily:'inherit',fontWeight:500}}>
           ⟳ Reset View
         </button>
+        {syncMsg&&<span style={{fontSize:12,color:T.success,fontWeight:600}}>✓ {syncMsg}</span>}
         <div style={{flex:1}}/>
         <div style={{fontSize:11,color:T.dim,textAlign:'right',lineHeight:1.5}}>
           {isAdmin&&<>Click to select · Dbl-click to edit · <br/></>}
@@ -15347,7 +15415,9 @@ ${linesSvg}${nodesSvg}</svg></body></html>`;
             alignItems:'center',justifyContent:'center',gap:12,pointerEvents:'none'}}>
             <div style={{fontSize:48,opacity:0.35}}>🏢</div>
             <div style={{fontSize:16,fontWeight:700,color:T.text,opacity:0.6}}>No organisation chart yet</div>
-            <div style={{fontSize:13,color:T.dim,opacity:0.8}}>Click "Add Top-Level Node" to get started</div>
+            <div style={{fontSize:13,color:T.dim,opacity:0.8}}>
+              {activeUsers.length>0?'Auto-populating from your team…':'Click "Add Node" to add your first person'}
+            </div>
           </div>
         )}
         <div style={{position:'absolute',bottom:14,right:14,display:'flex',flexDirection:'column',gap:4,alignItems:'center'}}>
@@ -15365,7 +15435,7 @@ ${linesSvg}${nodesSvg}</svg></body></html>`;
           </div>
         )}
       </div>
-      {editNode&&<OrgNodeEditModal node={editNode} onSave={onSaveNode} onClose={()=>setEditNode(null)} nodes={orgNodes}/>}
+      {editNode&&<OrgNodeEditModal node={editNode} onSave={onSaveNode} onClose={()=>setEditNode(null)} nodes={orgNodes} users={users}/>}
     </div>
   );
 }
@@ -16355,7 +16425,7 @@ export default function App(){
           {tab==='trash'&&isAdmin&&(<TrashBin trash={trash} onRestore={handleRestore} onPermanentDelete={handlePermanentDelete} isSuperAdmin={isSuperAdmin}/>)}
           {tab==='admin'&&isAdmin&&(<Admin users={users.filter(u=>u.id!=='__sa__')} setUsers={setUsers} projects={projects} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} actionLog={actionLog} onUndoAction={handleRestore} isSuperAdmin={isSuperAdmin}/>)}
           {tab==='system'&&isSuperAdmin&&(<SystemPanel projects={projects} invoices={invoices} payments={payments} siteWorkers={siteWorkers} attendance={attendance} users={users} warranties={warranties} trash={trash} acctSettings={acctSettings} setAcctSettings={setAcctSettings} actionLog={actionLog} setActionLog={setActionLog} logAction={logAction}/>)}
-          {tab==='orgchart'&&<OrgChart orgNodes={orgNodes} setOrgNodes={setOrgNodes} acctSettings={acctSettings} isAdmin={isAdmin}/>}
+          {tab==='orgchart'&&<OrgChart orgNodes={orgNodes} setOrgNodes={setOrgNodes} acctSettings={acctSettings} isAdmin={isAdmin} users={users}/>}
           {tab==='admin'&&!isAdmin&&(
             <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:60,gap:12,color:T.muted,textAlign:'center'}}>
               <Lock size={20} style={{color:T.dim}}/>
