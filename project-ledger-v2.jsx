@@ -9,7 +9,7 @@ import {
   Building, FileSpreadsheet, Calendar, Download, Settings,
   LogIn, LogOut, Star, Terminal, Database, RefreshCw, ClipboardList,
   Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine, Link2,
-  Zap, Plug, Wifi, Wind, Palette, LayoutGrid
+  Zap, Plug, Wifi, Wind, Palette, LayoutGrid, BookOpen
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -14714,6 +14714,43 @@ function SystemPanel({projects,invoices,payments,siteWorkers,attendance,users,wa
   const [coSaved,setCoSaved]=useState(false);
   const [confirm,setConfirm]=useState(null); // {action, label, desc, fn}
 
+  // Onboarding editor state
+  const OB_ROLES=[
+    {id:'admin',        label:'Admin'},
+    {id:'pm',           label:'Project Manager'},
+    {id:'designer',     label:'Designer'},
+    {id:'accounts',     label:'Accounts'},
+    {id:'expense_entry',label:'Expense Entry'},
+  ];
+  const [obRole,setObRole]=useState('admin');
+  const [obContent,setObContent]=useState(()=>acctSettings?.onboardingContent||{});
+  const [obSaved,setObSaved]=useState(false);
+
+  const getObStep=(role,i)=>{
+    const base=ONBOARDING_STEPS[role]?.steps[i]||{};
+    const ov=(obContent[role]||{})[i]||{};
+    return {
+      title:base.title||`Step ${i+1}`,
+      body:ov.body!==undefined?ov.body:base.body||'',
+      tips:(ov.tips!==undefined?ov.tips:(base.tips||[])).join('\n'),
+    };
+  };
+
+  const setObField=(role,i,field,val)=>{
+    setObContent(prev=>{
+      const roleData={...(prev[role]||{})};
+      const stepData={...(roleData[i]||{})};
+      stepData[field]=field==='tips'?val.split('\n').filter(l=>l.trim()):val;
+      roleData[i]=stepData;
+      return {...prev,[role]:roleData};
+    });
+  };
+
+  const saveObContent=()=>{
+    setAcctSettings(prev=>{const u={...prev,onboardingContent:obContent};saveS('acctSettings',u);return u;});
+    setObSaved(true);setTimeout(()=>setObSaved(false),2500);
+  };
+
   const sf=k=>v=>setAcctSettings(prev=>{const u={...prev,[k]:v};saveS('acctSettings',u);return u;});
   const handleCoSave=()=>{saveS('acctSettings',acctSettings);setCoSaved(true);setTimeout(()=>setCoSaved(false),2000);};
 
@@ -14877,6 +14914,59 @@ function SystemPanel({projects,invoices,payments,siteWorkers,attendance,users,wa
         {acctSettings.emailjsPublicKey&&acctSettings.emailjsServiceId&&acctSettings.emailjsTemplateId&&(
           <div style={{marginTop:4,fontSize:12,color:T.success,fontWeight:600}}>✓ EmailJS configured — password reset emails enabled</div>
         )}
+      </div>
+
+      {/* Onboarding Guide Content Editor */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:22,boxShadow:T.shadow}}>
+        <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:4,display:'flex',alignItems:'center',gap:8}}>
+          <BookOpen size={15}/>Onboarding Guide Content
+        </div>
+        <div style={{fontSize:12,color:T.muted,marginBottom:16,lineHeight:1.6}}>
+          Customise the tips shown in the onboarding wizard for each role. Leave a field blank to use the default text.
+        </div>
+        {/* Role tabs */}
+        <div style={{display:'flex',gap:6,marginBottom:18,flexWrap:'wrap'}}>
+          {OB_ROLES.map(r=>(
+            <button key={r.id} onClick={()=>setObRole(r.id)}
+              style={{padding:'6px 14px',borderRadius:8,border:`1px solid ${obRole===r.id?T.accent:T.borderLight}`,
+                cursor:'pointer',fontSize:12,fontWeight:obRole===r.id?700:400,
+                background:obRole===r.id?T.accentLight:'transparent',
+                color:obRole===r.id?T.accent:T.muted,fontFamily:'inherit',transition:'all 0.15s'}}>
+              {r.label}
+            </button>
+          ))}
+        </div>
+        {/* Step cards */}
+        <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          {[0,1,2,3].map(i=>{
+            const s=getObStep(obRole,i);
+            return (
+              <div key={i} style={{background:T.bg,borderRadius:12,padding:'14px 16px',border:`1px solid ${T.borderLight}`}}>
+                <div style={{fontSize:12,fontWeight:700,color:T.text,marginBottom:10}}>
+                  Step {i+1} — {s.title}
+                </div>
+                <div style={{marginBottom:8}}>
+                  <label style={{fontSize:11,fontWeight:600,color:T.muted,display:'block',marginBottom:4}}>Description</label>
+                  <textarea value={s.body} rows={3}
+                    onChange={e=>setObField(obRole,i,'body',e.target.value)}
+                    placeholder="Leave blank to use default text…"
+                    style={{...iStyle,resize:'vertical',fontFamily:'inherit',fontSize:13,lineHeight:1.5}}/>
+                </div>
+                <div>
+                  <label style={{fontSize:11,fontWeight:600,color:T.muted,display:'block',marginBottom:4}}>Tips (one per line)</label>
+                  <textarea value={s.tips} rows={4}
+                    onChange={e=>setObField(obRole,i,'tips',e.target.value)}
+                    placeholder={'✅ Tip one\n✅ Tip two\n…'}
+                    style={{...iStyle,resize:'vertical',fontFamily:'inherit',fontSize:13,lineHeight:1.5}}/>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{display:'flex',justifyContent:'flex-end',marginTop:14,alignItems:'center',gap:12}}>
+          {obSaved&&<span style={{fontSize:13,color:T.success,fontWeight:600}}>✓ Saved</span>}
+          <Btn onClick={saveObContent}><CheckCircle size={13}/>Save Guide Content</Btn>
+        </div>
       </div>
 
       {/* Data overview */}
