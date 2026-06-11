@@ -2380,7 +2380,7 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
   );
 }
 
-function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId,notices=[],setNotices,isAdmin,attendance=[]}){
+function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId,notices=[],setNotices,isAdmin,attendance=[],isSuperAdmin=false,systemChangelog=[],setSystemChangelog=()=>{}}){
   const totRev = useMemo(()=>projects.reduce((s,p)=>s+p.contractAmount+(p.variationOrders||0),0),[projects]);
   const totExp = useMemo(()=>invoices.reduce((s,i)=>s+i.total,0),[invoices]);
   const totRecv = useMemo(()=>payments.filter(p=>p.status==='Received').reduce((s,p)=>s+p.amount,0),[payments]);
@@ -2428,6 +2428,32 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
   const deleteNotice=(id)=>setNotices(notices.filter(n=>n.id!==id));
   const togglePin=(id)=>setNotices(notices.map(n=>n.id===id?{...n,pinned:!n.pinned}:n));
 
+  // ── System Changelog ──
+  const CHANGE_TYPES=[
+    {id:'feature',label:'New Feature',color:'#7c3aed',bg:'rgba(124,58,237,0.1)'},
+    {id:'improvement',label:'Improvement',color:'#0891b2',bg:'rgba(8,145,178,0.1)'},
+    {id:'fix',label:'Bug Fix',color:'#059669',bg:'rgba(5,150,105,0.1)'},
+    {id:'info',label:'Info',color:'#6b7280',bg:'rgba(107,114,128,0.1)'},
+  ];
+  const [changeForm,setChangeForm]=useState(null);
+  const [changeTitle,setChangeTitle]=useState('');
+  const [changeBody,setChangeBody]=useState('');
+  const [changeType,setChangeType]=useState('feature');
+  const openNewChange=()=>{setChangeTitle('');setChangeBody('');setChangeType('feature');setChangeForm({});};
+  const openEditChange=(c)=>{setChangeTitle(c.title);setChangeBody(c.body);setChangeType(c.type||'feature');setChangeForm(c);};
+  const saveChange=()=>{
+    if(!changeTitle.trim()) return;
+    let updated;
+    if(changeForm.id){
+      updated=systemChangelog.map(c=>c.id===changeForm.id?{...c,title:changeTitle.trim(),body:changeBody.trim(),type:changeType,editedAt:new Date().toISOString()}:c);
+    } else {
+      updated=[{id:uid(),title:changeTitle.trim(),body:changeBody.trim(),type:changeType,postedAt:new Date().toISOString()},...systemChangelog];
+    }
+    setSystemChangelog(updated);
+    setChangeForm(null);
+  };
+  const deleteChange=(id)=>setSystemChangelog(systemChangelog.filter(c=>c.id!==id));
+
   return (
     <div style={{display:'flex',flexDirection:'column',gap:20}}>
       {/* Who's Online */}
@@ -2473,94 +2499,171 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
         </div>
       )}
 
-      {/* ── Notice Board ── */}
-      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`}}>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <div style={{width:32,height:32,borderRadius:10,background:T.tanLight,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-              <Bell size={15} style={{color:T.tan}}/>
+      {/* ── Notice Board + System Updates (side-by-side) ── */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,alignItems:'start'}}>
+
+        {/* Notice Board */}
+        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`}}>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <div style={{width:32,height:32,borderRadius:10,background:T.tanLight,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <Bell size={15} style={{color:T.tan}}/>
+              </div>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:T.text}}>Notice Board</div>
+                <div style={{fontSize:11,color:T.muted}}>{notices.length===0?'No notices posted':`${notices.length} notice${notices.length!==1?'s':''}`}</div>
+              </div>
             </div>
-            <div>
-              <div style={{fontSize:14,fontWeight:700,color:T.text}}>Notice Board</div>
-              <div style={{fontSize:11,color:T.muted}}>{notices.length===0?'No notices posted':`${notices.length} notice${notices.length!==1?'s':''}`}</div>
-            </div>
+            {isAdmin&&(
+              <button onClick={openNew} style={{display:'flex',alignItems:'center',gap:6,background:T.text,color:T.card,border:'none',borderRadius:10,padding:'7px 14px',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                <Plus size={13}/>Post Notice
+              </button>
+            )}
           </div>
-          {isAdmin&&(
-            <button onClick={openNew} style={{display:'flex',alignItems:'center',gap:6,background:T.text,color:T.card,border:'none',borderRadius:10,padding:'7px 14px',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
-              <Plus size={13}/>Post Notice
-            </button>
+          {noticeForm!==null&&(
+            <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.borderLight}`,background:T.bg}}>
+              <textarea value={noticeText} onChange={e=>setNoticeText(e.target.value)} placeholder="Write your notice here…" rows={3}
+                style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 13px',fontSize:13,color:T.text,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.55,marginBottom:12,boxSizing:'border-box'}}/>
+              <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                <select value={noticePriority} onChange={e=>setNoticePriority(e.target.value)}
+                  style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 10px',fontSize:12,color:T.text,fontFamily:'inherit',cursor:'pointer'}}>
+                  <option value="normal">Normal</option>
+                  <option value="high">High Priority</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+                <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:T.muted,cursor:'pointer'}}>
+                  <input type="checkbox" checked={noticePinned} onChange={e=>setNoticePinned(e.target.checked)} style={{accentColor:T.tan}}/>Pin to top
+                </label>
+                <div style={{marginLeft:'auto',display:'flex',gap:8}}>
+                  <button onClick={()=>setNoticeForm(null)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 14px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+                  <button onClick={saveNotice} disabled={!noticeText.trim()} style={{background:T.text,color:T.card,border:'none',borderRadius:8,padding:'6px 16px',fontSize:12,fontWeight:600,cursor:noticeText.trim()?'pointer':'not-allowed',opacity:noticeText.trim()?1:0.45,fontFamily:'inherit'}}>
+                    {noticeForm.id?'Save Changes':'Post'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {sortedNotices.length===0?(
+            <div style={{padding:'28px 20px',textAlign:'center',color:T.dim,fontSize:13}}>No notices yet{isAdmin?' — post one above':''}</div>
+          ):(
+            <div style={{display:'flex',flexDirection:'column',maxHeight:460,overflowY:'auto'}}>
+              {sortedNotices.map((n,idx)=>(
+                <div key={n.id} style={{display:'flex',gap:12,padding:'13px 20px',borderBottom:idx<sortedNotices.length-1?`1px solid ${T.borderLight}`:'none',alignItems:'flex-start'}}>
+                  <div style={{width:4,flexShrink:0,borderRadius:4,alignSelf:'stretch',background:PRIO_CLR[n.priority||'normal'],minHeight:36}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
+                      <Badge color={PRIO_CLR[n.priority||'normal']} sm>{PRIO_LABEL[n.priority||'normal']}</Badge>
+                      {n.pinned&&<Badge color={T.tan} sm>Pinned</Badge>}
+                      <span style={{fontSize:11,color:T.dim,marginLeft:'auto'}}>{n.editedAt?`Edited ${fmtDate(n.editedAt)}`:`${fmtDate(n.postedAt)}`}</span>
+                    </div>
+                    <div style={{fontSize:13,color:T.text,lineHeight:1.6,whiteSpace:'pre-wrap'}}>{n.text}</div>
+                  </div>
+                  {isAdmin&&(
+                    <div style={{display:'flex',gap:4,flexShrink:0}}>
+                      <button title={n.pinned?'Unpin':'Pin'} onClick={()=>togglePin(n.id)}
+                        style={{background:'transparent',border:'none',cursor:'pointer',color:n.pinned?T.tan:T.dim,padding:4,borderRadius:6,display:'flex'}}>
+                        <Star size={13} fill={n.pinned?T.tan:'none'}/>
+                      </button>
+                      <button title="Edit" onClick={()=>openEdit(n)}
+                        style={{background:'transparent',border:'none',cursor:'pointer',color:T.muted,padding:4,borderRadius:6,display:'flex'}}>
+                        <Edit3 size={13}/>
+                      </button>
+                      <button title="Delete" onClick={()=>deleteNotice(n.id)}
+                        style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex'}}>
+                        <Trash2 size={13}/>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
-        {/* Post / edit form */}
-        {noticeForm!==null&&(
-          <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.borderLight}`,background:T.bg}}>
-            <textarea
-              value={noticeText}
-              onChange={e=>setNoticeText(e.target.value)}
-              placeholder="Write your notice here…"
-              rows={3}
-              style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 13px',fontSize:13,color:T.text,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.55,marginBottom:12}}
-            />
-            <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-              <select value={noticePriority} onChange={e=>setNoticePriority(e.target.value)}
-                style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 10px',fontSize:12,color:T.text,fontFamily:'inherit',cursor:'pointer'}}>
-                <option value="normal">Normal</option>
-                <option value="high">High Priority</option>
-                <option value="urgent">Urgent</option>
-              </select>
-              <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:T.muted,cursor:'pointer'}}>
-                <input type="checkbox" checked={noticePinned} onChange={e=>setNoticePinned(e.target.checked)} style={{accentColor:T.tan}}/>
-                Pin to top
-              </label>
-              <div style={{marginLeft:'auto',display:'flex',gap:8}}>
-                <button onClick={()=>setNoticeForm(null)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 14px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
-                <button onClick={saveNotice} disabled={!noticeText.trim()} style={{background:T.text,color:T.card,border:'none',borderRadius:8,padding:'6px 16px',fontSize:12,fontWeight:600,cursor:noticeText.trim()?'pointer':'not-allowed',opacity:noticeText.trim()?1:0.45,fontFamily:'inherit'}}>
-                  {noticeForm.id?'Save Changes':'Post'}
+        {/* System Updates / Changelog */}
+        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`}}>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <div style={{width:32,height:32,borderRadius:10,background:'rgba(124,58,237,0.1)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <Zap size={15} style={{color:'#7c3aed'}}/>
+              </div>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:T.text}}>System Updates</div>
+                <div style={{fontSize:11,color:T.muted}}>RenoLedger recent changes</div>
+              </div>
+            </div>
+            {isSuperAdmin&&(
+              <button onClick={openNewChange} style={{display:'flex',alignItems:'center',gap:6,background:'#7c3aed',color:'#fff',border:'none',borderRadius:10,padding:'7px 14px',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                <Plus size={13}/>Add Update
+              </button>
+            )}
+          </div>
+
+          {/* Post / edit form (superadmin only) */}
+          {changeForm!==null&&isSuperAdmin&&(
+            <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.borderLight}`,background:T.bg}}>
+              <div style={{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap'}}>
+                {CHANGE_TYPES.map(ct=>(
+                  <button key={ct.id} onClick={()=>setChangeType(ct.id)}
+                    style={{padding:'5px 12px',borderRadius:8,fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit',border:`2px solid ${changeType===ct.id?ct.color:T.borderLight}`,
+                      background:changeType===ct.id?ct.bg:'transparent',color:changeType===ct.id?ct.color:T.muted}}>
+                    {ct.label}
+                  </button>
+                ))}
+              </div>
+              <input value={changeTitle} onChange={e=>setChangeTitle(e.target.value)} placeholder="Update title (e.g. Bank Reconciliation Rebuild)"
+                style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:'9px 13px',fontSize:13,color:T.text,outline:'none',fontFamily:'inherit',marginBottom:8,boxSizing:'border-box'}}/>
+              <textarea value={changeBody} onChange={e=>setChangeBody(e.target.value)} placeholder="Describe what changed and how it affects the team…" rows={3}
+                style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 13px',fontSize:13,color:T.text,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.55,marginBottom:12,boxSizing:'border-box'}}/>
+              <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+                <button onClick={()=>setChangeForm(null)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 14px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+                <button onClick={saveChange} disabled={!changeTitle.trim()} style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:8,padding:'6px 16px',fontSize:12,fontWeight:600,cursor:changeTitle.trim()?'pointer':'not-allowed',opacity:changeTitle.trim()?1:0.45,fontFamily:'inherit'}}>
+                  {changeForm.id?'Save Changes':'Post Update'}
                 </button>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Notices list */}
-        {sortedNotices.length===0?(
-          <div style={{padding:'28px 20px',textAlign:'center',color:T.dim,fontSize:13}}>No notices yet{isAdmin?' — post one above':''}</div>
-        ):(
-          <div style={{display:'flex',flexDirection:'column'}}>
-            {sortedNotices.map((n,idx)=>(
-              <div key={n.id} style={{display:'flex',gap:12,padding:'13px 20px',borderBottom:idx<sortedNotices.length-1?`1px solid ${T.borderLight}`:'none',alignItems:'flex-start'}}>
-                <div style={{width:4,flexShrink:0,borderRadius:4,alignSelf:'stretch',background:PRIO_CLR[n.priority||'normal'],minHeight:36}}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
-                    <Badge color={PRIO_CLR[n.priority||'normal']} sm>{PRIO_LABEL[n.priority||'normal']}</Badge>
-                    {n.pinned&&<Badge color={T.tan} sm>Pinned</Badge>}
-                    <span style={{fontSize:11,color:T.dim,marginLeft:'auto'}}>
-                      {n.editedAt?`Edited ${fmtDate(n.editedAt)}`:`${fmtDate(n.postedAt)}`}
-                    </span>
+          {/* Changelog list */}
+          {systemChangelog.length===0?(
+            <div style={{padding:'28px 20px',textAlign:'center',color:T.dim,fontSize:13}}>
+              {isSuperAdmin?'No updates posted yet — click Add Update to post the first one':'No system updates posted yet'}
+            </div>
+          ):(
+            <div style={{display:'flex',flexDirection:'column',maxHeight:460,overflowY:'auto'}}>
+              {systemChangelog.map((c,idx)=>{
+                const ct=CHANGE_TYPES.find(t=>t.id===c.type)||CHANGE_TYPES[0];
+                return (
+                  <div key={c.id} style={{display:'flex',gap:12,padding:'13px 20px',borderBottom:idx<systemChangelog.length-1?`1px solid ${T.borderLight}`:'none',alignItems:'flex-start'}}>
+                    <div style={{width:4,flexShrink:0,borderRadius:4,alignSelf:'stretch',background:ct.color,minHeight:36}}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5,flexWrap:'wrap'}}>
+                        <span style={{fontSize:10,fontWeight:700,letterSpacing:'0.06em',textTransform:'uppercase',
+                          color:ct.color,background:ct.bg,padding:'2px 7px',borderRadius:5}}>{ct.label}</span>
+                        <span style={{fontSize:11,color:T.dim,marginLeft:'auto'}}>{c.editedAt?`Edited ${fmtDate(c.editedAt)}`:`${fmtDate(c.postedAt)}`}</span>
+                      </div>
+                      <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:c.body?4:0}}>{c.title}</div>
+                      {c.body&&<div style={{fontSize:12,color:T.muted,lineHeight:1.6,whiteSpace:'pre-wrap'}}>{c.body}</div>}
+                    </div>
+                    {isSuperAdmin&&(
+                      <div style={{display:'flex',gap:4,flexShrink:0}}>
+                        <button title="Edit" onClick={()=>openEditChange(c)}
+                          style={{background:'transparent',border:'none',cursor:'pointer',color:T.muted,padding:4,borderRadius:6,display:'flex'}}>
+                          <Edit3 size={13}/>
+                        </button>
+                        <button title="Delete" onClick={()=>deleteChange(c.id)}
+                          style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex'}}>
+                          <Trash2 size={13}/>
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <div style={{fontSize:13,color:T.text,lineHeight:1.6,whiteSpace:'pre-wrap'}}>{n.text}</div>
-                </div>
-                {isAdmin&&(
-                  <div style={{display:'flex',gap:4,flexShrink:0}}>
-                    <button title={n.pinned?'Unpin':'Pin'} onClick={()=>togglePin(n.id)}
-                      style={{background:'transparent',border:'none',cursor:'pointer',color:n.pinned?T.tan:T.dim,padding:4,borderRadius:6,display:'flex'}}>
-                      <Star size={13} fill={n.pinned?T.tan:'none'}/>
-                    </button>
-                    <button title="Edit" onClick={()=>openEdit(n)}
-                      style={{background:'transparent',border:'none',cursor:'pointer',color:T.muted,padding:4,borderRadius:6,display:'flex'}}>
-                      <Edit3 size={13}/>
-                    </button>
-                    <button title="Delete" onClick={()=>deleteNotice(n.id)}
-                      style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex'}}>
-                      <Trash2 size={13}/>
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
+        </div>
+
       </div>
 
       {/* Worker document expiry alerts */}
@@ -15708,6 +15811,7 @@ export default function App(){
   const [invoiceBatches,setInvoiceBatches]=useState([]);
   const [reconciliation,setReconciliation]=useState({});
   const [notices,setNotices]=useState([]);
+  const [systemChangelog,setSystemChangelog]=useState([]);
 
   const [activeUserId,setActiveUserId]=useState(null); // null = not logged in
   const [showOnboarding,setShowOnboarding]=useState(false);
@@ -15983,7 +16087,7 @@ export default function App(){
   const loadAllData = useCallback(async()=>{
     setSyncing(true);
     try{
-      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt,sr,oc,rec]=await Promise.all([
+      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt,sr,oc,rec,sc2]=await Promise.all([
         loadS('projects',SEED_PROJ),
         loadS('invoices',SEED_INV),
         loadS('payments',SEED_PAY),
@@ -16002,6 +16106,7 @@ export default function App(){
         loadS('siteReports',[]),
         loadS('orgChart',[]),
         loadS('reconciliation',{}),
+        loadS('systemChangelog',[]),
       ]);
       let finalProjects = Array.isArray(p) ? p : SEED_PROJ;
       // Rehydrate quotation files and VO files from separate per-project keys
@@ -16072,6 +16177,7 @@ export default function App(){
       setInvoiceBatches(Array.isArray(ib)?ib:[]);
       setReconciliation(rec&&typeof rec==='object'&&!Array.isArray(rec)?rec:{});
       setNotices(Array.isArray(no)?no:[]);
+      setSystemChangelog(Array.isArray(sc2)?sc2:[]);
       // Trash kept for 12 months (previously 30 days)
       const twelveMonthsAgo=Date.now()-365*24*60*60*1000;
       const freshTrash=(Array.isArray(tr)?tr:[]).filter(t=>new Date(t._deletedAt).getTime()>twelveMonthsAgo);
@@ -16579,7 +16685,7 @@ export default function App(){
             const allIds=DASH_WIDGETS.map(w=>w.id);
             const userWidgets=activeUser?.widgets||allIds;
             const mergedWidgets=[...userWidgets, ...allIds.filter(id=>!userWidgets.includes(id))];
-            return <Dashboard projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments.filter(py=>userProjects.some(p=>p.id===py.projectId))} widgets={mergedWidgets} siteWorkers={siteWorkers} onlinePresence={onlinePresence} activeUserId={activeUserId} notices={notices} setNotices={(n)=>{setNotices(n);saveNotices(n);}} isAdmin={isAdmin} attendance={attendance}/>;
+            return <Dashboard projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments.filter(py=>userProjects.some(p=>p.id===py.projectId))} widgets={mergedWidgets} siteWorkers={siteWorkers} onlinePresence={onlinePresence} activeUserId={activeUserId} notices={notices} setNotices={(n)=>{setNotices(n);saveNotices(n);}} isAdmin={isAdmin} attendance={attendance} isSuperAdmin={isSuperAdmin} systemChangelog={systemChangelog} setSystemChangelog={(cl)=>{setSystemChangelog(cl);saveS('systemChangelog',cl);}}/>;
           })()}
           {tab==='projects'&&<Projects projects={userProjects} setProjects={setProjects} invoices={invoices} payments={payments} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} users={users} acctSettings={acctSettings} logAction={logAction} activeUser={activeUser} siteReports={siteReports}/>}
           {tab==='invoices'&&<Invoices invoices={invoices} setInvoices={setInvoices} projects={userProjects} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} invoiceBatches={invoiceBatches} setInvoiceBatches={setInvoiceBatches} acctSettings={acctSettings} logAction={logAction}/>}
