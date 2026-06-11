@@ -9,7 +9,7 @@ import {
   Building, FileSpreadsheet, Calendar, Download, Settings,
   LogIn, LogOut, Star, Terminal, Database, RefreshCw, ClipboardList,
   Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine, Link2,
-  Zap, Plug, Wifi, Wind, Palette, LayoutGrid, BookOpen
+  Zap, Plug, Wifi, Wind, Palette, LayoutGrid, BookOpen, ArrowUpDown
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -36,7 +36,7 @@ const _sa = {
   assignedProjects:[],
 };
 
-const CATS = ['Preliminaries','Demolition Works','Masonry Works','Plumbing Works','Ceiling & Partition Works','Painting Works','Aircon Works','Carpentry Works','Door Works','Window Works','Floor Works','Miscellaneous','Sprinkler Works','ACMV Works','Electrical Works','Furniture','Appliances','Light Fittings','Labour (VO)','Purchases'];
+const CATS = ['Preliminaries','Demolition Works','Masonry Works','Plumbing Works','Ceiling & Partition Works','Painting Works','Aircon Works','Carpentry Works','Door Works','Window Works','Glass Works','Floor Works','Miscellaneous','Sprinkler Works','ACMV Works','Electrical Works','Furniture','Appliances','Light Fittings','Labour (VO)','Purchases'];
 const FULL_PAY_CATS = ['Purchases','Light Fittings','Appliances','Furniture','Aircon Works'];
 const PAY_SCHEDULES = [
   {id:'full_reno',  label:'Full Renovation (10/40/45/5%)',  stages:[{label:'Upon Confirmation',pct:10},{label:'Upon Start Work',pct:40},{label:'Upon Confirmation of Carpentry Details',pct:45},{label:'Upon Handover of Jobsite',pct:5}]},
@@ -9338,11 +9338,26 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
     });
   };
 
-  const addItem = () => setForm(p=>({...p,items:[...p.items,{
-    id:uid(),category:CATS[0],description:'',unit:'lot',qty:1,unitPrice:'',unitCost:'',
-  }]}));
+  const addItem = (afterId=null, inheritCategory=null) => {
+    const cat = inheritCategory || (afterId ? form.items.find(i=>i.id===afterId)?.category : null) || CATS[0];
+    const newItem = {id:uid(),category:cat,description:'',unit:'lot',qty:1,unitPrice:'',unitCost:''};
+    setForm(p=>{
+      if(!afterId) return {...p,items:[...p.items,newItem]};
+      const idx=p.items.findIndex(i=>i.id===afterId);
+      const items=[...p.items];
+      items.splice(idx+1,0,newItem);
+      return {...p,items};
+    });
+  };
   const updateItem = (id,key,val) => setForm(p=>({...p,items:p.items.map(i=>i.id===id?{...i,[key]:val}:i)}));
   const removeItem = (id) => setForm(p=>({...p,items:p.items.filter(i=>i.id!==id)}));
+  const sortByCategory = () => setForm(p=>{
+    const ordered=[...p.items].sort((a,b)=>{
+      const ai=CATS.indexOf(a.category||'Miscellaneous'), bi=CATS.indexOf(b.category||'Miscellaneous');
+      return (ai<0?999:ai)-(bi<0?999:bi);
+    });
+    return {...p,items:ordered};
+  });
 
   const subtotal = form.items.reduce((s,i)=>s+(parseFloat(i.qty)||0)*(parseFloat(i.unitPrice)||0),0);
   const totalCost = form.items.reduce((s,i)=>s+(parseFloat(i.qty)||0)*(parseFloat(i.unitCost)||0),0);
@@ -9524,7 +9539,11 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
         <div style={{padding:'12px 18px',borderBottom:`1px solid ${T.borderLight}`,
           display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <span style={{fontSize:14,fontWeight:700,color:T.text}}>Line Items</span>
-          <Btn size="sm" onClick={addItem}><Plus size={12}/>Add Item</Btn>
+          {form.items.length>1&&<button onClick={sortByCategory}
+            style={{background:'none',border:`1px solid ${T.borderLight}`,borderRadius:7,padding:'5px 11px',
+              cursor:'pointer',fontSize:11,color:T.muted,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5}}>
+            <ArrowUpDown size={11}/>Sort by Category
+          </button>}
         </div>
         <div style={{display:'flex',gap:6,padding:'8px 18px',background:T.bg,borderBottom:`1px solid ${T.borderLight}`}}>
           {[
@@ -9585,15 +9604,26 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
                   S${amt.toLocaleString('en-SG',{minimumFractionDigits:2,maximumFractionDigits:2})}
                 </span>
               </div>
-              <div style={{...colStyle.del,display:'flex',alignItems:'flex-start',paddingTop:4}}>
-                <button onClick={()=>removeItem(item.id)}
-                  style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:4,borderRadius:6,display:'flex',alignItems:'center'}}>
+              <div style={{...colStyle.del,display:'flex',flexDirection:'column',alignItems:'center',gap:2,paddingTop:4}}>
+                <button onClick={()=>addItem(item.id)} title="Insert row below"
+                  style={{background:'none',border:`1px solid ${T.borderLight}`,cursor:'pointer',color:T.accent,padding:'2px 4px',borderRadius:5,display:'flex',alignItems:'center'}}>
+                  <Plus size={11}/>
+                </button>
+                <button onClick={()=>removeItem(item.id)} title="Delete row"
+                  style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'2px 4px',borderRadius:5,display:'flex',alignItems:'center'}}>
                   <X size={13}/>
                 </button>
               </div>
             </div>
           );
         })}
+        {/* Add Item row */}
+        <div style={{padding:'10px 18px',borderTop:`1px solid ${T.borderLight}`,display:'flex',alignItems:'center',gap:10}}>
+          <Btn size="sm" onClick={()=>addItem()}><Plus size={12}/>Add Item</Btn>
+          {form.items.length>0&&(
+            <span style={{fontSize:11,color:T.dim}}>or click <Plus size={9} style={{display:'inline',verticalAlign:'middle'}}/> on any row to insert below it</span>
+          )}
+        </div>
         {/* Totals */}
         <div style={{padding:'14px 18px',borderTop:`1px solid ${T.borderLight}`,
           display:'flex',justifyContent:'flex-end',flexWrap:'wrap',gap:20,alignItems:'flex-start'}}>
