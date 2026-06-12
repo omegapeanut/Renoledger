@@ -9,7 +9,8 @@ import {
   Building, FileSpreadsheet, Calendar, Download, Settings,
   LogIn, LogOut, Star, Terminal, Database, RefreshCw, ClipboardList,
   Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine, Link2,
-  Zap, Plug, Wifi, Wind, Palette, LayoutGrid, BookOpen, ArrowUpDown
+  Zap, Plug, Wifi, Wind, Palette, LayoutGrid, BookOpen, ArrowUpDown,
+  Mic, MicOff, Video, FileText, Sparkles, Image, Filter
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -84,10 +85,10 @@ const ROLE_LABEL = {admin:'Admin',accounts:'Accounts',designer:'Designer',pm:'Pr
 const ROLE_CLR = {admin:'#ef4444',accounts:'#3b82f6',designer:'#7c3aed',pm:'#0891b2',expense_entry:'#059669',superadmin:'#6d28d9'};
 
 const ROLE_DEFAULT_TABS = {
-  admin:       ['dashboard','projects','quotations','sitereports','payments','reports','warranty','invoices','claims','commissions','tools','admin','workers','checkin','accounts','contacts','trash','orgchart'],
+  admin:       ['dashboard','projects','quotations','sitereports','fieldlogs','payments','reports','warranty','invoices','claims','commissions','tools','admin','workers','checkin','accounts','contacts','trash','orgchart'],
   accounts:    ['dashboard','payments','reports','invoices'],
-  designer:    ['dashboard','projects','quotations','sitereports','claims'],
-  pm:          ['dashboard','projects','quotations','sitereports','payments','warranty','invoices','claims','workers','orgchart'],
+  designer:    ['dashboard','projects','quotations','sitereports','fieldlogs','claims'],
+  pm:          ['dashboard','projects','quotations','sitereports','fieldlogs','payments','warranty','invoices','claims','workers','orgchart'],
   expense_entry:['invoices','claims'],
   site_worker: ['checkin'],
 };
@@ -2380,7 +2381,7 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
   );
 }
 
-function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId,notices=[],setNotices,isAdmin,attendance=[],isSuperAdmin=false,systemChangelog=[],setSystemChangelog=()=>{}}){
+function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId,notices=[],setNotices,isAdmin,attendance=[],isSuperAdmin=false,systemChangelog=[],setSystemChangelog=()=>{},fieldLogs=[],setFieldLogs=()=>{},activeUser=null}){
   const totRev = useMemo(()=>projects.reduce((s,p)=>s+p.contractAmount+(p.variationOrders||0),0),[projects]);
   const totExp = useMemo(()=>invoices.reduce((s,i)=>s+i.total,0),[invoices]);
   const totRecv = useMemo(()=>payments.filter(p=>p.status==='Received').reduce((s,p)=>s+p.amount,0),[payments]);
@@ -2454,8 +2455,219 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
   };
   const deleteChange=(id)=>setSystemChangelog(systemChangelog.filter(c=>c.id!==id));
 
+  // ── Field Log ──
+  const isMobile=useIsMobile();
+  const [logCapture,setLogCapture]=useState(null);
+  const [logProject,setLogProject]=useState('general');
+  const [logText,setLogText]=useState('');
+  const [logRecording,setLogRecording]=useState(false);
+  const [logUploading,setLogUploading]=useState(false);
+  const logMRRef=useRef(null);
+  const logChunksRef=useRef([]);
+  const uploadToCloudinary=async(fileOrBlob,type)=>{
+    const fd=new FormData();
+    fd.append('file',fileOrBlob);
+    fd.append('upload_preset','tdiworkspace');
+    const rt=type==='image'?'image':'video';
+    const resp=await fetch(`https://api.cloudinary.com/v1_1/du3f8jjrp/${rt}/upload`,{method:'POST',body:fd});
+    const data=await resp.json();
+    if(!data.secure_url) throw new Error(data.error?.message||'Upload failed');
+    return data.secure_url;
+  };
+  const saveFieldLog=(type,content,mediaUrl='')=>{
+    const entry={id:uid(),projectId:logProject,type,content:content.trim(),mediaUrl,
+      createdAt:new Date().toISOString(),createdBy:activeUser?.name||'Unknown'};
+    setFieldLogs([entry,...fieldLogs]);
+    setLogCapture(null);setLogText('');
+  };
+  const startVoiceRecording=async()=>{
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const mr=new MediaRecorder(stream);
+      logChunksRef.current=[];
+      mr.ondataavailable=e=>{if(e.data.size>0)logChunksRef.current.push(e.data);};
+      mr.onstop=async()=>{
+        const blob=new Blob(logChunksRef.current,{type:'audio/webm'});
+        stream.getTracks().forEach(t=>t.stop());
+        setLogRecording(false);
+        setLogUploading(true);
+        try{
+          const url=await uploadToCloudinary(blob,'audio');
+          saveFieldLog('voice','',url);
+        }catch(err){alert('Upload failed: '+err.message);}
+        finally{setLogUploading(false);}
+      };
+      mr.start();
+      logMRRef.current=mr;
+      setLogRecording(true);
+    }catch(err){alert('Microphone access denied: '+err.message);}
+  };
+  const stopVoiceRecording=()=>logMRRef.current?.stop();
+
   return (
     <div style={{display:'flex',flexDirection:'column',gap:20}}>
+
+      {/* ── Field Assistant ── */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',borderBottom:logCapture!==null?`1px solid ${T.borderLight}`:'none',flexWrap:'wrap',gap:10}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <div style={{width:32,height:32,borderRadius:10,background:'rgba(124,58,237,0.1)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              <Sparkles size={15} style={{color:'#7c3aed'}}/>
+            </div>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:T.text}}>Field Assistant</div>
+              <div style={{fontSize:11,color:T.muted}}>Quick capture — notes, photos, video, voice</div>
+            </div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:6}}>
+            {[
+              {mode:'note',Icon:FileText,label:'Note',color:'#0891b2'},
+              {mode:'meeting',Icon:BookOpen,label:'Meeting',color:'#d97706'},
+              {mode:'photo',Icon:Camera,label:'Photo',color:'#059669'},
+              {mode:'video',Icon:Video,label:'Video',color:'#7c3aed'},
+              {mode:'voice',Icon:Mic,label:'Voice',color:'#dc2626'},
+            ].map(({mode,Icon,label,color})=>(
+              <button key={mode} onClick={()=>setLogCapture(logCapture===mode?null:mode)} title={label}
+                style={{display:'flex',alignItems:'center',gap:4,padding:isMobile?'7px 8px':'7px 11px',borderRadius:9,
+                  border:`2px solid ${logCapture===mode?color:T.borderLight}`,
+                  background:logCapture===mode?`${color}18`:'transparent',
+                  color:logCapture===mode?color:T.muted,cursor:'pointer',fontFamily:'inherit',fontSize:11,fontWeight:600}}>
+                <Icon size={13}/>{!isMobile&&<span>{label}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {logCapture!==null&&(
+          <div style={{padding:'14px 20px',background:T.bg,borderBottom:`1px solid ${T.borderLight}`}}>
+            {/* Project selector */}
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+              <span style={{fontSize:12,color:T.muted,fontWeight:600}}>Project:</span>
+              <select value={logProject} onChange={e=>setLogProject(e.target.value)}
+                style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 10px',fontSize:12,color:T.text,fontFamily:'inherit',cursor:'pointer',flex:1,minWidth:0}}>
+                <option value="general">General (no project)</option>
+                {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+
+            {/* Note / Meeting input */}
+            {(logCapture==='note'||logCapture==='meeting')&&(
+              <>
+                <textarea value={logText} onChange={e=>setLogText(e.target.value)}
+                  placeholder={logCapture==='meeting'?'Meeting summary, schedule, decisions, action items…':'Enter your site note here…'}
+                  rows={4}
+                  style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,
+                    padding:'10px 13px',fontSize:13,color:T.text,outline:'none',resize:'vertical',
+                    fontFamily:'inherit',lineHeight:1.55,boxSizing:'border-box'}}/>
+                <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:10}}>
+                  <button onClick={()=>{setLogCapture(null);setLogText('');}}
+                    style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 14px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+                  <button onClick={()=>saveFieldLog(logCapture,logText)} disabled={!logText.trim()}
+                    style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:8,padding:'6px 16px',fontSize:12,fontWeight:600,
+                      cursor:logText.trim()?'pointer':'not-allowed',opacity:logText.trim()?1:0.45,fontFamily:'inherit'}}>
+                    Save Log
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Photo upload */}
+            {logCapture==='photo'&&(
+              <div style={{textAlign:'center'}}>
+                <input type="file" accept="image/*" id="fl-photo" style={{display:'none'}}
+                  onChange={async e=>{
+                    const file=e.target.files?.[0]; if(!file) return;
+                    setLogUploading(true);
+                    try{ const url=await uploadToCloudinary(file,'image'); saveFieldLog('photo','',url); }
+                    catch(err){alert('Upload failed: '+err.message);}
+                    finally{setLogUploading(false);e.target.value='';}
+                  }}/>
+                <label htmlFor="fl-photo" style={{display:'inline-flex',alignItems:'center',gap:8,padding:'20px 32px',
+                  borderRadius:12,border:`2px dashed ${T.border}`,cursor:'pointer',color:T.muted,fontSize:13,fontWeight:600}}>
+                  {logUploading?<Loader2 size={18} style={{animation:'spin 1s linear infinite'}}/>:<Camera size={18} style={{color:'#059669'}}/>}
+                  {logUploading?'Uploading…':'Tap to select photo'}
+                </label>
+                <div style={{marginTop:8}}>
+                  <button onClick={()=>setLogCapture(null)}
+                    style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 12px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Video upload */}
+            {logCapture==='video'&&(
+              <div style={{textAlign:'center'}}>
+                <input type="file" accept="video/*" id="fl-video" style={{display:'none'}}
+                  onChange={async e=>{
+                    const file=e.target.files?.[0]; if(!file) return;
+                    setLogUploading(true);
+                    try{ const url=await uploadToCloudinary(file,'video'); saveFieldLog('video','',url); }
+                    catch(err){alert('Upload failed: '+err.message);}
+                    finally{setLogUploading(false);e.target.value='';}
+                  }}/>
+                <label htmlFor="fl-video" style={{display:'inline-flex',alignItems:'center',gap:8,padding:'20px 32px',
+                  borderRadius:12,border:`2px dashed ${T.border}`,cursor:'pointer',color:T.muted,fontSize:13,fontWeight:600}}>
+                  {logUploading?<Loader2 size={18} style={{animation:'spin 1s linear infinite'}}/>:<Video size={18} style={{color:'#7c3aed'}}/>}
+                  {logUploading?'Uploading…':'Tap to select video'}
+                </label>
+                <div style={{marginTop:8}}>
+                  <button onClick={()=>setLogCapture(null)}
+                    style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 12px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Voice recording */}
+            {logCapture==='voice'&&(
+              <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:14,padding:'12px 0'}}>
+                {!logRecording&&!logUploading?(
+                  <button onClick={startVoiceRecording}
+                    style={{width:72,height:72,borderRadius:'50%',background:'#dc2626',border:'none',cursor:'pointer',
+                      display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 4px 20px rgba(220,38,38,0.35)'}}>
+                    <Mic size={28} style={{color:'#fff'}}/>
+                  </button>
+                ):(
+                  <button onClick={logRecording?stopVoiceRecording:undefined} disabled={logUploading}
+                    style={{width:72,height:72,borderRadius:'50%',background:'#7f1d1d',border:'4px solid #dc2626',cursor:logUploading?'not-allowed':'pointer',
+                      display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    {logUploading?<Loader2 size={24} style={{color:'#fff',animation:'spin 1s linear infinite'}}/>:<MicOff size={24} style={{color:'#fff'}}/>}
+                  </button>
+                )}
+                <div style={{fontSize:12,fontWeight:600,color:logRecording?'#dc2626':T.muted}}>
+                  {logUploading?'Uploading recording…':logRecording?'Recording… tap to stop':'Tap to start recording'}
+                </div>
+                {!logRecording&&!logUploading&&(
+                  <button onClick={()=>setLogCapture(null)}
+                    style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'5px 12px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Recent logs strip */}
+        {fieldLogs.length>0&&(
+          <div style={{padding:'9px 20px',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',borderTop:logCapture===null?`1px solid ${T.borderLight}`:'none'}}>
+            <span style={{fontSize:11,color:T.dim,fontWeight:600}}>Recent:</span>
+            {fieldLogs.slice(0,isMobile?2:5).map(fl=>{
+              const icons={note:FileText,meeting:BookOpen,photo:Camera,video:Video,voice:Mic};
+              const colors={note:'#0891b2',meeting:'#d97706',photo:'#059669',video:'#7c3aed',voice:'#dc2626'};
+              const Icon=icons[fl.type]||FileText;
+              const proj=projects.find(p=>p.id===fl.projectId);
+              return(
+                <div key={fl.id} style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:T.muted,
+                  background:T.bg,borderRadius:8,padding:'4px 9px',border:`1px solid ${T.borderLight}`}}>
+                  <Icon size={10} style={{color:colors[fl.type]||T.muted}}/>
+                  <span style={{fontWeight:600}}>{proj?proj.name:'General'}</span>
+                  <span style={{color:T.dim}}>·</span>
+                  <span style={{color:T.dim}}>{new Date(fl.createdAt).toLocaleDateString('en-SG',{day:'numeric',month:'short'})}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Who's Online */}
       {onlinePresence.length>0&&(
         <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:'14px 18px',boxShadow:T.shadow}}>
@@ -2500,7 +2712,7 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
       )}
 
       {/* ── Notice Board + System Updates (side-by-side) ── */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,alignItems:'start'}}>
+      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:16,alignItems:'start'}}>
 
         {/* Notice Board */}
         <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
@@ -3121,6 +3333,133 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
         </div>
       )}
 
+    </div>
+  );
+}
+
+function FieldLogs({fieldLogs=[],setFieldLogs=()=>{},projects=[],activeUser=null}){
+  const [filterProject,setFilterProject]=useState('all');
+  const [filterType,setFilterType]=useState('all');
+
+  const TYPE_META={
+    note:   {label:'Note',    Icon:FileText, color:'#0891b2', bg:'rgba(8,145,178,0.1)'},
+    meeting:{label:'Meeting', Icon:BookOpen, color:'#d97706', bg:'rgba(217,119,6,0.1)'},
+    photo:  {label:'Photo',   Icon:Camera,   color:'#059669', bg:'rgba(5,150,105,0.1)'},
+    video:  {label:'Video',   Icon:Video,    color:'#7c3aed', bg:'rgba(124,58,237,0.1)'},
+    voice:  {label:'Voice',   Icon:Mic,      color:'#dc2626', bg:'rgba(220,38,38,0.1)'},
+  };
+
+  const filtered=fieldLogs.filter(fl=>{
+    if(filterProject!=='all'&&fl.projectId!==filterProject) return false;
+    if(filterType!=='all'&&fl.type!==filterType) return false;
+    return true;
+  });
+
+  const deleteLog=(id)=>setFieldLogs(fieldLogs.filter(fl=>fl.id!==id));
+  const mediaEntries=filtered.filter(fl=>fl.type==='photo'||fl.type==='video');
+  const logEntries=filtered.filter(fl=>fl.type!=='photo'&&fl.type!=='video');
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+      {/* Filters */}
+      <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+        <select value={filterProject} onChange={e=>setFilterProject(e.target.value)}
+          style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:'8px 12px',fontSize:13,color:T.text,fontFamily:'inherit',cursor:'pointer'}}>
+          <option value="all">All Projects</option>
+          <option value="general">General</option>
+          {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+          {['all','note','meeting','photo','video','voice'].map(t=>(
+            <button key={t} onClick={()=>setFilterType(t)}
+              style={{padding:'7px 12px',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit',
+                border:`1px solid ${filterType===t?T.text:T.borderLight}`,
+                background:filterType===t?T.text:'transparent',color:filterType===t?T.card:T.muted}}>
+              {t==='all'?'All':TYPE_META[t]?.label||t}
+            </button>
+          ))}
+        </div>
+        <span style={{fontSize:12,color:T.dim,marginLeft:'auto'}}>{filtered.length} record{filtered.length!==1?'s':''}</span>
+      </div>
+
+      {filtered.length===0?(
+        <div style={{background:T.card,borderRadius:16,padding:'52px 24px',textAlign:'center',color:T.dim,fontSize:14,border:`1px solid ${T.borderLight}`}}>
+          No field logs yet — use the <strong>Field Assistant</strong> on the Dashboard to add your first entry.
+        </div>
+      ):(
+        <>
+          {/* Photo / Video grid */}
+          {mediaEntries.length>0&&(
+            <div>
+              <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:10}}>Media ({mediaEntries.length})</div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:12}}>
+                {mediaEntries.map(fl=>{
+                  const proj=projects.find(p=>p.id===fl.projectId);
+                  const meta=TYPE_META[fl.type];
+                  return(
+                    <div key={fl.id} style={{background:T.card,borderRadius:14,overflow:'hidden',border:`1px solid ${T.borderLight}`,boxShadow:T.shadow}}>
+                      {fl.type==='photo'?(
+                        <img src={fl.mediaUrl} alt="" style={{width:'100%',height:150,objectFit:'cover',display:'block'}} loading="lazy"/>
+                      ):(
+                        <video src={fl.mediaUrl} controls style={{width:'100%',height:150,objectFit:'cover',display:'block',background:'#000'}}/>
+                      )}
+                      <div style={{padding:'9px 11px'}}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:2}}>
+                          <span style={{fontSize:10,fontWeight:700,color:meta.color,background:meta.bg,padding:'2px 6px',borderRadius:5,letterSpacing:'0.04em',textTransform:'uppercase'}}>{meta.label}</span>
+                          <button onClick={()=>deleteLog(fl.id)} title="Delete"
+                            style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:2,borderRadius:6,display:'flex'}}>
+                            <Trash2 size={12}/>
+                          </button>
+                        </div>
+                        <div style={{fontSize:11,color:T.muted}}>{proj?proj.name:'General'}</div>
+                        <div style={{fontSize:10,color:T.dim}}>{new Date(fl.createdAt).toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'})} · {fl.createdBy}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Notes / Meetings / Voice list */}
+          {logEntries.length>0&&(
+            <div>
+              <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:10}}>Logs ({logEntries.length})</div>
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {logEntries.map(fl=>{
+                  const proj=projects.find(p=>p.id===fl.projectId);
+                  const meta=TYPE_META[fl.type]||TYPE_META.note;
+                  const Icon=meta.Icon;
+                  return(
+                    <div key={fl.id} style={{background:T.card,borderRadius:14,padding:'14px 18px',border:`1px solid ${T.borderLight}`,boxShadow:T.shadow,display:'flex',gap:14,alignItems:'flex-start'}}>
+                      <div style={{width:36,height:36,borderRadius:10,background:meta.bg,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                        <Icon size={16} style={{color:meta.color}}/>
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:3,flexWrap:'wrap'}}>
+                          <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',
+                            color:meta.color,background:meta.bg,padding:'2px 7px',borderRadius:5}}>{meta.label}</span>
+                          <span style={{fontSize:12,fontWeight:600,color:T.text}}>{proj?proj.name:'General'}</span>
+                          <span style={{fontSize:11,color:T.dim,marginLeft:'auto'}}>{new Date(fl.createdAt).toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'})}</span>
+                        </div>
+                        <div style={{fontSize:11,color:T.dim,marginBottom:fl.content?6:0}}>{fl.createdBy}</div>
+                        {fl.content&&<div style={{fontSize:13,color:T.text,lineHeight:1.6,whiteSpace:'pre-wrap'}}>{fl.content}</div>}
+                        {fl.type==='voice'&&fl.mediaUrl&&(
+                          <audio controls src={fl.mediaUrl} style={{width:'100%',marginTop:8,borderRadius:8}}/>
+                        )}
+                      </div>
+                      <button onClick={()=>deleteLog(fl.id)} title="Delete"
+                        style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex',flexShrink:0}}>
+                        <Trash2 size={14}/>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -15720,6 +16059,7 @@ const ALL_NAV=[
   {id:'payments',    label:'Client Payments',  Icon:CreditCard,      group:'project'},
   {id:'quotations',  label:'Quotations & VO',  Icon:FileSpreadsheet, group:'project'},
   {id:'sitereports', label:'Site Meeting',     Icon:ClipboardList,   group:'project'},
+  {id:'fieldlogs',   label:'Field Logs',       Icon:Sparkles,        group:'project'},
   {id:'reports',     label:'Project Report',   Icon:BarChart3,       group:'project'},
   {id:'warranty',    label:'Warranty',         Icon:CheckCircle,     group:'project'},
   // Group 2 — Expenses (amber accent)
@@ -15812,6 +16152,7 @@ export default function App(){
   const [reconciliation,setReconciliation]=useState({});
   const [notices,setNotices]=useState([]);
   const [systemChangelog,setSystemChangelog]=useState([]);
+  const [fieldLogs,setFieldLogs]=useState([]);
 
   const [activeUserId,setActiveUserId]=useState(null); // null = not logged in
   const [showOnboarding,setShowOnboarding]=useState(false);
@@ -16087,7 +16428,7 @@ export default function App(){
   const loadAllData = useCallback(async()=>{
     setSyncing(true);
     try{
-      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt,sr,oc,rec,sc2]=await Promise.all([
+      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt,sr,oc,rec,sc2,fl]=await Promise.all([
         loadS('projects',SEED_PROJ),
         loadS('invoices',SEED_INV),
         loadS('payments',SEED_PAY),
@@ -16107,6 +16448,7 @@ export default function App(){
         loadS('orgChart',[]),
         loadS('reconciliation',{}),
         loadS('systemChangelog',[]),
+        loadS('fieldLogs',[]),
       ]);
       let finalProjects = Array.isArray(p) ? p : SEED_PROJ;
       // Rehydrate quotation files and VO files from separate per-project keys
@@ -16178,6 +16520,7 @@ export default function App(){
       setReconciliation(rec&&typeof rec==='object'&&!Array.isArray(rec)?rec:{});
       setNotices(Array.isArray(no)?no:[]);
       setSystemChangelog(Array.isArray(sc2)?sc2:[]);
+      setFieldLogs(Array.isArray(fl)?fl:[]);
       // Trash kept for 12 months (previously 30 days)
       const twelveMonthsAgo=Date.now()-365*24*60*60*1000;
       const freshTrash=(Array.isArray(tr)?tr:[]).filter(t=>new Date(t._deletedAt).getTime()>twelveMonthsAgo);
@@ -16250,6 +16593,7 @@ export default function App(){
     admin:'User management, roles, and dashboard visibility controls',
     system:`Developer panel — ${APP_FULL} . Build ${APP_BUILD}`,
     orgchart:'Visual company hierarchy — adjustable, printable for project submissions',
+    fieldlogs:'Site field logs — notes, meeting records, photos, videos and voice memos linked to projects',
   };
 
   if(!FIREBASE_CONFIGURED) return <FirebaseSetupBanner/>;
@@ -16685,7 +17029,7 @@ export default function App(){
             const allIds=DASH_WIDGETS.map(w=>w.id);
             const userWidgets=activeUser?.widgets||allIds;
             const mergedWidgets=[...userWidgets, ...allIds.filter(id=>!userWidgets.includes(id))];
-            return <Dashboard projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments.filter(py=>userProjects.some(p=>p.id===py.projectId))} widgets={mergedWidgets} siteWorkers={siteWorkers} onlinePresence={onlinePresence} activeUserId={activeUserId} notices={notices} setNotices={(n)=>{setNotices(n);saveNotices(n);}} isAdmin={isAdmin} attendance={attendance} isSuperAdmin={isSuperAdmin} systemChangelog={systemChangelog} setSystemChangelog={(cl)=>{setSystemChangelog(cl);saveS('systemChangelog',cl);}}/>;
+            return <Dashboard projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments.filter(py=>userProjects.some(p=>p.id===py.projectId))} widgets={mergedWidgets} siteWorkers={siteWorkers} onlinePresence={onlinePresence} activeUserId={activeUserId} notices={notices} setNotices={(n)=>{setNotices(n);saveNotices(n);}} isAdmin={isAdmin} attendance={attendance} isSuperAdmin={isSuperAdmin} systemChangelog={systemChangelog} setSystemChangelog={(cl)=>{setSystemChangelog(cl);saveS('systemChangelog',cl);}} fieldLogs={fieldLogs} setFieldLogs={(logs)=>{setFieldLogs(logs);saveS('fieldLogs',logs);}} activeUser={activeUser}/>;
           })()}
           {tab==='projects'&&<Projects projects={userProjects} setProjects={setProjects} invoices={invoices} payments={payments} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} users={users} acctSettings={acctSettings} logAction={logAction} activeUser={activeUser} siteReports={siteReports}/>}
           {tab==='invoices'&&<Invoices invoices={invoices} setInvoices={setInvoices} projects={userProjects} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} invoiceBatches={invoiceBatches} setInvoiceBatches={setInvoiceBatches} acctSettings={acctSettings} logAction={logAction}/>}
@@ -16696,6 +17040,7 @@ export default function App(){
           {tab==='claims'&&<StaffClaims claims={staffClaims} setClaims={setStaffClaims} projects={userProjects} users={users} activeUser={activeUser} isAdmin={isAdmin} invoices={invoices} setInvoices={setInvoices} acctSettings={acctSettings} trash={trash} setTrash={setTrash}/>}
           {tab==='quotations'&&<Quotations quotes={quotes} setQuotes={setQuotes} projects={userProjects} isAdmin={isAdmin} acctSettings={acctSettings} onShowToast={handleShowToast} onSoftDelete={handleSoftDelete}/>}
           {tab==='sitereports'&&<SiteReports reports={siteReports} setReports={setSiteReports} projects={userProjects} acctSettings={acctSettings} isAdmin={isAdmin} activeUser={activeUser} onShowToast={handleShowToast} users={users} onSoftDelete={handleSoftDelete}/>}
+          {tab==='fieldlogs'&&<FieldLogs fieldLogs={fieldLogs} setFieldLogs={(logs)=>{setFieldLogs(logs);saveS('fieldLogs',logs);}} projects={userProjects} activeUser={activeUser}/>}
           {tab==='warranty'&&<Warranty warranties={warranties} setWarranties={setWarranties} projects={projects} isAdmin={isAdmin} acctSettings={acctSettings}/>}
           {tab==='workers'&&<WorkerAdmin siteWorkers={siteWorkers} setSiteWorkers={setSiteWorkers} attendance={attendance} setAttendance={setAttendance} projects={projects} invoices={invoices} setInvoices={setInvoices} claims={workerClaims} setClaims={setWorkerClaims} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='checkin'&&<WorkerLoginScreen siteWorkers={siteWorkers} onLogin={(w)=>setWorkerSession(w)} onAdminLogin={()=>setTab('dashboard')} acctSettings={acctSettings}/>}
