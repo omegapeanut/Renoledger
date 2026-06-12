@@ -10,7 +10,8 @@ import {
   LogIn, LogOut, Star, Terminal, Database, RefreshCw, ClipboardList,
   Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine, Link2,
   Zap, Plug, Wifi, Wind, Palette, LayoutGrid, BookOpen, ArrowUpDown,
-  Mic, MicOff, Video, FileText, Sparkles, Image, Filter
+  Mic, MicOff, Video, FileText, Sparkles, Image, Filter,
+  Landmark, TrendingDown
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -13737,6 +13738,375 @@ function WorkerAdmin({siteWorkers,setSiteWorkers,attendance,setAttendance,projec
   );
 }
 
+function BankStatementMatcher({statements=[],setStatements,projects=[],invoices=[],acctSettings}){
+  const [parsing,setParsing]=useState(false);
+  const [parseErr,setParseErr]=useState('');
+  const [activeId,setActiveId]=useState(null);
+  const [matchModal,setMatchModal]=useState(null);
+  const [matchForm,setMatchForm]=useState({matchType:'',projectId:'',invoiceId:'',note:''});
+  const [filter,setFilter]=useState('unmatched');
+  const [confirmDel,setConfirmDel]=useState(null);
+  const fileRef=useRef(null);
+
+  useEffect(()=>{
+    if(!activeId&&statements.length>0) setActiveId(statements[0].id);
+  },[statements.length,activeId]);
+
+  const activeStmt=statements.find(s=>s.id===activeId)||null;
+  const txns=activeStmt?.transactions||[];
+  const matched=txns.filter(t=>t.status==='matched').length;
+  const unmatched=txns.filter(t=>t.status==='unmatched').length;
+  const ignored=txns.filter(t=>t.status==='ignored').length;
+  const totalIn=txns.filter(t=>t.type==='credit').reduce((s,t)=>s+t.amount,0);
+  const totalOut=txns.filter(t=>t.type==='debit').reduce((s,t)=>s+t.amount,0);
+  const filteredTxns=filter==='all'?txns:txns.filter(t=>t.status===filter);
+
+  const MATCH_TYPES=[
+    {id:'client_payment',label:'Client Payment Received',forType:'credit'},
+    {id:'supplier_payment',label:'Supplier / Invoice Payment',forType:'debit'},
+    {id:'payroll',label:'Salary / Payroll / CPF',forType:'debit'},
+    {id:'other',label:'Other (Bank Fee / Transfer / Misc)',forType:'both'},
+  ];
+  const matchLabel=(mt)=>MATCH_TYPES.find(x=>x.id===mt)?.label||mt;
+  const projInvoices=matchForm.projectId?invoices.filter(i=>i.projectId===matchForm.projectId):[];
+
+  const handleUpload=async(e)=>{
+    const file=e.target.files?.[0];
+    if(!file){return;}
+    const apiKey=(acctSettings?.anthropicApiKey||'').trim();
+    if(!apiKey){
+      setParseErr('API key not set. Go to System → Developer to add your Anthropic API key.');
+      e.target.value='';return;
+    }
+    setParsing(true);setParseErr('');
+    try{
+      const b64=await toB64(file);
+      const res=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify({
+          model:'claude-haiku-4-5-20251001',max_tokens:4096,
+          messages:[{role:'user',content:[
+            {type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},
+            {type:'text',text:'Extract ALL transactions from this bank statement. Return ONLY a valid JSON array with no other text, no markdown fences:\n[{"date":"YYYY-MM-DD","description":"full transaction text","amount":0.00,"type":"credit","balance":0.00}]\nRules: date=YYYY-MM-DD. amount=positive number always. type="credit" if money received/deposited, "debit" if money paid/withdrawn. balance=running balance after the transaction (0 if not shown). Include every single transaction row without skipping any.'}
+          ]}]
+        })
+      });
+      const data=await res.json();
+      if(data.error) throw new Error(data.error.message);
+      const txt=(data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
+      const parsed=JSON.parse(txt);
+      if(!Array.isArray(parsed)||parsed.length===0) throw new Error('No transactions found in this PDF.');
+      const stmtId=uid();
+      const newStmt={
+        id:stmtId,filename:file.name,uploadedAt:new Date().toISOString(),
+        transactions:parsed.map(t=>({
+          id:uid(),
+          date:t.date||'',
+          description:String(t.description||''),
+          amount:Math.abs(parseFloat(t.amount)||0),
+          balance:parseFloat(t.balance)||0,
+          type:String(t.type||'debit').toLowerCase().includes('credit')?'credit':'debit',
+          status:'unmatched',matchType:null,projectId:null,invoiceId:null,note:'',
+        }))
+      };
+      setStatements([...statements,newStmt]);
+      setActiveId(stmtId);
+      setFilter('unmatched');
+    }catch(err){
+      setParseErr('Could not parse PDF: '+err.message+'. Ensure it is a text-based (not scanned) PDF.');
+    }finally{setParsing(false);e.target.value='';}
+  };
+
+  const updateTxn=(stmtId,txnId,upd)=>setStatements(
+    statements.map(s=>s.id!==stmtId?s:{...s,transactions:s.transactions.map(t=>t.id!==txnId?t:{...t,...upd})})
+  );
+
+  const openMatch=(txn)=>{
+    setMatchForm({matchType:'',projectId:'',invoiceId:'',note:''});
+    setMatchModal({stmtId:activeStmt.id,txn});
+  };
+
+  const confirmMatch=()=>{
+    if(!matchModal||!matchForm.matchType) return;
+    updateTxn(matchModal.stmtId,matchModal.txn.id,{
+      status:'matched',matchType:matchForm.matchType,
+      projectId:matchForm.projectId||null,invoiceId:matchForm.invoiceId||null,note:matchForm.note,
+    });
+    setMatchModal(null);
+  };
+
+  const deletStmt=(id)=>{
+    const remaining=statements.filter(s=>s.id!==id);
+    setStatements(remaining);
+    if(activeId===id) setActiveId(remaining[0]?.id||null);
+    setConfirmDel(null);
+  };
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:18}}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
+        <div>
+          <div style={{fontSize:14,fontWeight:600,color:T.text}}>AI Statement Matching</div>
+          <div style={{fontSize:12,color:T.muted,marginTop:2}}>Upload your DBS PDF — Claude reads every transaction. Match each one to a project or label it.</div>
+        </div>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+          {parseErr&&<div style={{fontSize:11,color:T.danger,background:T.dangerLight,padding:'6px 12px',borderRadius:8,maxWidth:260}}>{parseErr}</div>}
+          <input ref={fileRef} type="file" accept=".pdf" style={{display:'none'}} onChange={handleUpload}/>
+          <Btn onClick={()=>fileRef.current?.click()} disabled={parsing}>
+            {parsing?<><Loader2 size={12} style={{animation:'spin 1s linear infinite'}}/>Reading PDF…</>:<><Upload size={12}/>Upload PDF</>}
+          </Btn>
+        </div>
+      </div>
+
+      {/* Empty state */}
+      {statements.length===0&&(
+        <div style={{background:T.card,border:`2px dashed ${T.borderLight}`,borderRadius:18,padding:'48px 24px',textAlign:'center'}}>
+          <Landmark size={36} style={{color:T.dim,marginBottom:14}}/>
+          <div style={{fontSize:15,fontWeight:600,color:T.text,marginBottom:8}}>No statements uploaded yet</div>
+          <div style={{fontSize:12,color:T.muted,maxWidth:380,margin:'0 auto 20px',lineHeight:1.6}}>
+            Upload your bank statement PDF. Claude will extract all transactions automatically so you can tag each one to a project.
+          </div>
+          <Btn onClick={()=>fileRef.current?.click()} disabled={parsing}><Upload size={12}/>Upload Statement PDF</Btn>
+          {!acctSettings?.anthropicApiKey&&(
+            <div style={{marginTop:12,fontSize:11,color:T.warning,background:T.warningLight,padding:'6px 12px',borderRadius:8,display:'inline-block'}}>
+              Anthropic API key not set — go to System → Developer to add it.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Statement tabs (if multiple) */}
+      {statements.length>0&&(
+        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          {statements.map(s=>(
+            <div key={s.id}
+              style={{display:'flex',alignItems:'center',gap:6,padding:'5px 12px',borderRadius:10,cursor:'pointer',
+                border:`1px solid ${s.id===activeId?T.accent:T.borderLight}`,
+                background:s.id===activeId?T.accentLight:T.card}}
+              onClick={()=>setActiveId(s.id)}>
+              <FileText size={11} style={{color:s.id===activeId?T.accent:T.dim,flexShrink:0}}/>
+              <span style={{fontSize:12,fontWeight:600,color:s.id===activeId?T.accent:T.text,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.filename}</span>
+              <span style={{marginLeft:2,fontSize:14,color:T.dim,lineHeight:1,cursor:'pointer'}}
+                onClick={e=>{e.stopPropagation();setConfirmDel(s.id);}}>×</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Active statement */}
+      {activeStmt&&(
+        <>
+          <div style={{fontSize:11,color:T.dim}}>
+            Uploaded {new Date(activeStmt.uploadedAt).toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'})} · {txns.length} transactions extracted
+          </div>
+
+          {/* Stats */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(100px,1fr))',gap:10}}>
+            {[
+              {l:'Total',v:txns.length,c:T.text},
+              {l:'Pending',v:unmatched,c:unmatched>0?T.danger:T.success},
+              {l:'Matched',v:matched,c:T.success},
+              {l:'Ignored',v:ignored,c:T.dim},
+              {l:'Money In',v:fmtSGD(totalIn),c:'#16a34a'},
+              {l:'Money Out',v:fmtSGD(totalOut),c:T.danger},
+            ].map(({l,v,c})=>(
+              <div key={l} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:12,padding:'10px 14px',boxShadow:T.shadow}}>
+                <div style={{fontSize:9,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:3}}>{l}</div>
+                <div style={{fontSize:16,fontWeight:700,color:c}}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Filter tabs */}
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {[{id:'all',l:'All'},{id:'unmatched',l:'Pending'},{id:'matched',l:'Matched'},{id:'ignored',l:'Ignored'}].map(({id,l})=>(
+              <button key={id} onClick={()=>setFilter(id)}
+                style={{padding:'5px 14px',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit',
+                  border:`1px solid ${filter===id?T.accent:T.borderLight}`,
+                  background:filter===id?T.accentLight:T.card,
+                  color:filter===id?T.accent:T.muted}}>
+                {l}{id==='unmatched'&&unmatched>0&&<span style={{marginLeft:5,background:T.danger,color:'#fff',borderRadius:10,padding:'0 5px',fontSize:10}}>{unmatched}</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* Transaction list */}
+          <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,overflow:'hidden',boxShadow:T.shadow}}>
+            {filteredTxns.length===0
+              ?<div style={{padding:'36px',textAlign:'center',color:T.muted,fontSize:13}}>No transactions in this view.</div>
+              :<div>
+                {filteredTxns.map((txn,idx)=>{
+                  const isCredit=txn.type==='credit';
+                  const statusClr=txn.status==='matched'?T.success:txn.status==='ignored'?T.dim:T.danger;
+                  const proj=txn.projectId?projects.find(p=>p.id===txn.projectId):null;
+                  return(
+                    <div key={txn.id} style={{
+                      display:'flex',alignItems:'flex-start',gap:12,padding:'12px 18px',
+                      borderTop:idx===0?'none':`1px solid ${T.borderLight}`,
+                      background:txn.status==='matched'?T.success+'06':txn.status==='ignored'?T.bg:T.card}}>
+                      {/* Date + type */}
+                      <div style={{flexShrink:0,width:76}}>
+                        <div style={{fontSize:11,color:T.dim,fontWeight:500,whiteSpace:'nowrap'}}>{txn.date}</div>
+                        <div style={{marginTop:3,fontSize:9,fontWeight:700,display:'inline-block',
+                          color:isCredit?'#16a34a':T.danger,
+                          background:isCredit?'#dcfce7':'#fee2e2',
+                          padding:'1px 6px',borderRadius:4}}>
+                          {isCredit?'IN':'OUT'}
+                        </div>
+                      </div>
+                      {/* Description + tags */}
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,fontWeight:600,color:T.text,wordBreak:'break-word',lineHeight:1.4}}>{txn.description}</div>
+                        {txn.status==='matched'&&(
+                          <div style={{fontSize:11,color:T.success,marginTop:3,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+                            <span>✓ {matchLabel(txn.matchType)}</span>
+                            {proj&&<span style={{color:T.dim}}>— {proj.name}</span>}
+                            {txn.note&&<span style={{color:T.dim}}>"{txn.note}"</span>}
+                          </div>
+                        )}
+                        {txn.status==='ignored'&&<div style={{fontSize:10,color:T.dim,marginTop:2}}>Ignored{txn.note?` — ${txn.note}`:''}</div>}
+                      </div>
+                      {/* Amount */}
+                      <div style={{flexShrink:0,textAlign:'right',minWidth:90}}>
+                        <div style={{fontSize:13,fontWeight:700,color:isCredit?'#16a34a':T.danger}}>
+                          {isCredit?'+':'-'}{fmtSGD(txn.amount)}
+                        </div>
+                        {txn.balance>0&&<div style={{fontSize:10,color:T.dim}}>Bal {fmtSGD(txn.balance)}</div>}
+                      </div>
+                      {/* Status + actions */}
+                      <div style={{flexShrink:0,display:'flex',flexDirection:'column',alignItems:'flex-end',gap:5}}>
+                        <span style={{fontSize:9,fontWeight:700,color:statusClr,background:statusClr+'18',padding:'2px 7px',borderRadius:6,whiteSpace:'nowrap'}}>
+                          {txn.status==='matched'?'MATCHED':txn.status==='ignored'?'IGNORED':'PENDING'}
+                        </span>
+                        <div style={{display:'flex',gap:5}}>
+                          {txn.status==='unmatched'&&(<>
+                            <button onClick={()=>openMatch(txn)}
+                              style={{background:T.accentLight,border:`1px solid ${T.borderLight}`,borderRadius:7,
+                                padding:'3px 10px',cursor:'pointer',fontSize:11,fontWeight:600,color:T.text,fontFamily:'inherit'}}>
+                              Match
+                            </button>
+                            <button onClick={()=>updateTxn(activeStmt.id,txn.id,{status:'ignored',matchType:'other',note:''})}
+                              style={{background:'none',border:`1px solid ${T.borderLight}`,borderRadius:7,
+                                padding:'3px 8px',cursor:'pointer',fontSize:11,color:T.dim,fontFamily:'inherit'}}>
+                              Ignore
+                            </button>
+                          </>)}
+                          {txn.status!=='unmatched'&&(
+                            <button onClick={()=>updateTxn(activeStmt.id,txn.id,{status:'unmatched',matchType:null,projectId:null,invoiceId:null,note:''})}
+                              style={{background:'none',border:`1px solid ${T.borderLight}`,borderRadius:7,
+                                padding:'3px 8px',cursor:'pointer',fontSize:10,color:T.dim,fontFamily:'inherit'}}>
+                              Undo
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            }
+          </div>
+        </>
+      )}
+
+      {/* Match modal */}
+      {matchModal&&(
+        <Modal title="Match Transaction" onClose={()=>setMatchModal(null)} wide>
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            {/* Transaction summary */}
+            <div style={{background:T.bg,borderRadius:12,padding:'12px 16px',display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:11,color:T.muted,marginBottom:2}}>Transaction</div>
+                <div style={{fontSize:13,fontWeight:600,color:T.text,wordBreak:'break-word'}}>{matchModal.txn.description}</div>
+                <div style={{fontSize:11,color:T.dim,marginTop:2}}>{matchModal.txn.date}</div>
+              </div>
+              <div style={{textAlign:'right',flexShrink:0}}>
+                <div style={{fontSize:16,fontWeight:700,color:matchModal.txn.type==='credit'?'#16a34a':T.danger}}>
+                  {matchModal.txn.type==='credit'?'+':'-'}{fmtSGD(matchModal.txn.amount)}
+                </div>
+                <span style={{fontSize:9,fontWeight:700,
+                  color:matchModal.txn.type==='credit'?'#16a34a':T.danger,
+                  background:matchModal.txn.type==='credit'?'#dcfce7':'#fee2e2',
+                  padding:'2px 8px',borderRadius:4,display:'inline-block',marginTop:3}}>
+                  {matchModal.txn.type==='credit'?'MONEY IN':'MONEY OUT'}
+                </span>
+              </div>
+            </div>
+
+            {/* Type selector */}
+            <div style={{fontSize:12,fontWeight:600,color:T.text}}>This transaction is:</div>
+            <div style={{display:'flex',flexDirection:'column',gap:7}}>
+              {MATCH_TYPES.filter(mt=>mt.forType==='both'||mt.forType===matchModal.txn.type).map(mt=>(
+                <label key={mt.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',
+                  borderRadius:10,border:`1px solid ${matchForm.matchType===mt.id?T.accent:T.borderLight}`,
+                  background:matchForm.matchType===mt.id?T.accentLight:T.bg,cursor:'pointer'}}>
+                  <input type="radio" checked={matchForm.matchType===mt.id}
+                    onChange={()=>setMatchForm(p=>({...p,matchType:mt.id,projectId:'',invoiceId:''}))}
+                    style={{accentColor:T.accent,flexShrink:0}}/>
+                  <span style={{fontSize:13,fontWeight:600,color:T.text}}>{mt.label}</span>
+                </label>
+              ))}
+            </div>
+
+            {/* Project selector */}
+            {(matchForm.matchType==='client_payment'||matchForm.matchType==='supplier_payment')&&(
+              <div>
+                <label style={{fontSize:12,fontWeight:600,color:T.text,display:'block',marginBottom:6}}>Project</label>
+                <select value={matchForm.projectId} onChange={e=>setMatchForm(p=>({...p,projectId:e.target.value,invoiceId:''}))}
+                  style={{...iStyle,fontSize:13}}>
+                  <option value="">— Select project —</option>
+                  {projects.map(p=><option key={p.id} value={p.id}>{p.name}{p.client?` (${p.client})`:''}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Invoice selector (supplier payment) */}
+            {matchForm.matchType==='supplier_payment'&&matchForm.projectId&&projInvoices.length>0&&(
+              <div>
+                <label style={{fontSize:12,fontWeight:600,color:T.text,display:'block',marginBottom:6}}>Invoice / Bill <span style={{fontWeight:400,color:T.muted}}>(optional)</span></label>
+                <select value={matchForm.invoiceId} onChange={e=>setMatchForm(p=>({...p,invoiceId:e.target.value}))}
+                  style={{...iStyle,fontSize:13}}>
+                  <option value="">— Select invoice —</option>
+                  {projInvoices.map(inv=><option key={inv.id} value={inv.id}>{inv.invoiceNo||inv.id} · {inv.supplier} · {fmtSGD(inv.total)}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Note */}
+            <div>
+              <label style={{fontSize:12,fontWeight:600,color:T.text,display:'block',marginBottom:6}}>Note <span style={{fontWeight:400,color:T.muted}}>(optional)</span></label>
+              <input value={matchForm.note} onChange={e=>setMatchForm(p=>({...p,note:e.target.value}))}
+                placeholder="e.g. 50% progress payment, Ref #123…" style={{...iStyle,fontSize:13}}/>
+            </div>
+
+            <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
+              <Btn variant="secondary" onClick={()=>setMatchModal(null)}>Cancel</Btn>
+              <Btn onClick={confirmMatch} disabled={!matchForm.matchType}>
+                <CheckCircle size={13}/>Confirm Match
+              </Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete statement confirm */}
+      {confirmDel&&(
+        <Modal title="Delete Statement?" onClose={()=>setConfirmDel(null)}>
+          <div style={{display:'flex',flexDirection:'column',gap:16}}>
+            <div style={{fontSize:13,color:T.muted}}>Remove this statement and all its transaction data? This cannot be undone.</div>
+            <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
+              <Btn variant="secondary" onClick={()=>setConfirmDel(null)}>Cancel</Btn>
+              <Btn onClick={()=>deletStmt(confirmDel)} style={{background:T.danger,color:'#fff'}}>Delete Statement</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSettings,staffClaims=[],workerClaims=[],invoiceBatches=[],reconciliation={},setReconciliation=()=>{}}){
   const [tab,setTab]=useState('overview');
   const [settings,setSettings]=useState(acctSettings);
@@ -13757,6 +14127,10 @@ function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSetting
     const cur=monthRecon(mKey);
     saveRecon({...reconciliation,[mKey]:{...cur,...patch}});
   };
+
+  // Statement matching (AI transaction-level reconciliation)
+  const stmtStatements=Array.isArray(reconciliation?.statements)?reconciliation.statements:[];
+  const setStmtStatements=(stmts)=>saveRecon({...reconciliation,statements:stmts});
 
   // Load the open month's bank statement on demand from its own storage key
   // (falls back to legacy acctSettings.bankStatements for previously-uploaded months)
@@ -14181,6 +14555,7 @@ function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSetting
         {[
           {id:'overview',l:'Overview'},
           {id:'reconcile',l:'Monthly Reconciliation'},
+          {id:'stmtmatch',l:'Statement Matching'},
           {id:'settings',l:'Settings & Prior Year'},
         ].map(({id,l})=>(
           <button key={id} onClick={()=>setTab(id)}
@@ -14637,6 +15012,17 @@ function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSetting
             </div>
           </div>
         </div>
+      )}
+
+      {/* Statement Matching tab */}
+      {tab==='stmtmatch'&&(
+        <BankStatementMatcher
+          statements={stmtStatements}
+          setStatements={setStmtStatements}
+          projects={projects}
+          invoices={invoices}
+          acctSettings={acctSettings}
+        />
       )}
     </div>
   );
