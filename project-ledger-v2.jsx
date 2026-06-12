@@ -2476,6 +2476,7 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
   const [changeTitle,setChangeTitle]=useState('');
   const [changeBody,setChangeBody]=useState('');
   const [changeType,setChangeType]=useState('feature');
+  const [changelogOpen,setChangelogOpen]=useState(false);
   const openNewChange=()=>{setChangeTitle('');setChangeBody('');setChangeType('feature');setChangeForm({});};
   const openEditChange=(c)=>{setChangeTitle(c.title);setChangeBody(c.body);setChangeType(c.type||'feature');setChangeForm(c);};
   const saveChange=()=>{
@@ -2747,171 +2748,196 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
         </div>
       )}
 
-      {/* ── Notice Board + System Updates (side-by-side) ── */}
-      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:16,alignItems:'start'}}>
-
-        {/* Notice Board */}
-        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`}}>
-            <div style={{display:'flex',alignItems:'center',gap:10}}>
-              <div style={{width:32,height:32,borderRadius:10,background:T.tanLight,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                <Bell size={15} style={{color:T.tan}}/>
-              </div>
-              <div>
-                <div style={{fontSize:14,fontWeight:700,color:T.text}}>Notice Board</div>
-                <div style={{fontSize:11,color:T.muted}}>{notices.length===0?'No notices posted':`${notices.length} notice${notices.length!==1?'s':''}`}</div>
-              </div>
+      {/* ── Notice Board ── */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <div style={{width:32,height:32,borderRadius:10,background:T.tanLight,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              <Bell size={15} style={{color:T.tan}}/>
             </div>
-            {isAdmin&&(
-              <button onClick={openNew} style={{display:'flex',alignItems:'center',gap:6,background:T.text,color:T.card,border:'none',borderRadius:10,padding:'7px 14px',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
-                <Plus size={13}/>Post Notice
-              </button>
-            )}
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:T.text}}>Notice Board</div>
+              <div style={{fontSize:11,color:T.muted}}>{notices.length===0?'No notices posted':`${notices.length} notice${notices.length!==1?'s':''}`}</div>
+            </div>
           </div>
-          {noticeForm!==null&&(
-            <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.borderLight}`,background:T.bg}}>
-              <textarea value={noticeText} onChange={e=>setNoticeText(e.target.value)} placeholder="Write your notice here…" rows={3}
-                style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 13px',fontSize:13,color:T.text,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.55,marginBottom:12,boxSizing:'border-box'}}/>
-              <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-                <select value={noticePriority} onChange={e=>setNoticePriority(e.target.value)}
-                  style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 10px',fontSize:12,color:T.text,fontFamily:'inherit',cursor:'pointer'}}>
-                  <option value="normal">Normal</option>
-                  <option value="high">High Priority</option>
-                  <option value="urgent">Urgent</option>
-                </select>
-                <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:T.muted,cursor:'pointer'}}>
-                  <input type="checkbox" checked={noticePinned} onChange={e=>setNoticePinned(e.target.checked)} style={{accentColor:T.tan}}/>Pin to top
-                </label>
-                <div style={{marginLeft:'auto',display:'flex',gap:8}}>
-                  <button onClick={()=>setNoticeForm(null)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 14px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
-                  <button onClick={saveNotice} disabled={!noticeText.trim()} style={{background:T.text,color:T.card,border:'none',borderRadius:8,padding:'6px 16px',fontSize:12,fontWeight:600,cursor:noticeText.trim()?'pointer':'not-allowed',opacity:noticeText.trim()?1:0.45,fontFamily:'inherit'}}>
-                    {noticeForm.id?'Save Changes':'Post'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-          {sortedNotices.length===0?(
-            <div style={{padding:'28px 20px',textAlign:'center',color:T.dim,fontSize:13}}>No notices yet{isAdmin?' — post one above':''}</div>
-          ):(
-            <div style={{display:'flex',flexDirection:'column',maxHeight:460,overflowY:'auto'}}>
-              {sortedNotices.map((n,idx)=>(
-                <div key={n.id} style={{display:'flex',gap:12,padding:'13px 20px',borderBottom:idx<sortedNotices.length-1?`1px solid ${T.borderLight}`:'none',alignItems:'flex-start'}}>
-                  <div style={{width:4,flexShrink:0,borderRadius:4,alignSelf:'stretch',background:PRIO_CLR[n.priority||'normal'],minHeight:36}}/>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
-                      <Badge color={PRIO_CLR[n.priority||'normal']} sm>{PRIO_LABEL[n.priority||'normal']}</Badge>
-                      {n.pinned&&<Badge color={T.tan} sm>Pinned</Badge>}
-                      <span style={{fontSize:11,color:T.dim,marginLeft:'auto'}}>{n.editedAt?`Edited ${fmtDate(n.editedAt)}`:`${fmtDate(n.postedAt)}`}</span>
-                    </div>
-                    <div style={{fontSize:13,color:T.text,lineHeight:1.6,whiteSpace:'pre-wrap'}}>{n.text}</div>
-                  </div>
-                  {isAdmin&&(
-                    <div style={{display:'flex',gap:4,flexShrink:0}}>
-                      <button title={n.pinned?'Unpin':'Pin'} onClick={()=>togglePin(n.id)}
-                        style={{background:'transparent',border:'none',cursor:'pointer',color:n.pinned?T.tan:T.dim,padding:4,borderRadius:6,display:'flex'}}>
-                        <Star size={13} fill={n.pinned?T.tan:'none'}/>
-                      </button>
-                      <button title="Edit" onClick={()=>openEdit(n)}
-                        style={{background:'transparent',border:'none',cursor:'pointer',color:T.muted,padding:4,borderRadius:6,display:'flex'}}>
-                        <Edit3 size={13}/>
-                      </button>
-                      <button title="Delete" onClick={()=>deleteNotice(n.id)}
-                        style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex'}}>
-                        <Trash2 size={13}/>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+          {isAdmin&&(
+            <button onClick={openNew} style={{display:'flex',alignItems:'center',gap:6,background:T.text,color:T.card,border:'none',borderRadius:10,padding:'7px 14px',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+              <Plus size={13}/>Post Notice
+            </button>
           )}
         </div>
-
-        {/* System Updates / Changelog */}
-        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`}}>
-            <div style={{display:'flex',alignItems:'center',gap:10}}>
-              <div style={{width:32,height:32,borderRadius:10,background:'rgba(124,58,237,0.1)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                <Zap size={15} style={{color:'#7c3aed'}}/>
-              </div>
-              <div>
-                <div style={{fontSize:14,fontWeight:700,color:T.text}}>System Updates</div>
-                <div style={{fontSize:11,color:T.muted}}>RenoLedger recent changes</div>
-              </div>
-            </div>
-            {isSuperAdmin&&(
-              <button onClick={openNewChange} style={{display:'flex',alignItems:'center',gap:6,background:'#7c3aed',color:'#fff',border:'none',borderRadius:10,padding:'7px 14px',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
-                <Plus size={13}/>Add Update
-              </button>
-            )}
-          </div>
-
-          {/* Post / edit form (superadmin only) */}
-          {changeForm!==null&&isSuperAdmin&&(
-            <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.borderLight}`,background:T.bg}}>
-              <div style={{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap'}}>
-                {CHANGE_TYPES.map(ct=>(
-                  <button key={ct.id} onClick={()=>setChangeType(ct.id)}
-                    style={{padding:'5px 12px',borderRadius:8,fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit',border:`2px solid ${changeType===ct.id?ct.color:T.borderLight}`,
-                      background:changeType===ct.id?ct.bg:'transparent',color:changeType===ct.id?ct.color:T.muted}}>
-                    {ct.label}
-                  </button>
-                ))}
-              </div>
-              <input value={changeTitle} onChange={e=>setChangeTitle(e.target.value)} placeholder="Update title (e.g. Bank Reconciliation Rebuild)"
-                style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:'9px 13px',fontSize:13,color:T.text,outline:'none',fontFamily:'inherit',marginBottom:8,boxSizing:'border-box'}}/>
-              <textarea value={changeBody} onChange={e=>setChangeBody(e.target.value)} placeholder="Describe what changed and how it affects the team…" rows={3}
-                style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 13px',fontSize:13,color:T.text,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.55,marginBottom:12,boxSizing:'border-box'}}/>
-              <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
-                <button onClick={()=>setChangeForm(null)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 14px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
-                <button onClick={saveChange} disabled={!changeTitle.trim()} style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:8,padding:'6px 16px',fontSize:12,fontWeight:600,cursor:changeTitle.trim()?'pointer':'not-allowed',opacity:changeTitle.trim()?1:0.45,fontFamily:'inherit'}}>
-                  {changeForm.id?'Save Changes':'Post Update'}
+        {noticeForm!==null&&(
+          <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.borderLight}`,background:T.bg}}>
+            <textarea value={noticeText} onChange={e=>setNoticeText(e.target.value)} placeholder="Write your notice here…" rows={3}
+              style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 13px',fontSize:13,color:T.text,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.55,marginBottom:12,boxSizing:'border-box'}}/>
+            <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              <select value={noticePriority} onChange={e=>setNoticePriority(e.target.value)}
+                style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 10px',fontSize:12,color:T.text,fontFamily:'inherit',cursor:'pointer'}}>
+                <option value="normal">Normal</option>
+                <option value="high">High Priority</option>
+                <option value="urgent">Urgent</option>
+              </select>
+              <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:T.muted,cursor:'pointer'}}>
+                <input type="checkbox" checked={noticePinned} onChange={e=>setNoticePinned(e.target.checked)} style={{accentColor:T.tan}}/>Pin to top
+              </label>
+              <div style={{marginLeft:'auto',display:'flex',gap:8}}>
+                <button onClick={()=>setNoticeForm(null)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 14px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+                <button onClick={saveNotice} disabled={!noticeText.trim()} style={{background:T.text,color:T.card,border:'none',borderRadius:8,padding:'6px 16px',fontSize:12,fontWeight:600,cursor:noticeText.trim()?'pointer':'not-allowed',opacity:noticeText.trim()?1:0.45,fontFamily:'inherit'}}>
+                  {noticeForm.id?'Save Changes':'Post'}
                 </button>
               </div>
             </div>
-          )}
-
-          {/* Changelog list */}
-          {systemChangelog.length===0?(
-            <div style={{padding:'28px 20px',textAlign:'center',color:T.dim,fontSize:13}}>
-              {isSuperAdmin?'No updates posted yet — click Add Update to post the first one':'No system updates posted yet'}
-            </div>
-          ):(
-            <div style={{display:'flex',flexDirection:'column',maxHeight:460,overflowY:'auto'}}>
-              {systemChangelog.map((c,idx)=>{
-                const ct=CHANGE_TYPES.find(t=>t.id===c.type)||CHANGE_TYPES[0];
-                return (
-                  <div key={c.id} style={{display:'flex',gap:12,padding:'13px 20px',borderBottom:idx<systemChangelog.length-1?`1px solid ${T.borderLight}`:'none',alignItems:'flex-start'}}>
-                    <div style={{width:4,flexShrink:0,borderRadius:4,alignSelf:'stretch',background:ct.color,minHeight:36}}/>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5,flexWrap:'wrap'}}>
-                        <span style={{fontSize:10,fontWeight:700,letterSpacing:'0.06em',textTransform:'uppercase',
-                          color:ct.color,background:ct.bg,padding:'2px 7px',borderRadius:5}}>{ct.label}</span>
-                        <span style={{fontSize:11,color:T.dim,marginLeft:'auto'}}>{c.editedAt?`Edited ${fmtDate(c.editedAt)}`:`${fmtDate(c.postedAt)}`}</span>
-                      </div>
-                      <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:c.body?4:0}}>{c.title}</div>
-                      {c.body&&<div style={{fontSize:12,color:T.muted,lineHeight:1.6,whiteSpace:'pre-wrap'}}>{c.body}</div>}
-                    </div>
-                    {isSuperAdmin&&(
-                      <div style={{display:'flex',gap:4,flexShrink:0}}>
-                        <button title="Edit" onClick={()=>openEditChange(c)}
-                          style={{background:'transparent',border:'none',cursor:'pointer',color:T.muted,padding:4,borderRadius:6,display:'flex'}}>
-                          <Edit3 size={13}/>
-                        </button>
-                        <button title="Delete" onClick={()=>deleteChange(c.id)}
-                          style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex'}}>
-                          <Trash2 size={13}/>
-                        </button>
-                      </div>
-                    )}
+          </div>
+        )}
+        {sortedNotices.length===0?(
+          <div style={{padding:'28px 20px',textAlign:'center',color:T.dim,fontSize:13}}>No notices yet{isAdmin?' — post one above':''}</div>
+        ):(
+          <div style={{display:'flex',flexDirection:'column',maxHeight:460,overflowY:'auto'}}>
+            {sortedNotices.map((n,idx)=>(
+              <div key={n.id} style={{display:'flex',gap:12,padding:'13px 20px',borderBottom:idx<sortedNotices.length-1?`1px solid ${T.borderLight}`:'none',alignItems:'flex-start'}}>
+                <div style={{width:4,flexShrink:0,borderRadius:4,alignSelf:'stretch',background:PRIO_CLR[n.priority||'normal'],minHeight:36}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
+                    <Badge color={PRIO_CLR[n.priority||'normal']} sm>{PRIO_LABEL[n.priority||'normal']}</Badge>
+                    {n.pinned&&<Badge color={T.tan} sm>Pinned</Badge>}
+                    <span style={{fontSize:11,color:T.dim,marginLeft:'auto'}}>{n.editedAt?`Edited ${fmtDate(n.editedAt)}`:`${fmtDate(n.postedAt)}`}</span>
                   </div>
-                );
-              })}
+                  <div style={{fontSize:13,color:T.text,lineHeight:1.6,whiteSpace:'pre-wrap'}}>{n.text}</div>
+                </div>
+                {isAdmin&&(
+                  <div style={{display:'flex',gap:4,flexShrink:0}}>
+                    <button title={n.pinned?'Unpin':'Pin'} onClick={()=>togglePin(n.id)}
+                      style={{background:'transparent',border:'none',cursor:'pointer',color:n.pinned?T.tan:T.dim,padding:4,borderRadius:6,display:'flex'}}>
+                      <Star size={13} fill={n.pinned?T.tan:'none'}/>
+                    </button>
+                    <button title="Edit" onClick={()=>openEdit(n)}
+                      style={{background:'transparent',border:'none',cursor:'pointer',color:T.muted,padding:4,borderRadius:6,display:'flex'}}>
+                      <Edit3 size={13}/>
+                    </button>
+                    <button title="Delete" onClick={()=>deleteNotice(n.id)}
+                      style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex'}}>
+                      <Trash2 size={13}/>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── System Updates (collapsible, below notice board) ── */}
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
+        {/* Header — always visible, click to expand/collapse */}
+        <div onClick={()=>!isSuperAdmin&&setChangelogOpen(o=>!o)}
+          style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 20px',
+            cursor:isSuperAdmin?'default':'pointer',userSelect:'none'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <div style={{width:28,height:28,borderRadius:9,background:'rgba(124,58,237,0.1)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              <Zap size={13} style={{color:'#7c3aed'}}/>
             </div>
-          )}
+            <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              <span style={{fontSize:13,fontWeight:700,color:T.text}}>System Updates</span>
+              {/* Latest entry pill — shown when collapsed */}
+              {!changelogOpen&&systemChangelog.length>0&&(()=>{
+                const latest=systemChangelog[0];
+                const ct=CHANGE_TYPES.find(t=>t.id===latest.type)||CHANGE_TYPES[0];
+                return(
+                  <span style={{fontSize:11,color:T.muted,display:'flex',alignItems:'center',gap:6}}>
+                    <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',
+                      color:ct.color,background:ct.bg,padding:'1px 6px',borderRadius:4}}>{ct.label}</span>
+                    <span style={{color:T.text,fontWeight:600}}>{latest.title}</span>
+                    <span style={{color:T.dim}}>· {fmtDate(latest.postedAt)}</span>
+                  </span>
+                );
+              })()}
+            </div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            {isSuperAdmin&&(
+              <button onClick={e=>{e.stopPropagation();openNewChange();setChangelogOpen(true);}}
+                style={{display:'flex',alignItems:'center',gap:5,background:'#7c3aed',color:'#fff',border:'none',
+                  borderRadius:9,padding:'5px 12px',fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>
+                <Plus size={12}/>Add
+              </button>
+            )}
+            <button onClick={e=>{e.stopPropagation();setChangelogOpen(o=>!o);}}
+              style={{display:'flex',alignItems:'center',gap:4,background:'transparent',border:`1px solid ${T.borderLight}`,
+                borderRadius:8,padding:'5px 10px',fontSize:11,fontWeight:600,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>
+              {changelogOpen?'Hide':'Show all'}
+              <span style={{fontSize:10,color:T.dim,marginLeft:2}}>({systemChangelog.length})</span>
+            </button>
+          </div>
         </div>
 
+        {/* Expanded body */}
+        {changelogOpen&&(
+          <>
+            {/* Post / edit form */}
+            {changeForm!==null&&isSuperAdmin&&(
+              <div style={{padding:'16px 20px',borderTop:`1px solid ${T.borderLight}`,background:T.bg}}>
+                <div style={{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap'}}>
+                  {CHANGE_TYPES.map(ct=>(
+                    <button key={ct.id} onClick={()=>setChangeType(ct.id)}
+                      style={{padding:'5px 12px',borderRadius:8,fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit',
+                        border:`2px solid ${changeType===ct.id?ct.color:T.borderLight}`,
+                        background:changeType===ct.id?ct.bg:'transparent',color:changeType===ct.id?ct.color:T.muted}}>
+                      {ct.label}
+                    </button>
+                  ))}
+                </div>
+                <input value={changeTitle} onChange={e=>setChangeTitle(e.target.value)} placeholder="Update title"
+                  style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:'9px 13px',fontSize:13,color:T.text,outline:'none',fontFamily:'inherit',marginBottom:8,boxSizing:'border-box'}}/>
+                <textarea value={changeBody} onChange={e=>setChangeBody(e.target.value)} placeholder="Describe what changed…" rows={3}
+                  style={{width:'100%',background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 13px',fontSize:13,color:T.text,outline:'none',resize:'vertical',fontFamily:'inherit',lineHeight:1.55,marginBottom:10,boxSizing:'border-box'}}/>
+                <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+                  <button onClick={()=>setChangeForm(null)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'6px 14px',fontSize:12,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+                  <button onClick={saveChange} disabled={!changeTitle.trim()} style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:8,padding:'6px 16px',fontSize:12,fontWeight:600,cursor:changeTitle.trim()?'pointer':'not-allowed',opacity:changeTitle.trim()?1:0.45,fontFamily:'inherit'}}>
+                    {changeForm.id?'Save Changes':'Post Update'}
+                  </button>
+                </div>
+              </div>
+            )}
+            <div style={{borderTop:`1px solid ${T.borderLight}`,display:'flex',flexDirection:'column',maxHeight:420,overflowY:'auto'}}>
+              {systemChangelog.length===0?(
+                <div style={{padding:'28px 20px',textAlign:'center',color:T.dim,fontSize:13}}>
+                  {isSuperAdmin?'No updates yet — click Add to post':'No system updates posted yet'}
+                </div>
+              ):(
+                systemChangelog.map((c,idx)=>{
+                  const ct=CHANGE_TYPES.find(t=>t.id===c.type)||CHANGE_TYPES[0];
+                  return(
+                    <div key={c.id} style={{display:'flex',gap:12,padding:'12px 20px',
+                      borderBottom:idx<systemChangelog.length-1?`1px solid ${T.borderLight}`:'none',alignItems:'flex-start'}}>
+                      <div style={{width:3,flexShrink:0,borderRadius:4,alignSelf:'stretch',background:ct.color,minHeight:28}}/>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
+                          <span style={{fontSize:10,fontWeight:700,letterSpacing:'0.06em',textTransform:'uppercase',
+                            color:ct.color,background:ct.bg,padding:'2px 6px',borderRadius:4}}>{ct.label}</span>
+                          <span style={{fontSize:11,color:T.dim,marginLeft:'auto'}}>{c.editedAt?`Edited ${fmtDate(c.editedAt)}`:`${fmtDate(c.postedAt)}`}</span>
+                        </div>
+                        <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:c.body?3:0}}>{c.title}</div>
+                        {c.body&&<div style={{fontSize:12,color:T.muted,lineHeight:1.55,whiteSpace:'pre-wrap'}}>{c.body}</div>}
+                      </div>
+                      {isSuperAdmin&&(
+                        <div style={{display:'flex',gap:4,flexShrink:0}}>
+                          <button title="Edit" onClick={()=>openEditChange(c)}
+                            style={{background:'transparent',border:'none',cursor:'pointer',color:T.muted,padding:4,borderRadius:6,display:'flex'}}>
+                            <Edit3 size={12}/>
+                          </button>
+                          <button title="Delete" onClick={()=>deleteChange(c.id)}
+                            style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex'}}>
+                            <Trash2 size={12}/>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Worker document expiry alerts */}
