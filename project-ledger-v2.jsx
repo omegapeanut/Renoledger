@@ -8216,6 +8216,161 @@ function Commissions({projects,setProjects,invoices,isAdmin,users=[]}){
   );
 }
 
+function ActionLog({actionLog=[],isSuperAdmin,onUndoAction}){
+  const [undoTarget,setUndoTarget]=useState(null);
+  const [logSearch,setLogSearch]=useState('');
+  const [logUser,setLogUser]=useState('All');
+  const [logPage,setLogPage]=useState(1);
+  const LOG_PAGE_SIZE=20;
+
+  const ACTION_ICON={
+    CREATE_PROJECT:'📁',EDIT_PROJECT:'✏️',CLOSE_PROJECT:'✅',REOPEN_PROJECT:'🔄',
+    CREATE_INVOICE:'🧾',PAY_INVOICE:'💳',
+    CREATE_PAYMENT:'💰',
+    CREATE_WORKER:'👷',EDIT_WORKER:'✏️',
+    DELETE_PROJECT:'🗑️',DELETE_INVOICE:'🗑️',DELETE_PAYMENT:'🗑️',DELETE_USER:'🗑️',DELETE_STAFFCLAIM:'🗑️',
+    RESTORE_PROJECT:'↩️',RESTORE_INVOICE:'↩️',RESTORE_PAYMENT:'↩️',RESTORE_USER:'↩️',
+    PERMANENT_DELETE:'⛔',
+  };
+  const ACTION_COLOR={
+    CREATE_PROJECT:T.success,EDIT_PROJECT:T.info,CLOSE_PROJECT:T.success,REOPEN_PROJECT:T.tan,
+    CREATE_INVOICE:'#8A6A3A',PAY_INVOICE:T.success,CREATE_PAYMENT:T.success,
+    CREATE_WORKER:T.info,EDIT_WORKER:T.info,
+    DELETE_PROJECT:T.danger,DELETE_INVOICE:T.danger,DELETE_PAYMENT:T.danger,DELETE_USER:T.danger,DELETE_STAFFCLAIM:T.danger,
+    RESTORE_PROJECT:T.tan,RESTORE_INVOICE:T.tan,RESTORE_PAYMENT:T.tan,RESTORE_USER:T.tan,
+    PERMANENT_DELETE:'#6d28d9',
+  };
+  const canUndo=entry=>entry.snapshot&&entry.action.startsWith('DELETE_')&&!entry.action.includes('PERMANENT');
+
+  const uniqueUsers=['All',...[...new Set(actionLog.map(e=>e.userName))].sort()];
+  const filtered=actionLog
+    .filter(e=>{
+      const matchUser=logUser==='All'||e.userName===logUser;
+      const matchSearch=!logSearch||(e.detail+e.userName+e.action).toLowerCase().includes(logSearch.toLowerCase());
+      return matchUser&&matchSearch;
+    })
+    .sort((a,b)=>new Date(b.at)-new Date(a.at));
+
+  const pagedFiltered=filtered.slice(0,logPage*LOG_PAGE_SIZE);
+  const hasMore=filtered.length>logPage*LOG_PAGE_SIZE;
+
+  const byUser={};
+  pagedFiltered.forEach(e=>{
+    if(!byUser[e.userName]) byUser[e.userName]={userName:e.userName,userRole:e.userRole,entries:[]};
+    byUser[e.userName].entries.push(e);
+  });
+  const userGroups=Object.values(byUser).sort((a,b)=>new Date(b.entries[0].at)-new Date(a.entries[0].at));
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:14}}>
+      {/* Toolbar */}
+      <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+        <div style={{position:'relative',flex:1,minWidth:180}}>
+          <Search size={12} style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',color:T.dim}}/>
+          <input value={logSearch} onChange={e=>{setLogSearch(e.target.value);setLogPage(1);}} placeholder="Search actions…"
+            style={{...iStyle,paddingLeft:30,fontSize:13}}/>
+        </div>
+        <select value={logUser} onChange={e=>{setLogUser(e.target.value);setLogPage(1);}}
+          style={{...iStyle,width:'auto',fontSize:13,cursor:'pointer'}}>
+          {uniqueUsers.map(u=><option key={u} value={u}>{u}</option>)}
+        </select>
+        <div style={{fontSize:12,color:T.dim,display:'flex',alignItems:'center'}}>
+          {pagedFiltered.length} of {filtered.length} action{filtered.length!==1?'s':''}
+        </div>
+      </div>
+
+      {userGroups.length===0&&(
+        <div style={{textAlign:'center',padding:'48px 0',color:T.muted,fontSize:13}}>
+          No actions recorded yet. Actions are automatically tracked from here on.
+        </div>
+      )}
+
+      {userGroups.map(group=>(
+        <div key={group.userName} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
+          <div style={{padding:'12px 18px',background:T.bg,borderBottom:`1px solid ${T.borderLight}`,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <div style={{width:30,height:30,borderRadius:10,background:T.text,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <span style={{fontSize:12,color:T.bg,fontWeight:700}}>{group.userName.charAt(0).toUpperCase()}</span>
+              </div>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:T.text}}>{group.userName}</div>
+                <div style={{fontSize:10,color:T.dim}}>{ROLE_LABEL[group.userRole]||group.userRole} · {group.entries.length} action{group.entries.length!==1?'s':''}</div>
+              </div>
+            </div>
+            <div style={{fontSize:11,color:T.dim}}>
+              Last: {(()=>{const d=new Date(group.entries[0].at);const age=Math.floor((Date.now()-d)/60000);return age<2?'Just now':age<60?`${age}m ago`:age<1440?`${Math.floor(age/60)}h ago`:d.toLocaleDateString('en-SG',{day:'numeric',month:'short'});})()}
+            </div>
+          </div>
+          <div>
+            {group.entries.map((entry,idx)=>{
+              const color=ACTION_COLOR[entry.action]||T.muted;
+              const icon=ACTION_ICON[entry.action]||'•';
+              const d=new Date(entry.at);
+              const timeStr=d.toLocaleString('en-SG',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+              return (
+                <div key={entry.id} style={{display:'flex',alignItems:'flex-start',gap:12,padding:'10px 18px',
+                  borderTop:idx===0?'none':`1px solid ${T.borderLight}`,
+                  background:'transparent'}}>
+                  <div style={{width:24,height:24,borderRadius:7,background:color+'14',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1,fontSize:13}}>
+                    {icon}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{entry.detail}</div>
+                    <div style={{fontSize:10,color:T.dim,marginTop:2,display:'flex',gap:8,flexWrap:'wrap'}}>
+                      <span style={{fontFamily:'monospace',background:T.bg,padding:'1px 5px',borderRadius:4,fontSize:9}}>{entry.action}</span>
+                      <span>{timeStr}</span>
+                    </div>
+                  </div>
+                  {isSuperAdmin&&canUndo(entry)&&(
+                    <button onClick={()=>setUndoTarget(entry)}
+                      style={{background:T.accentLight,border:`1px solid ${T.borderLight}`,borderRadius:7,
+                        padding:'3px 10px',cursor:'pointer',fontSize:11,fontWeight:600,
+                        color:T.text,fontFamily:'inherit',display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+                      <RotateCcw size={9}/>Undo
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      {hasMore&&(
+        <div style={{textAlign:'center',paddingTop:4}}>
+          <button onClick={()=>setLogPage(p=>p+1)}
+            style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:10,padding:'10px 28px',fontSize:13,fontWeight:600,color:T.text,cursor:'pointer',fontFamily:'inherit'}}>
+            Load more ({filtered.length-pagedFiltered.length} remaining)
+          </button>
+        </div>
+      )}
+
+      {undoTarget&&(
+        <Modal title="Confirm Undo" onClose={()=>setUndoTarget(null)}>
+          <div style={{display:'flex',flexDirection:'column',gap:16}}>
+            <div style={{background:T.bg,borderRadius:12,padding:'14px 16px'}}>
+              <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Action to undo:</div>
+              <div style={{fontSize:14,fontWeight:600,color:T.text}}>{undoTarget.detail}</div>
+              <div style={{fontSize:11,color:T.dim,marginTop:4}}>
+                By {undoTarget.userName} · {new Date(undoTarget.at).toLocaleString('en-SG',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false})}
+              </div>
+            </div>
+            <div style={{fontSize:13,color:T.muted,lineHeight:1.6}}>
+              This will restore the deleted item back to its original location.
+            </div>
+            <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
+              <Btn variant="secondary" onClick={()=>setUndoTarget(null)}>Cancel</Btn>
+              <Btn onClick={()=>{if(undoTarget.snapshot)onUndoAction(undoTarget.snapshot);setUndoTarget(null);}}>
+                <RotateCcw size={13}/>Confirm Undo
+              </Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],onUndoAction,isSuperAdmin}){
   const [adminTab,setAdminTab]=useState('users'); // 'users' | 'log'
   const [modal,setModal]=useState(null);
@@ -8358,167 +8513,7 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
         ))}
       </div>
 
-      {adminTab==='log'&&(()=>{
-        const [undoTarget,setUndoTarget]=useState(null);
-        const [logSearch,setLogSearch]=useState('');
-        const [logUser,setLogUser]=useState('All');
-        const [logPage,setLogPage]=useState(1);
-        const LOG_PAGE_SIZE=20;
-
-        const ACTION_ICON={
-          CREATE_PROJECT:'📁',EDIT_PROJECT:'✏️',CLOSE_PROJECT:'✅',REOPEN_PROJECT:'🔄',
-          CREATE_INVOICE:'🧾',PAY_INVOICE:'💳',
-          CREATE_PAYMENT:'💰',
-          CREATE_WORKER:'👷',EDIT_WORKER:'✏️',
-          DELETE_PROJECT:'🗑️',DELETE_INVOICE:'🗑️',DELETE_PAYMENT:'🗑️',DELETE_USER:'🗑️',DELETE_STAFFCLAIM:'🗑️',
-          RESTORE_PROJECT:'↩️',RESTORE_INVOICE:'↩️',RESTORE_PAYMENT:'↩️',RESTORE_USER:'↩️',
-          PERMANENT_DELETE:'⛔',
-        };
-        const ACTION_COLOR={
-          CREATE_PROJECT:T.success,EDIT_PROJECT:T.info,CLOSE_PROJECT:T.success,REOPEN_PROJECT:T.tan,
-          CREATE_INVOICE:'#8A6A3A',PAY_INVOICE:T.success,CREATE_PAYMENT:T.success,
-          CREATE_WORKER:T.info,EDIT_WORKER:T.info,
-          DELETE_PROJECT:T.danger,DELETE_INVOICE:T.danger,DELETE_PAYMENT:T.danger,DELETE_USER:T.danger,DELETE_STAFFCLAIM:T.danger,
-          RESTORE_PROJECT:T.tan,RESTORE_INVOICE:T.tan,RESTORE_PAYMENT:T.tan,RESTORE_USER:T.tan,
-          PERMANENT_DELETE:'#6d28d9',
-        };
-        const canUndo=entry=>entry.snapshot&&entry.action.startsWith('DELETE_')&&!entry.action.includes('PERMANENT');
-
-        // Filter and sort
-        const uniqueUsers=['All',...[...new Set(actionLog.map(e=>e.userName))].sort()];
-        const filtered=actionLog
-          .filter(e=>{
-            const matchUser=logUser==='All'||e.userName===logUser;
-            const matchSearch=!logSearch||(e.detail+e.userName+e.action).toLowerCase().includes(logSearch.toLowerCase());
-            return matchUser&&matchSearch;
-          })
-          .sort((a,b)=>new Date(b.at)-new Date(a.at));
-
-        // Paginate filtered before grouping
-        const pagedFiltered=filtered.slice(0,logPage*LOG_PAGE_SIZE);
-        const hasMore=filtered.length>logPage*LOG_PAGE_SIZE;
-
-        // Group by user for the grouped view
-        const byUser={};
-        pagedFiltered.forEach(e=>{
-          if(!byUser[e.userName]) byUser[e.userName]={userName:e.userName,userRole:e.userRole,entries:[]};
-          byUser[e.userName].entries.push(e);
-        });
-        const userGroups=Object.values(byUser).sort((a,b)=>new Date(b.entries[0].at)-new Date(a.entries[0].at));
-
-        return (
-          <div style={{display:'flex',flexDirection:'column',gap:14}}>
-            {/* Toolbar */}
-            <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-              <div style={{position:'relative',flex:1,minWidth:180}}>
-                <Search size={12} style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',color:T.dim}}/>
-                <input value={logSearch} onChange={e=>{setLogSearch(e.target.value);setLogPage(1);}} placeholder="Search actions…"
-                  style={{...iStyle,paddingLeft:30,fontSize:13}}/>
-              </div>
-              <select value={logUser} onChange={e=>{setLogUser(e.target.value);setLogPage(1);}}
-                style={{...iStyle,width:'auto',fontSize:13,cursor:'pointer'}}>
-                {uniqueUsers.map(u=><option key={u} value={u}>{u}</option>)}
-              </select>
-              <div style={{fontSize:12,color:T.dim,display:'flex',alignItems:'center'}}>
-                {pagedFiltered.length} of {filtered.length} action{filtered.length!==1?'s':''}
-              </div>
-            </div>
-
-            {userGroups.length===0&&(
-              <div style={{textAlign:'center',padding:'48px 0',color:T.muted,fontSize:13}}>
-                No actions recorded yet. Actions are automatically tracked from here on.
-              </div>
-            )}
-
-            {/* User groups */}
-            {userGroups.map(group=>(
-              <div key={group.userName} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,overflow:'hidden',boxShadow:T.shadow}}>
-                {/* User header */}
-                <div style={{padding:'12px 18px',background:T.bg,borderBottom:`1px solid ${T.borderLight}`,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:10}}>
-                    <div style={{width:30,height:30,borderRadius:10,background:T.text,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                      <span style={{fontSize:12,color:T.bg,fontWeight:700}}>{group.userName.charAt(0).toUpperCase()}</span>
-                    </div>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:700,color:T.text}}>{group.userName}</div>
-                      <div style={{fontSize:10,color:T.dim}}>{ROLE_LABEL[group.userRole]||group.userRole} · {group.entries.length} action{group.entries.length!==1?'s':''}</div>
-                    </div>
-                  </div>
-                  <div style={{fontSize:11,color:T.dim}}>
-                    Last: {(()=>{const d=new Date(group.entries[0].at);const age=Math.floor((Date.now()-d)/60000);return age<2?'Just now':age<60?`${age}m ago`:age<1440?`${Math.floor(age/60)}h ago`:d.toLocaleDateString('en-SG',{day:'numeric',month:'short'});})()}
-                  </div>
-                </div>
-                {/* Action rows */}
-                <div>
-                  {group.entries.map((entry,idx)=>{
-                    const color=ACTION_COLOR[entry.action]||T.muted;
-                    const icon=ACTION_ICON[entry.action]||'•';
-                    const d=new Date(entry.at);
-                    const timeStr=d.toLocaleString('en-SG',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
-                    return (
-                      <div key={entry.id} style={{display:'flex',alignItems:'flex-start',gap:12,padding:'10px 18px',
-                        borderTop:idx===0?'none':`1px solid ${T.borderLight}`,
-                        background:'transparent'}}>
-                        <div style={{width:24,height:24,borderRadius:7,background:color+'14',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1,fontSize:13}}>
-                          {icon}
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:12,fontWeight:600,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{entry.detail}</div>
-                          <div style={{fontSize:10,color:T.dim,marginTop:2,display:'flex',gap:8,flexWrap:'wrap'}}>
-                            <span style={{fontFamily:'monospace',background:T.bg,padding:'1px 5px',borderRadius:4,fontSize:9}}>{entry.action}</span>
-                            <span>{timeStr}</span>
-                          </div>
-                        </div>
-                        {isSuperAdmin&&canUndo(entry)&&(
-                          <button onClick={()=>setUndoTarget(entry)}
-                            style={{background:T.accentLight,border:`1px solid ${T.borderLight}`,borderRadius:7,
-                              padding:'3px 10px',cursor:'pointer',fontSize:11,fontWeight:600,
-                              color:T.text,fontFamily:'inherit',display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
-                            <RotateCcw size={9}/>Undo
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-
-            {hasMore&&(
-              <div style={{textAlign:'center',paddingTop:4}}>
-                <button onClick={()=>setLogPage(p=>p+1)}
-                  style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:10,padding:'10px 28px',fontSize:13,fontWeight:600,color:T.text,cursor:'pointer',fontFamily:'inherit'}}>
-                  Load more ({filtered.length-pagedFiltered.length} remaining)
-                </button>
-              </div>
-            )}
-
-            {/* Undo confirmation modal */}
-            {undoTarget&&(
-              <Modal title="Confirm Undo" onClose={()=>setUndoTarget(null)}>
-                <div style={{display:'flex',flexDirection:'column',gap:16}}>
-                  <div style={{background:T.bg,borderRadius:12,padding:'14px 16px'}}>
-                    <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Action to undo:</div>
-                    <div style={{fontSize:14,fontWeight:600,color:T.text}}>{undoTarget.detail}</div>
-                    <div style={{fontSize:11,color:T.dim,marginTop:4}}>
-                      By {undoTarget.userName} · {new Date(undoTarget.at).toLocaleString('en-SG',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false})}
-                    </div>
-                  </div>
-                  <div style={{fontSize:13,color:T.muted,lineHeight:1.6}}>
-                    This will restore the deleted item back to its original location.
-                  </div>
-                  <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
-                    <Btn variant="secondary" onClick={()=>setUndoTarget(null)}>Cancel</Btn>
-                    <Btn onClick={()=>{if(undoTarget.snapshot)onUndoAction(undoTarget.snapshot);setUndoTarget(null);}}>
-                      <RotateCcw size={13}/>Confirm Undo
-                    </Btn>
-                  </div>
-                </div>
-              </Modal>
-            )}
-          </div>
-        );
-      })()}
+      {adminTab==='log'&&<ActionLog actionLog={actionLog} isSuperAdmin={isSuperAdmin} onUndoAction={onUndoAction}/>}
 
       {adminTab==='users'&&(<>
       {/* Stats row */}
