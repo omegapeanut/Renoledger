@@ -80,6 +80,42 @@ const SEED_PROJ = [];
 const SEED_INV  = [];
 const SEED_PAY  = [];
 
+const SEED_CHANGELOG = [
+  {id:'cl-001',type:'feature',title:'Field Assistant — Site Capture',
+   body:'New Field Assistant widget on the Dashboard. Capture site notes, meeting records, photos, videos, and voice memos directly from your phone. All entries are linked to a project and stored under the new Field Logs tab.',
+   postedAt:'2026-06-12T00:00:00.000Z'},
+  {id:'cl-002',type:'improvement',title:'Mobile Layout Fix',
+   body:'Dashboard Notice Board and System Updates now stack to a single column on phones. The two-column layout is kept on tablets and laptops. Field Assistant capture buttons show icon-only on mobile for a cleaner experience.',
+   postedAt:'2026-06-12T00:00:00.000Z'},
+  {id:'cl-003',type:'feature',title:'System Updates Panel',
+   body:'New System Updates column on the Dashboard beside the Notice Board. Super Admin can post changelog entries tagged as New Feature, Improvement, Bug Fix, or Info. All users see the feed — no one misses a change.',
+   postedAt:'2026-06-10T00:00:00.000Z'},
+  {id:'cl-004',type:'feature',title:'Bank Reconciliation Rebuild',
+   body:'Monthly Reconciliation in Company Accounts is fully rebuilt. Tick off individual income and expense transactions per month. State persists across sessions. Opening/closing balance proof shows whether the month balances. Bank PDFs are stored per month. In-transit items carry forward automatically.',
+   postedAt:'2026-05-30T00:00:00.000Z'},
+  {id:'cl-005',type:'improvement',title:'Quotation Editor — Add Item Below & Sort by Category',
+   body:'Add Item button moved to the bottom of the item list. Each row now has an insert-below button so you can add an item in the middle of the list without disruption. New Sort by Category button reorders all items by category. Glass Works added as a new category.',
+   postedAt:'2026-05-28T00:00:00.000Z'},
+  {id:'cl-006',type:'improvement',title:'Org Chart — Auto-sync from System Users',
+   body:'Organisation chart now auto-populates from the system user list. New nodes are created for users who are not yet on the chart and linked by userId. Existing nodes are matched and updated automatically when roles or names change.',
+   postedAt:'2026-05-20T00:00:00.000Z'},
+  {id:'cl-007',type:'feature',title:'Company Accounts — Tax & Financial Reports',
+   body:'Company Accounts tab added for Admin and Accounts roles. Covers bank reconciliation, 4-line profit & loss statement, and expense category breakdown to support IRAS tax filing.',
+   postedAt:'2026-04-01T00:00:00.000Z'},
+  {id:'cl-008',type:'feature',title:'Site Meeting Reports',
+   body:'Site Meeting tab added. Create meeting reports linked to projects, upload photos, capture attendees, and generate a PDF report. Acknowledgement link can be sent to clients for digital sign-off.',
+   postedAt:'2026-03-15T00:00:00.000Z'},
+  {id:'cl-009',type:'feature',title:'Quotations & Variation Orders',
+   body:'Full quotation editor with line items by category, unit pricing, cost vs. sell margin tracking. Supports Variation Orders (VO) linked to the base quotation. PDF generation and client acceptance flow included.',
+   postedAt:'2026-02-20T00:00:00.000Z'},
+  {id:'cl-010',type:'feature',title:'Worker Management & Payroll',
+   body:'Site Worker module: manage worker profiles, work pass expiry, safety certificates, daily rates, and monthly payroll. Workers can self check-in and check-out via a dedicated kiosk screen.',
+   postedAt:'2026-02-01T00:00:00.000Z'},
+  {id:'cl-011',type:'feature',title:'RenoLedger Launched',
+   body:'RenoLedger v1.0 live. Projects, Client Payments, Supplier Invoices, Expense Claims, Commissions, Warranty certificates, Contacts, and a role-based access system for Admin, PM, Designer, Accounts, and Expense Entry users.',
+   postedAt:'2026-01-01T00:00:00.000Z'},
+];
+
 const ROLES = ['admin','accounts','designer','pm','expense_entry'];
 const ROLE_LABEL = {admin:'Admin',accounts:'Accounts',designer:'Designer',pm:'Project Manager',expense_entry:'Expense Entry',superadmin:'Developer'};
 const ROLE_CLR = {admin:'#ef4444',accounts:'#3b82f6',designer:'#7c3aed',pm:'#0891b2',expense_entry:'#059669',superadmin:'#6d28d9'};
@@ -16519,7 +16555,7 @@ export default function App(){
       setInvoiceBatches(Array.isArray(ib)?ib:[]);
       setReconciliation(rec&&typeof rec==='object'&&!Array.isArray(rec)?rec:{});
       setNotices(Array.isArray(no)?no:[]);
-      setSystemChangelog(Array.isArray(sc2)?sc2:[]);
+      setSystemChangelog(Array.isArray(sc2)&&sc2.length>0?sc2:SEED_CHANGELOG);
       setFieldLogs(Array.isArray(fl)?fl:[]);
       // Trash kept for 12 months (previously 30 days)
       const twelveMonthsAgo=Date.now()-365*24*60*60*1000;
