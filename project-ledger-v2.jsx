@@ -64,10 +64,31 @@ const getCo = (s) => ({
 });
 
 const CAT_CLR = {
+  // All CATS entries — exact key match
+  'Preliminaries':             '#6b7280',
+  'Demolition Works':          '#dc2626',
+  'Masonry Works':             '#92400e',
+  'Plumbing Works':            '#0891b2',
+  'Ceiling & Partition Works': '#8b5cf6',
+  'Painting Works':            '#7c3aed',
+  'Aircon Works':              '#0ea5e9',
+  'Carpentry Works':           '#d97706',
+  'Door Works':                '#b45309',
+  'Window Works':              '#0284c7',
+  'Glass Works':               '#06b6d4',
+  'Floor Works':               '#854d0e',
+  'Miscellaneous':             '#64748b',
+  'Sprinkler Works':           '#2563eb',
+  'ACMV Works':                '#0369a1',
+  'Electrical Works':          '#3b82f6',
+  'Furniture':                 '#db2777',
+  'Appliances':                '#059669',
+  'Light Fittings':            '#ca8a04',
+  'Labour (VO)':               '#16a34a',
+  'Purchases':                 '#0d9488',
+  // Legacy aliases for any old saved data
   Carpentry:'#d97706', Electrical:'#3b82f6', Plumbing:'#0891b2',
-  Painting:'#7c3aed', Lighting:'#ca8a04', Furniture:'#db2777',
-  Appliances:'#059669', Miscellaneous:'#64748b', 'Labour (VO)':'#0891b2',
-  Aircon:'#0ea5e9', Preliminaries:'#6b7280',
+  Painting:'#7c3aed', Lighting:'#ca8a04', Aircon:'#0ea5e9',
 };
 const ST_CLR = {
   Planning:'#64748b','In Progress':'#3b82f6','On Hold':'#d97706',
@@ -2032,26 +2053,28 @@ const DropZone = ({onDrop, accept='*', children, style={}}) => {
   );
 };
 
-const Modal = ({title,onClose,children,wide}) => (
+const Modal = ({title,onClose,children,wide}) => {
+  const isMob=typeof window!=='undefined'&&window.innerWidth<600;
+  return(
   <div style={{position:'fixed',inset:0,zIndex:100,display:'flex',alignItems:'flex-end',
     justifyContent:'center',background:'rgba(29,29,31,0.36)',backdropFilter:'blur(24px)',WebkitBackdropFilter:'blur(24px)'}}>
-    <div style={{background:'rgba(255,255,255,0.97)',border:`1px solid ${T.borderLight}`,
+    <div style={{background:T.card,border:`1px solid ${T.borderLight}`,
       borderRadius:'20px 20px 0 0',
       width:'100%',maxWidth:wide?860:580,
       maxHeight:'92dvh',
       display:'flex',flexDirection:'column',
       boxShadow:'0 -8px 40px rgba(0,0,0,0.14)',
-      paddingBottom:'env(safe-area-inset-bottom,0px)'}}>
+      paddingBottom:'env(safe-area-inset-bottom,8px)'}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
-        padding:'18px 20px 14px',borderBottom:`1px solid ${T.borderLight}`,flexShrink:0}}>
-        <span style={{fontWeight:700,color:T.text,fontSize:17,letterSpacing:'-0.02em',flex:1,marginRight:12}}>{title}</span>
+        padding:isMob?'16px 16px 12px':'18px 20px 14px',borderBottom:`1px solid ${T.borderLight}`,flexShrink:0}}>
+        <span style={{fontWeight:700,color:T.text,fontSize:isMob?15:17,letterSpacing:'-0.02em',flex:1,marginRight:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{title}</span>
         <button type="button" onClick={onClose} style={{background:T.bg,border:`1px solid ${T.borderLight}`,cursor:'pointer',
-          color:T.muted,display:'flex',padding:6,borderRadius:8,flexShrink:0}}><X size={15}/></button>
+          color:T.muted,display:'flex',padding:isMob?8:6,borderRadius:8,flexShrink:0}}><X size={15}/></button>
       </div>
-      <div style={{overflowY:'auto',padding:'20px',flex:1,WebkitOverflowScrolling:'touch'}}>{children}</div>
+      <div style={{overflowY:'auto',padding:isMob?'14px 14px':'20px 20px',flex:1,WebkitOverflowScrolling:'touch'}}>{children}</div>
     </div>
   </div>
-);
+);}
 
 // PDF viewer using PDF.js — renders pages as canvas, works inside sandboxed iframes
 const PdfViewer = ({src}) => {
@@ -2462,7 +2485,8 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
     setNotices(updated);
     setNoticeForm(null);
   };
-  const deleteNotice=(id)=>setNotices(notices.filter(n=>n.id!==id));
+  const [confirmNoticeId,setConfirmNoticeId]=useState(null);
+  const deleteNotice=(id)=>{setNotices(notices.filter(n=>n.id!==id));setConfirmNoticeId(null);};
   const togglePin=(id)=>setNotices(notices.map(n=>n.id===id?{...n,pinned:!n.pinned}:n));
 
   // ── System Changelog ──
@@ -2805,7 +2829,7 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
                   <div style={{fontSize:13,color:T.text,lineHeight:1.6,whiteSpace:'pre-wrap'}}>{n.text}</div>
                 </div>
                 {isAdmin&&(
-                  <div style={{display:'flex',gap:4,flexShrink:0}}>
+                  <div style={{display:'flex',gap:4,flexShrink:0,alignItems:'center'}}>
                     <button title={n.pinned?'Unpin':'Pin'} onClick={()=>togglePin(n.id)}
                       style={{background:'transparent',border:'none',cursor:'pointer',color:n.pinned?T.tan:T.dim,padding:4,borderRadius:6,display:'flex'}}>
                       <Star size={13} fill={n.pinned?T.tan:'none'}/>
@@ -2814,10 +2838,20 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
                       style={{background:'transparent',border:'none',cursor:'pointer',color:T.muted,padding:4,borderRadius:6,display:'flex'}}>
                       <Edit3 size={13}/>
                     </button>
-                    <button title="Delete" onClick={()=>deleteNotice(n.id)}
-                      style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex'}}>
-                      <Trash2 size={13}/>
-                    </button>
+                    {confirmNoticeId===n.id?(
+                      <div style={{display:'flex',alignItems:'center',gap:4}}>
+                        <span style={{fontSize:11,color:T.danger,fontWeight:600}}>Delete?</span>
+                        <button onClick={()=>deleteNotice(n.id)}
+                          style={{background:T.danger,color:'#fff',border:'none',borderRadius:6,padding:'3px 8px',fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>Yes</button>
+                        <button onClick={()=>setConfirmNoticeId(null)}
+                          style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:6,padding:'3px 8px',fontSize:11,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>No</button>
+                      </div>
+                    ):(
+                      <button title="Delete" onClick={()=>setConfirmNoticeId(n.id)}
+                        style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex'}}>
+                        <Trash2 size={13}/>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -3417,7 +3451,8 @@ function FieldLogs({fieldLogs=[],setFieldLogs=()=>{},projects=[],activeUser=null
     return true;
   });
 
-  const deleteLog=(id)=>setFieldLogs(fieldLogs.filter(fl=>fl.id!==id));
+  const [confirmLogId,setConfirmLogId]=useState(null);
+  const deleteLog=(id)=>{setFieldLogs(fieldLogs.filter(fl=>fl.id!==id));setConfirmLogId(null);};
   const mediaEntries=filtered.filter(fl=>fl.type==='photo'||fl.type==='video');
   const logEntries=filtered.filter(fl=>fl.type!=='photo'&&fl.type!=='video');
 
@@ -3468,10 +3503,17 @@ function FieldLogs({fieldLogs=[],setFieldLogs=()=>{},projects=[],activeUser=null
                       <div style={{padding:'9px 11px'}}>
                         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:2}}>
                           <span style={{fontSize:10,fontWeight:700,color:meta.color,background:meta.bg,padding:'2px 6px',borderRadius:5,letterSpacing:'0.04em',textTransform:'uppercase'}}>{meta.label}</span>
-                          <button onClick={()=>deleteLog(fl.id)} title="Delete"
-                            style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:2,borderRadius:6,display:'flex'}}>
-                            <Trash2 size={12}/>
-                          </button>
+                          {confirmLogId===fl.id?(
+                            <div style={{display:'flex',alignItems:'center',gap:4}}>
+                              <button onClick={()=>deleteLog(fl.id)} style={{background:T.danger,color:'#fff',border:'none',borderRadius:5,padding:'2px 7px',fontSize:10,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>Delete</button>
+                              <button onClick={()=>setConfirmLogId(null)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:5,padding:'2px 7px',fontSize:10,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+                            </div>
+                          ):(
+                            <button onClick={()=>setConfirmLogId(fl.id)} title="Delete"
+                              style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:2,borderRadius:6,display:'flex'}}>
+                              <Trash2 size={12}/>
+                            </button>
+                          )}
                         </div>
                         <div style={{fontSize:11,color:T.muted}}>{proj?proj.name:'General'}</div>
                         <div style={{fontSize:10,color:T.dim}}>{new Date(fl.createdAt).toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'})} · {fl.createdBy}</div>
@@ -3510,10 +3552,20 @@ function FieldLogs({fieldLogs=[],setFieldLogs=()=>{},projects=[],activeUser=null
                           <audio controls src={fl.mediaUrl} style={{width:'100%',marginTop:8,borderRadius:8}}/>
                         )}
                       </div>
-                      <button onClick={()=>deleteLog(fl.id)} title="Delete"
-                        style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex',flexShrink:0}}>
-                        <Trash2 size={14}/>
-                      </button>
+                      {confirmLogId===fl.id?(
+                        <div style={{display:'flex',flexDirection:'column',gap:4,flexShrink:0,alignItems:'flex-end'}}>
+                          <span style={{fontSize:10,color:T.danger,fontWeight:600}}>Delete?</span>
+                          <div style={{display:'flex',gap:4}}>
+                            <button onClick={()=>deleteLog(fl.id)} style={{background:T.danger,color:'#fff',border:'none',borderRadius:5,padding:'3px 8px',fontSize:10,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>Yes</button>
+                            <button onClick={()=>setConfirmLogId(null)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:5,padding:'3px 8px',fontSize:10,color:T.muted,cursor:'pointer',fontFamily:'inherit'}}>No</button>
+                          </div>
+                        </div>
+                      ):(
+                        <button onClick={()=>setConfirmLogId(fl.id)} title="Delete"
+                          style={{background:'transparent',border:'none',cursor:'pointer',color:T.danger,padding:4,borderRadius:6,display:'flex',flexShrink:0}}>
+                          <Trash2 size={14}/>
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -3693,8 +3745,11 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
     return matchSearch&&matchStatus;
   }),[sorted,search,sfilt]);
 
+  const [projFormErr,setProjFormErr]=useState('');
   const save_=()=>{
-    if(!form.name||!form.client)return;
+    if(!form.name||!form.client){setProjFormErr('Project name and client are required.');return;}
+    if(parseFloat(form.contractAmount)<=0){setProjFormErr('Contract amount must be greater than $0.');return;}
+    setProjFormErr('');
     // Auto-compute variationOrders from voList
     const voTotal=(form.voList||[]).reduce((s,v)=>s+(parseFloat(v.amount)||0),0);
     const d={...form,
@@ -4053,7 +4108,17 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
             </div>
           );
         })}
-        {filtered.length===0&&<div style={{color:T.dim,fontSize:13,padding:24,gridColumn:'1/-1',textAlign:'center'}}>No projects found</div>}
+        {filtered.length===0&&(
+          <div style={{gridColumn:'1/-1',background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:'52px 24px',textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:10}}>
+            <FolderOpen size={32} style={{color:T.dim,opacity:0.4}}/>
+            <div style={{fontSize:15,fontWeight:700,color:T.text}}>{search||sfilt!=='All'?'No projects match your filters':'No projects yet'}</div>
+            <div style={{fontSize:13,color:T.muted,maxWidth:360}}>
+              {search||sfilt!=='All'?'Try a different search term or status filter.'
+               :isAdmin?'Click "New Project" to create your first project.'
+               :'You have no projects assigned yet. Ask your admin to assign you to a project.'}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Document viewer modal */}
@@ -4147,7 +4212,15 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
                       </div>
                     </div>
                     {quoteOcr.done&&<div style={{fontSize:11,color:T.muted,marginTop:6}}>Fields auto-filled below — review and adjust as needed</div>}
-                    {quoteOcr.err&&<div style={{fontSize:11,color:T.warning,marginTop:6}}>{quoteOcr.err}</div>}
+                    {quoteOcr.err&&(
+                      <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6}}>
+                        <div style={{fontSize:11,color:T.danger,flex:1}}>{quoteOcr.err}</div>
+                        <button type="button" onClick={()=>quoteFileRef.current?.click()}
+                          style={{fontSize:11,fontWeight:600,color:'#fff',background:T.danger,border:'none',borderRadius:6,padding:'3px 10px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
+                          Retry
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ):(
                   <button type="button" onClick={()=>quoteFileRef.current?.click()} disabled={quoteOcr.loading}
@@ -4381,8 +4454,9 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
               </div>
             </div>
           </div>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:10,marginTop:22}}>
-            <Btn variant="secondary" onClick={()=>setModal(null)}>Cancel</Btn>
+          {projFormErr&&<div style={{background:T.dangerLight,border:`1px solid ${T.danger}30`,borderRadius:8,padding:'8px 14px',fontSize:12,color:T.danger,marginTop:12}}>{projFormErr}</div>}
+          <div style={{display:'flex',justifyContent:'flex-end',gap:10,marginTop:12}}>
+            <Btn variant="secondary" onClick={()=>{setModal(null);setProjFormErr('');}}>Cancel</Btn>
             <Btn onClick={save_} disabled={quoteCompressing} loading={quoteCompressing}>{quoteCompressing?'Compressing file…':modal==='new'?'Create Project':'Save Changes'}</Btn>
           </div>
         </Modal>
@@ -4733,6 +4807,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
   const save_=()=>{
     if(!form.projectId||!form.supplier||!form.invoiceNo)return;
     if(!preview){setErr('Please upload or photograph the invoice document before saving.');return;}
+    if(parseFloat(form.total)<=0){setErr('Invoice total must be greater than $0.');return;}
     if(dup&&!window.confirm('Duplicate invoice number detected. Save anyway?'))return;
     const inv={...form,id:uid(),
       proofImage:preview||null,
@@ -5459,7 +5534,15 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
                   <span><b>PDF kept locally only</b> — this file is {Math.round(preview.length/1333)}KB which exceeds the 100KB cloud limit. The invoice data (supplier, amount, date) will sync to all devices, but the PDF attachment will only be viewable on this device during this session.</span>
                 </div>
               )}
-              {ocr.err&&<div style={{marginTop:8,fontSize:12,color:T.danger,background:T.dangerLight,borderRadius:10,padding:'9px 12px'}}>{ocr.err}</div>}
+              {ocr.err&&(
+                <div style={{marginTop:8,display:'flex',alignItems:'center',gap:10,fontSize:12,color:T.danger,background:T.dangerLight,borderRadius:10,padding:'9px 12px'}}>
+                  <span style={{flex:1}}>{ocr.err}</span>
+                  <button type="button" onClick={()=>fileRef.current?.click()}
+                    style={{fontSize:11,fontWeight:600,color:'#fff',background:T.danger,border:'none',borderRadius:6,padding:'3px 10px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>
+                    Retry
+                  </button>
+                </div>
+              )}
               {dup&&<div style={{marginTop:8,fontSize:12,color:T.warning,background:'rgba(245,158,11,0.08)',borderRadius:10,padding:'9px 12px'}}>⚠ {dup}</div>}
             </div>
 
@@ -5950,8 +6033,11 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
     finally{setOcrLoading(false);}
   };
 
+  const [payErr,setPayErr]=useState('');
   const save_=()=>{
-    if(!form.projectId||!form.amount)return;
+    if(!form.projectId||!form.amount){setPayErr('Please select a project and enter an amount.');return;}
+    if(parseFloat(form.amount)<=0){setPayErr('Payment amount must be greater than $0.');return;}
+    setPayErr('');
     const pay={...form,id:uid(),amount:parseFloat(form.amount)||0,
       receiptNo:`RCP-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`};
     const upd=[...payments,pay];
@@ -6150,7 +6236,11 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
       })}
 
       {projects.every(p=>!payments.find(py=>py.projectId===p.id))&&(
-        <div style={{color:T.dim,fontSize:13,textAlign:'center',padding:36}}>No payments recorded yet</div>
+        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:'52px 24px',textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:10}}>
+          <CreditCard size={32} style={{color:T.dim,opacity:0.4}}/>
+          <div style={{fontSize:15,fontWeight:700,color:T.text}}>No payments recorded yet</div>
+          <div style={{fontSize:13,color:T.muted,maxWidth:340}}>Use the "Record Payment" button on any project to log client deposits, progress payments, and final payments.</div>
+        </div>
       )}
 
       {modal&&(
@@ -6256,8 +6346,9 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
               </div>
             </div>
 
-            <div style={{display:'flex',justifyContent:'flex-end',gap:10,borderTop:`1px solid ${T.borderLight}`,paddingTop:14}}>
-              <Btn variant="secondary" onClick={()=>{setModal(false);setReceipt(null);}}>Cancel</Btn>
+            <div style={{display:'flex',justifyContent:'flex-end',gap:10,borderTop:`1px solid ${T.borderLight}`,paddingTop:14,alignItems:'center'}}>
+              {payErr&&<div style={{fontSize:12,color:T.danger,flex:1,fontWeight:500}}>{payErr}</div>}
+              <Btn variant="secondary" onClick={()=>{setModal(false);setReceipt(null);setPayErr('');}}>Cancel</Btn>
               <Btn onClick={save_} disabled={!form.projectId||!form.amount}>Record Payment</Btn>
             </div>
           </div>
@@ -6415,7 +6506,13 @@ Be specific, use the numbers, and keep it professional.`}]
     setGenerating(false);
   };
 
-  if(!proj)return <div style={{color:T.dim,fontSize:13,textAlign:'center',padding:40}}>No projects available</div>;
+  if(!proj)return (
+    <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:'52px 24px',textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:10}}>
+      <BarChart3 size={32} style={{color:T.dim,opacity:0.4}}/>
+      <div style={{fontSize:15,fontWeight:700,color:T.text}}>No projects to report on</div>
+      <div style={{fontSize:13,color:T.muted,maxWidth:340}}>Create a project first, then come back here to view P&L reports and generate AI financial analysis.</div>
+    </div>
+  );
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:16}}>
@@ -8265,6 +8362,8 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
         const [undoTarget,setUndoTarget]=useState(null);
         const [logSearch,setLogSearch]=useState('');
         const [logUser,setLogUser]=useState('All');
+        const [logPage,setLogPage]=useState(1);
+        const LOG_PAGE_SIZE=20;
 
         const ACTION_ICON={
           CREATE_PROJECT:'📁',EDIT_PROJECT:'✏️',CLOSE_PROJECT:'✅',REOPEN_PROJECT:'🔄',
@@ -8295,9 +8394,13 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
           })
           .sort((a,b)=>new Date(b.at)-new Date(a.at));
 
+        // Paginate filtered before grouping
+        const pagedFiltered=filtered.slice(0,logPage*LOG_PAGE_SIZE);
+        const hasMore=filtered.length>logPage*LOG_PAGE_SIZE;
+
         // Group by user for the grouped view
         const byUser={};
-        filtered.forEach(e=>{
+        pagedFiltered.forEach(e=>{
           if(!byUser[e.userName]) byUser[e.userName]={userName:e.userName,userRole:e.userRole,entries:[]};
           byUser[e.userName].entries.push(e);
         });
@@ -8309,15 +8412,15 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
             <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
               <div style={{position:'relative',flex:1,minWidth:180}}>
                 <Search size={12} style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',color:T.dim}}/>
-                <input value={logSearch} onChange={e=>setLogSearch(e.target.value)} placeholder="Search actions…"
+                <input value={logSearch} onChange={e=>{setLogSearch(e.target.value);setLogPage(1);}} placeholder="Search actions…"
                   style={{...iStyle,paddingLeft:30,fontSize:13}}/>
               </div>
-              <select value={logUser} onChange={e=>setLogUser(e.target.value)}
+              <select value={logUser} onChange={e=>{setLogUser(e.target.value);setLogPage(1);}}
                 style={{...iStyle,width:'auto',fontSize:13,cursor:'pointer'}}>
                 {uniqueUsers.map(u=><option key={u} value={u}>{u}</option>)}
               </select>
               <div style={{fontSize:12,color:T.dim,display:'flex',alignItems:'center'}}>
-                {filtered.length} action{filtered.length!==1?'s':''}
+                {pagedFiltered.length} of {filtered.length} action{filtered.length!==1?'s':''}
               </div>
             </div>
 
@@ -8380,6 +8483,15 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
                 </div>
               </div>
             ))}
+
+            {hasMore&&(
+              <div style={{textAlign:'center',paddingTop:4}}>
+                <button onClick={()=>setLogPage(p=>p+1)}
+                  style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:10,padding:'10px 28px',fontSize:13,fontWeight:600,color:T.text,cursor:'pointer',fontFamily:'inherit'}}>
+                  Load more ({filtered.length-pagedFiltered.length} remaining)
+                </button>
+              </div>
+            )}
 
             {/* Undo confirmation modal */}
             {undoTarget&&(
@@ -8884,7 +8996,11 @@ function Contacts({projects,invoices,payments}){
       {view==='clients'&&(
         <div style={{display:'flex',flexDirection:'column',gap:12}}>
           {filteredClients.length===0&&(
-            <div style={{color:T.dim,fontSize:13,textAlign:'center',padding:40}}>No clients found</div>
+            <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:'48px 24px',textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:10}}>
+              <Home size={32} style={{color:T.dim,opacity:0.4}}/>
+              <div style={{fontSize:15,fontWeight:700,color:T.text}}>{search?'No clients match your search':'No clients yet'}</div>
+              <div style={{fontSize:13,color:T.muted,maxWidth:340}}>{search?'Try a different name or clear the search.':'Clients appear here automatically once you create a project with a client name.'}</div>
+            </div>
           )}
           {filteredClients.map(c=>{
             const totalRev=c.projects.reduce((s,p)=>s+p.contractAmount,0);
@@ -8979,7 +9095,11 @@ function Contacts({projects,invoices,payments}){
           )}
 
           {filteredSuppliers.length===0&&(
-            <div style={{color:T.dim,fontSize:13,textAlign:'center',padding:40}}>No suppliers found</div>
+            <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:'48px 24px',textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:10}}>
+              <Building2 size={32} style={{color:T.dim,opacity:0.4}}/>
+              <div style={{fontSize:15,fontWeight:700,color:T.text}}>{search?'No suppliers match your search':'No suppliers yet'}</div>
+              <div style={{fontSize:13,color:T.muted,maxWidth:340}}>{search?'Try a different name or clear the search.':'Suppliers and subcontractors appear here automatically once you add invoices against them.'}</div>
+            </div>
           )}
           {filteredSuppliers.map(s=>(
             <div key={s.name} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:22,boxShadow:T.shadow}}>
@@ -15892,6 +16012,7 @@ function OrgNodeEditModal({node,onSave,onClose,nodes,users=[]}){
 function OrgChart({orgNodes,setOrgNodes,acctSettings,isAdmin,users=[]}){
   const [editNode,setEditNode]=useState(null);
   const [selected,setSelected]=useState(null);
+  const [confirmOrgDelete,setConfirmOrgDelete]=useState(null);
   const [pan,setPan]=useState({x:500,y:80});
   const [zoom,setZoom]=useState(1);
   const [panDrag,setPanDrag]=useState(null);
@@ -16074,7 +16195,7 @@ ${linesSvg}${nodesSvg}</svg></body></html>`;
                       <text x={11} y={15} textAnchor="middle" fontSize={11} fill="#fff">✎</text>
                     </g>
                     <g transform={`translate(${ORG_NODE_W+5},${ORG_NODE_H/2-11})`}
-                      onClick={e=>{e.stopPropagation();deleteNode(node.id);}}>
+                      onClick={e=>{e.stopPropagation();setConfirmOrgDelete(node.id);}}>
                       <circle cx={11} cy={11} r={11} fill="#ef4444" style={{cursor:'pointer'}}/>
                       <text x={11} y={15} textAnchor="middle" fontSize={15} fill="#fff">×</text>
                     </g>
@@ -16110,6 +16231,21 @@ ${linesSvg}${nodesSvg}</svg></body></html>`;
         )}
       </div>
       {editNode&&<OrgNodeEditModal node={editNode} onSave={onSaveNode} onClose={()=>setEditNode(null)} nodes={orgNodes} users={users}/>}
+      {confirmOrgDelete&&(
+        <div style={{position:'fixed',inset:0,zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.35)'}}>
+          <div style={{background:T.card,borderRadius:16,padding:'24px 28px',boxShadow:'0 8px 32px rgba(0,0,0,0.18)',maxWidth:320,width:'90%',textAlign:'center'}}>
+            <Trash2 size={28} style={{color:T.danger,marginBottom:10}}/>
+            <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:6}}>Remove this node?</div>
+            <div style={{fontSize:13,color:T.muted,marginBottom:20}}>The node will be removed from the chart. Any child nodes will be re-linked to its parent.</div>
+            <div style={{display:'flex',gap:10,justifyContent:'center'}}>
+              <button onClick={()=>setConfirmOrgDelete(null)}
+                style={{flex:1,padding:'10px',borderRadius:10,border:`1px solid ${T.border}`,background:'transparent',color:T.muted,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>Cancel</button>
+              <button onClick={()=>{deleteNode(confirmOrgDelete);setConfirmOrgDelete(null);}}
+                style={{flex:1,padding:'10px',borderRadius:10,border:'none',background:T.danger,color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>Remove</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
