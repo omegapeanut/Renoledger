@@ -1196,7 +1196,7 @@ const buildHandoverHTML = (proj, projInvoices, finalPayment, handoverData, co, p
   // ═══════════════════════════════════════════════════════════
   // PAGE 1 — HANDOVER CERTIFICATE (client copy)
   // ═══════════════════════════════════════════════════════════
-  html += '<div style="width:100%;min-height:100vh;display:flex;flex-direction:column;padding:44px 52px 40px;box-sizing:border-box;background:#fff;page-break-after:always;">';
+  html += '<div class="hdpage" style="width:100%;min-height:100vh;display:flex;flex-direction:column;padding:40px 48px 36px;box-sizing:border-box;background:#fff;page-break-after:always;break-after:page;">';
 
   // Header
   html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0;flex:0 0 auto;">';
@@ -1360,7 +1360,7 @@ const buildHandoverHTML = (proj, projInvoices, finalPayment, handoverData, co, p
   // ═══════════════════════════════════════════════════════════
   // PAGE 2 — DEFECTS LIABILITY RECORD (company copy)
   // ═══════════════════════════════════════════════════════════
-  html += '<div style="width:100%;min-height:100vh;display:flex;flex-direction:column;padding:44px 52px 40px;box-sizing:border-box;background:#fff;">';
+  html += '<div class="hdpage" style="width:100%;min-height:100vh;display:flex;flex-direction:column;padding:40px 48px 36px;box-sizing:border-box;background:#fff;">';
 
   html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex:0 0 auto;margin-bottom:0;">';
   html += '<div>';
@@ -1448,8 +1448,9 @@ const printDoc = (html, title='Document', fullPage=false) => {
     body{font-family:"DM Sans",-apple-system,sans-serif;font-size:13px;color:#1A1A1A;background:${fullPage?'#fff':'#F8F6F2'};${fullPage?'':'padding:36px;'}}
     @media print{
       html,body{height:100%;margin:0;padding:0;background:#fff;}
-      @page{margin:${fullPage?'0':'12mm'};size:A4;}
+      @page{margin:${fullPage?'0':'12mm'};size:A4 portrait;}
       .no-print{display:none!important;}
+      .hdpage{height:297mm!important;overflow:hidden!important;page-break-after:always!important;break-after:page!important;}
     }
   </style>
 </head>
