@@ -1533,7 +1533,7 @@ const buildSOAHTML = (proj, projInv, projPay, co) => {
   const rev=(proj.contractAmount||0)+(proj.variationOrders||0);
   const totalPaid=projPay.filter(p=>p.status==='Received').reduce((s,p)=>s+p.amount,0);
   const outstanding=rev-totalPaid;
-  const payRows=projPay.map(p=>`
+  const payRows=[...projPay].sort((a,b)=>new Date(a.date||0)-new Date(b.date||0)).map(p=>`
     <tr style="border-bottom:1px solid #EDE9E1;">
       <td style="padding:7px 4px;font-size:11px;color:#1A1A1A;">${p.date?new Date(p.date).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}):'—'}</td>
       <td style="padding:7px 4px;font-size:11px;color:#1A1A1A;">${p.type} Payment</td>
@@ -6269,7 +6269,7 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
       })()}
 
       {projects.map(proj=>{
-        const pp=payments.filter(p=>p.projectId===proj.id);
+        const pp=payments.filter(p=>p.projectId===proj.id).sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
         if(pp.length===0)return null;
         const projInv=invoices.filter(i=>i.projectId===proj.id);
         const rev=proj.contractAmount+(proj.variationOrders||0);
