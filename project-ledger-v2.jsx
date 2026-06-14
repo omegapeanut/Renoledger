@@ -5496,6 +5496,8 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
       {Object.entries(activeByProject).map(([projId,invList])=>{
         const proj=projects.find(p=>p.id===projId);
         const projTotal=invList.reduce((s,i)=>s+i.total,0);
+        const projPaid=invList.filter(i=>i.status==='Paid').reduce((s,i)=>s+i.total,0);
+        const projPending=projTotal-projPaid;
         return(
           <div key={projId} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,overflow:'hidden',boxShadow:T.shadow}}>
             <div style={{padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`,display:'flex',alignItems:'center',justifyContent:'space-between',background:T.bg}}>
@@ -5504,9 +5506,22 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
                 <span style={{fontSize:14,fontWeight:600,color:T.text}}>{proj?.name||'Unknown Project'}</span>
                 <span style={{fontSize:12,color:T.muted}}>{proj?.client}</span>
               </div>
-              <div style={{display:'flex',alignItems:'center',gap:12}}>
+              <div style={{display:'flex',alignItems:'center',gap:16,flexWrap:'wrap',justifyContent:'flex-end'}}>
                 <span style={{fontSize:12,color:T.dim}}>{invList.length} invoice{invList.length!==1?'s':''}</span>
-                <span style={{fontSize:13,fontWeight:700,color:T.text}}>{fmtSGD(projTotal)}</span>
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  <span style={{fontSize:11,color:T.dim}}>Total</span>
+                  <span style={{fontSize:13,fontWeight:700,color:T.text}}>{fmtSGD(projTotal)}</span>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  <span style={{fontSize:11,color:T.success}}>Paid</span>
+                  <span style={{fontSize:13,fontWeight:700,color:T.success}}>{fmtSGD(projPaid)}</span>
+                </div>
+                {projPending>0&&(
+                  <div style={{display:'flex',alignItems:'center',gap:6}}>
+                    <span style={{fontSize:11,color:T.danger}}>Unpaid</span>
+                    <span style={{fontSize:13,fontWeight:700,color:T.danger}}>{fmtSGD(projPending)}</span>
+                  </div>
+                )}
               </div>
             </div>
             <InvTable invList={invList}/>
