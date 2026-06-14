@@ -3734,9 +3734,12 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
 
 
   const sorted=useMemo(()=>[...projects].sort((a,b)=>{
-    // Sort by start date desc (most recent first), fall back to createdAt
-    const da=new Date(a.startDate||a.createdAt||0);
-    const db=new Date(b.startDate||b.createdAt||0);
+    // Sort by start date descending; projects with no start date go to the bottom
+    const da=a.startDate?new Date(a.startDate):null;
+    const db=b.startDate?new Date(b.startDate):null;
+    if(!da&&!db) return 0;
+    if(!da) return 1;
+    if(!db) return -1;
     return db-da;
   }),[projects]);
 
