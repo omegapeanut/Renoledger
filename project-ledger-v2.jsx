@@ -11,7 +11,7 @@ import {
   Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine, Link2,
   Zap, Plug, Wifi, Wind, Palette, LayoutGrid, BookOpen, ArrowUpDown,
   Mic, MicOff, Video, FileText, Sparkles, Image, Filter,
-  Landmark, TrendingDown
+  Landmark, TrendingDown, List
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -3609,6 +3609,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
   const ff=k=>v=>setForm(p=>({...p,[k]:v}));
 
   const [meetingOpenProj,setMeetingOpenProj]=useState(null); // project id whose meetings are expanded
+  const [viewMode,setViewMode]=useState('card'); // 'card' | 'list'
 
   const [handoverTarget,setHandoverTarget]=useState(null); // project being handed over
   const [handoverForm,setHandoverForm]=useState({
@@ -3830,6 +3831,17 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
           <option value="" style={{}}>By status…</option>
           {PROJ_STATUSES.map(s=><option key={s} value={s} style={{}}>{s}</option>)}
         </select>
+        {/* Card / List toggle */}
+        <div style={{display:'flex',background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:10,overflow:'hidden',flexShrink:0}}>
+          {[{v:'card',Icon:LayoutGrid},{v:'list',Icon:List}].map(({v,Icon})=>(
+            <button key={v} onClick={()=>setViewMode(v)}
+              style={{padding:'7px 11px',border:'none',cursor:'pointer',fontFamily:'inherit',
+                background:viewMode===v?T.text:'transparent',
+                color:viewMode===v?T.bg:T.muted,display:'flex',alignItems:'center',transition:'all .15s'}}>
+              <Icon size={14}/>
+            </button>
+          ))}
+        </div>
         <Btn onClick={()=>{
           const yr=new Date().getFullYear();
           const sameYear=projects.filter(p=>(p.projectYear||(p.createdAt?new Date(p.createdAt).getFullYear():yr))===yr);
@@ -3839,7 +3851,113 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
         }}><Plus size={13}/>New Project</Btn>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(min(350px,100%),1fr))',gap:14}}>
+      {/* ── LIST VIEW ── */}
+      {viewMode==='list'&&(
+        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,overflow:'hidden',boxShadow:T.shadow}}>
+          {/* Header row */}
+          <div style={{display:'grid',gridTemplateColumns:'90px 1fr 130px 90px 100px 68px 68px 120px 100px',
+            gap:0,padding:'9px 16px',background:T.bg,borderBottom:`1px solid ${T.borderLight}`,
+            fontSize:9,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em'}}>
+            <span>Code</span><span>Project</span><span>Client</span><span>Status</span>
+            <span style={{textAlign:'right'}}>Contract</span><span style={{textAlign:'right'}}>Margin</span>
+            <span style={{textAlign:'right'}}>Collected</span><span>Dates</span><span style={{textAlign:'right'}}>Actions</span>
+          </div>
+          {filtered.length===0&&(
+            <div style={{padding:'40px',textAlign:'center',color:T.muted,fontSize:13}}>No projects match this filter.</div>
+          )}
+          {filtered.map((p,idx)=>{
+            const exp=invoices.filter(i=>i.projectId===p.id).reduce((s,i)=>s+i.total,0);
+            const rev=(p.contractAmount||0)+(p.variationOrders||0);
+            const recv=payments.filter(py=>py.projectId===p.id&&py.status==='Received').reduce((s,py)=>s+py.amount,0);
+            const gross=rev-exp;
+            const margin=rev>0?gross/rev*100:0;
+            const pctCollected=rev>0?Math.min(recv/rev*100,100):0;
+            const daysLeft=p.endDate?Math.ceil((new Date(p.endDate)-new Date())/864e5):null;
+            const overdue=daysLeft!==null&&daysLeft<0&&p.status!=='Completed'&&!p.archived;
+            const code=p.projectNumber?`${String(p.projectYear||new Date().getFullYear()).slice(-2)}-${String(p.projectNumber).padStart(2,'0')}`:null;
+            return(
+              <div key={p.id} style={{display:'grid',gridTemplateColumns:'90px 1fr 130px 90px 100px 68px 68px 120px 100px',
+                gap:0,padding:'11px 16px',borderTop:idx===0?'none':`1px solid ${T.borderLight}`,
+                alignItems:'center',background:p.archived?T.bg:T.card,opacity:p.archived?0.75:1,
+                transition:'background .12s'}}>
+                {/* Code */}
+                <div>
+                  {code
+                    ?<span style={{background:T.text,color:T.bg,borderRadius:5,padding:'2px 7px',fontSize:10,fontWeight:700,fontFamily:'monospace'}}>{code}</span>
+                    :<span style={{fontSize:10,color:T.dim}}>—</span>}
+                </div>
+                {/* Name */}
+                <div style={{paddingRight:12,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:T.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</div>
+                  {p.clientAddress&&<div style={{fontSize:10,color:T.dim,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginTop:1}}>{p.clientAddress}</div>}
+                </div>
+                {/* Client */}
+                <div style={{paddingRight:8,minWidth:0}}>
+                  <div style={{fontSize:12,color:T.muted,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.client||'—'}</div>
+                  {p.clientPhone&&<div style={{fontSize:10,color:T.dim}}>{p.clientPhone}</div>}
+                </div>
+                {/* Status */}
+                <div><Badge color={ST_CLR[p.status]}>{p.status}</Badge></div>
+                {/* Contract */}
+                <div style={{textAlign:'right',fontSize:12,fontWeight:700,color:T.text}}>{fmtSGD(rev)}</div>
+                {/* Margin */}
+                <div style={{textAlign:'right',fontSize:12,fontWeight:700,color:margin>20?T.success:margin>0?T.accent:T.danger}}>{rev>0?`${margin.toFixed(1)}%`:'—'}</div>
+                {/* Collected */}
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:12,fontWeight:700,color:pctCollected>=100?T.success:T.muted}}>{rev>0?`${pctCollected.toFixed(0)}%`:'—'}</div>
+                </div>
+                {/* Dates */}
+                <div style={{fontSize:10,color:overdue?T.danger:T.dim,fontWeight:overdue?700:400}}>
+                  <div>{p.startDate?fmtDate(p.startDate):'No start'}{p.endDate&&` → ${fmtDate(p.endDate)}`}</div>
+                  {overdue&&<div style={{color:T.danger,fontWeight:700}}>{Math.abs(daysLeft)}d overdue</div>}
+                  {!overdue&&daysLeft!==null&&daysLeft<=14&&p.status!=='Completed'&&!p.archived&&<div style={{color:T.warning}}>{daysLeft}d left</div>}
+                </div>
+                {/* Actions */}
+                <div style={{display:'flex',gap:4,justifyContent:'flex-end',alignItems:'center',flexWrap:'nowrap'}}>
+                  {!p.archived&&(
+                    <button title="Edit" onClick={()=>{
+                      const inferredYear=p.startDate?new Date(p.startDate).getFullYear():(p.projectYear||(p.createdAt?new Date(p.createdAt).getFullYear():new Date().getFullYear()));
+                      setForm({...p,contractAmount:String(p.contractAmount),variationOrders:String(p.variationOrders??0),designerRate:String(p.designerRate??0),pmRate:String(p.pmRate??0),projectYear:inferredYear});setModal('edit');}}
+                      style={{background:'none',border:'none',cursor:'pointer',color:T.dim,display:'flex',padding:4,borderRadius:5}}>
+                      <Edit3 size={12}/>
+                    </button>
+                  )}
+                  <button title="Cover page" onClick={()=>{
+                    const projInv=invoices.filter(i=>i.projectId===p.id);
+                    const projPay=payments.filter(py=>py.projectId===p.id);
+                    printDoc(buildCoverPageHTML(p,projInv,projPay,getCo(acctSettings),activeUser?.name),`Cover — ${p.name}`,true);
+                  }} style={{background:'none',border:'none',cursor:'pointer',color:T.dim,display:'flex',padding:4,borderRadius:5}}>
+                    <FileSpreadsheet size={12}/>
+                  </button>
+                  {!p.archived&&p.status!=='Cancelled'&&(
+                    <button title="Handover" onClick={()=>{
+                      setHandoverTarget(p);
+                      setHandoverForm({handoverDate:new Date().toISOString().slice(0,10),defects:'',outstanding:'',finalPaymentAmount:'',finalPaymentMethod:'PayNow',finalPaymentReceiptNo:''});
+                    }} style={{background:'none',border:'none',cursor:'pointer',color:T.success,display:'flex',padding:4,borderRadius:5}}>
+                      <CheckCircle size={12}/>
+                    </button>
+                  )}
+                  {p.archived?(
+                    <button onClick={()=>unarchive(p.id)}
+                      style={{background:T.infoLight,border:'none',cursor:'pointer',color:T.info,
+                        padding:'2px 7px',borderRadius:5,fontSize:10,fontWeight:600,fontFamily:'inherit'}}>
+                      Restore
+                    </button>
+                  ):isAdmin?(
+                    <button title="Delete" onClick={()=>del_(p.id)}
+                      style={{background:'none',border:'none',cursor:'pointer',color:T.dim,display:'flex',padding:4,borderRadius:5}}>
+                      <Trash2 size={12}/>
+                    </button>
+                  ):null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── CARD VIEW ── */}
+      {viewMode==='card'&&<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(min(350px,100%),1fr))',gap:14}}>
         {filtered.map(p=>{
           const exp=invoices.filter(i=>i.projectId===p.id).reduce((s,i)=>s+i.total,0);
           const rev=p.contractAmount+(p.variationOrders||0);
@@ -4124,7 +4242,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
             </div>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Document viewer modal */}
       {docViewer&&(
