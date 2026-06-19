@@ -8000,10 +8000,59 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
   );
 }
 
-function Commissions({projects,setProjects,invoices,isAdmin,users=[]}){
+function Commissions({projects,setProjects,invoices,isAdmin,users=[],commAdvances=[],setCommAdvances=()=>{},activeUser=null,acctSettings={}}){
   const [payModal,setPayModal]=useState(null);
   const [payForm,setPayForm]=useState({date:new Date().toISOString().slice(0,10),method:'bank_transfer',reference:'',notes:'',dPaid:true,pmPaid:true});
   const pf=k=>v=>setPayForm(p=>({...p,[k]:v}));
+  const [advModal,setAdvModal]=useState(false);
+  const [advForm,setAdvForm]=useState({projectId:'',amount:'',reason:''});
+  const [advProofModal,setAdvProofModal]=useState(null);
+  const [advProofUploading,setAdvProofUploading]=useState(false);
+  const [rejectModal,setRejectModal]=useState(null);
+  const [rejectReason,setRejectReason]=useState('');
+  const advFileRef=useRef(null);
+  const af=k=>v=>setAdvForm(p=>({...p,[k]:v}));
+  const saveAdvances=(next)=>{setCommAdvances(next);saveS('commAdvances',next);};
+  const myName=activeUser?.name||'';
+  const myRole=activeUser?.role||'';
+  const isDesignerOrPM=myRole==='designer'||myRole==='pm';
+  const myProjects=projects.filter(p=>!p.archived&&(p.designer===myName||p.pm===myName));
+  const myAdvances=(commAdvances||[]).filter(a=>a.appliedBy===myName);
+  const pendingAdv=(commAdvances||[]).filter(a=>a.status==='Pending');
+  const approvedUnpaidAdv=(commAdvances||[]).filter(a=>a.status==='Approved');
+  const advDeductions=(projId,name)=>(commAdvances||[]).filter(a=>a.projectId===projId&&a.appliedBy===name&&a.status==='Paid').reduce((s,a)=>s+a.amount,0);
+  const totalAdvPaid=(projId)=>(commAdvances||[]).filter(a=>a.projectId===projId&&a.status==='Paid').reduce((s,a)=>s+a.amount,0);
+  const submitAdvance=()=>{
+    if(!advForm.projectId||!advForm.amount) return;
+    const proj=projects.find(p=>p.id===advForm.projectId);
+    if(!proj) return;
+    const amount=parseFloat(advForm.amount)||0;
+    if(amount<=0||amount>1000){alert('Advance amount must be between S$1 and S$1,000.');return;}
+    const existing=(commAdvances||[]).find(a=>a.projectId===advForm.projectId&&a.appliedBy===myName&&(a.status==='Pending'||a.status==='Approved'));
+    if(existing){alert('You already have a pending or approved advance for this project.');return;}
+    const newAdv={id:uid(),projectId:advForm.projectId,projectName:proj.name,
+      appliedBy:myName,role:proj.designer===myName?'designer':'pm',
+      amount,reason:advForm.reason,status:'Pending',appliedAt:new Date().toISOString(),
+      approvedBy:null,approvedAt:null,rejectedBy:null,rejectedAt:null,rejectionReason:null,paidAt:null,proofImage:null};
+    saveAdvances([...(commAdvances||[]),newAdv]);
+    setAdvModal(false);setAdvForm({projectId:'',amount:'',reason:''});
+  };
+  const approveAdv=(id)=>saveAdvances((commAdvances||[]).map(a=>a.id!==id?a:{...a,status:'Approved',approvedBy:myName||'Admin',approvedAt:new Date().toISOString()}));
+  const rejectAdv=()=>{
+    if(!rejectModal) return;
+    saveAdvances((commAdvances||[]).map(a=>a.id!==rejectModal?a:{...a,status:'Rejected',rejectedBy:myName||'Admin',rejectedAt:new Date().toISOString(),rejectionReason:rejectReason}));
+    setRejectModal(null);setRejectReason('');
+  };
+  const uploadProof=async(file,advId)=>{
+    if(!file) return;
+    setAdvProofUploading(true);
+    try{
+      const url=await uploadToCloudinary(file);
+      saveAdvances((commAdvances||[]).map(a=>a.id!==advId?a:{...a,status:'Paid',paidAt:new Date().toISOString(),proofImage:url||null}));
+      setAdvProofModal(null);
+    }catch(e){alert('Upload failed: '+e.message);}
+    finally{setAdvProofUploading(false);}
+  };
 
   const markPaid=(proj)=>{
     const payout={
@@ -8078,6 +8127,110 @@ function Commissions({projects,setProjects,invoices,isAdmin,users=[]}){
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:20}}>
+
+      {/* ── ADMIN: Pending Advance Requests ── */}
+      {isAdmin&&(pendingAdv.length>0||approvedUnpaidAdv.length>0)&&(
+        <div style={{background:T.card,border:`2px solid ${T.warning}40`,borderRadius:18,overflow:'hidden',boxShadow:T.shadow}}>
+          <div style={{padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`,background:T.warningLight,display:'flex',alignItems:'center',gap:10}}>
+            <AlertCircle size={15} style={{color:T.warning}}/>
+            <span style={{fontSize:14,fontWeight:700,color:T.text}}>Commission Advance Requests</span>
+            {pendingAdv.length>0&&<Badge color={T.warning}>{pendingAdv.length} pending</Badge>}
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:0}}>
+            {[...pendingAdv,...approvedUnpaidAdv].map((adv,idx)=>{
+              const proj=projects.find(p=>p.id===adv.projectId);
+              const{dComm,pmComm}=proj?calcComm(proj,invoices):{dComm:0,pmComm:0};
+              const totalComm=adv.role==='designer'?dComm:pmComm;
+              return(
+                <div key={adv.id} style={{padding:'14px 20px',borderTop:idx===0?'none':`1px solid ${T.borderLight}`,display:'flex',alignItems:'flex-start',gap:14,flexWrap:'wrap'}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:4}}>
+                      <span style={{fontSize:13,fontWeight:700,color:T.text}}>{adv.appliedBy}</span>
+                      <Badge color={adv.role==='designer'?T.accent:T.info} sm>{adv.role==='designer'?'Designer':'PM'}</Badge>
+                      <Badge color={adv.status==='Pending'?T.warning:T.success} sm>{adv.status}</Badge>
+                    </div>
+                    <div style={{fontSize:12,color:T.muted}}>{adv.projectName}</div>
+                    {adv.reason&&<div style={{fontSize:11,color:T.dim,marginTop:3,fontStyle:'italic'}}>"{adv.reason}"</div>}
+                    <div style={{fontSize:10,color:T.dim,marginTop:3}}>{new Date(adv.appliedAt).toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'})}</div>
+                    {totalComm>0&&<div style={{fontSize:11,color:T.muted,marginTop:2}}>Project commission: {fmtSGD(totalComm)}</div>}
+                  </div>
+                  <div style={{textAlign:'right',flexShrink:0}}>
+                    <div style={{fontSize:20,fontWeight:800,color:T.accent}}>{fmtSGD(adv.amount)}</div>
+                    <div style={{fontSize:10,color:T.dim}}>requested</div>
+                  </div>
+                  <div style={{display:'flex',gap:8,alignItems:'center',flexShrink:0,flexWrap:'wrap'}}>
+                    {adv.status==='Pending'&&(<>
+                      <Btn onClick={()=>approveAdv(adv.id)}><CheckCircle size={12}/>Approve</Btn>
+                      <Btn variant="secondary" onClick={()=>{setRejectModal(adv.id);setRejectReason('');}}><X size={12}/>Reject</Btn>
+                    </>)}
+                    {adv.status==='Approved'&&(<>
+                      <input ref={advFileRef} type="file" accept="image/*,.pdf" style={{display:'none'}}
+                        onChange={e=>{const f=e.target.files?.[0];if(f){uploadProof(f,adv.id);}e.target.value='';}}/>
+                      <Btn onClick={()=>{setAdvProofModal(adv.id);advFileRef.current?.click();}} disabled={advProofUploading}>
+                        {advProofUploading?<><Loader2 size={12} style={{animation:'spin 1s linear infinite'}}/>Uploading…</>:<><Upload size={12}/>Upload Proof & Pay</>}
+                      </Btn>
+                    </>)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── DESIGNER/PM: My Advance Requests ── */}
+      {isDesignerOrPM&&(
+        <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,overflow:'hidden',boxShadow:T.shadow}}>
+          <div style={{padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`,display:'flex',alignItems:'center',justifyContent:'space-between',background:T.bg}}>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <DollarSign size={14} style={{color:T.accent}}/>
+              <span style={{fontSize:14,fontWeight:600,color:T.text}}>My Commission Advances</span>
+              <span style={{fontSize:11,color:T.dim}}>max S$1,000 per project</span>
+            </div>
+            <Btn onClick={()=>{setAdvForm({projectId:myProjects[0]?.id||'',amount:'',reason:''});setAdvModal(true);}}>
+              <Plus size={12}/>Request Advance
+            </Btn>
+          </div>
+          {myAdvances.length===0?(
+            <div style={{padding:'32px',textAlign:'center',color:T.dim,fontSize:13}}>No advance requests yet. Click "Request Advance" to apply.</div>
+          ):(
+            <div>
+              {[...myAdvances].sort((a,b)=>new Date(b.appliedAt)-new Date(a.appliedAt)).map((adv,idx)=>{
+                const statusClr=adv.status==='Paid'?T.success:adv.status==='Approved'?T.info:adv.status==='Rejected'?T.danger:T.warning;
+                return(
+                  <div key={adv.id} style={{padding:'12px 20px',borderTop:idx===0?'none':`1px solid ${T.borderLight}`,
+                    display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',
+                    background:adv.status==='Rejected'?T.bg:T.card}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:3}}>
+                        <span style={{fontSize:13,fontWeight:600,color:T.text}}>{adv.projectName}</span>
+                        <Badge color={statusClr} sm>{adv.status}</Badge>
+                      </div>
+                      {adv.reason&&<div style={{fontSize:11,color:T.dim,fontStyle:'italic'}}>"{adv.reason}"</div>}
+                      <div style={{fontSize:10,color:T.dim,marginTop:2}}>
+                        Applied {new Date(adv.appliedAt).toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'})}
+                        {adv.status==='Paid'&&adv.paidAt&&` · Paid ${new Date(adv.paidAt).toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'})}`}
+                        {adv.status==='Rejected'&&adv.rejectionReason&&` · Reason: ${adv.rejectionReason}`}
+                      </div>
+                    </div>
+                    <div style={{textAlign:'right',flexShrink:0}}>
+                      <div style={{fontSize:15,fontWeight:700,color:statusClr}}>{fmtSGD(adv.amount)}</div>
+                    </div>
+                    {adv.status==='Paid'&&adv.proofImage&&(
+                      <button onClick={()=>window.open(adv.proofImage,'_blank')}
+                        style={{background:T.successLight,border:'none',cursor:'pointer',color:T.success,
+                          display:'flex',padding:'4px 10px',borderRadius:6,fontSize:11,fontWeight:600,
+                          fontFamily:'inherit',alignItems:'center',gap:4}}>
+                        <Eye size={11}/>Proof
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Individual balances */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:16}}>
@@ -8299,28 +8452,85 @@ function Commissions({projects,setProjects,invoices,isAdmin,users=[]}){
         </div>
       )}
 
+      {/* ── Request Advance Modal ── */}
+      {advModal&&(
+        <Modal title="Request Commission Advance" onClose={()=>setAdvModal(false)}>
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            <div style={{background:T.warningLight,border:`1px solid ${T.warning}30`,borderRadius:10,padding:'10px 14px',fontSize:12,color:T.warning}}>
+              Advances are capped at <strong>S$1,000 per project</strong>. The amount will be deducted from your final commission when the project is closed and paid out.
+            </div>
+            <div>
+              <label style={{fontSize:12,fontWeight:500,color:T.muted,display:'block',marginBottom:6}}>Project</label>
+              <select value={advForm.projectId} onChange={e=>af('projectId')(e.target.value)} style={{...iStyle,fontSize:13}}>
+                <option value="">— Select your project —</option>
+                {myProjects.map(p=>{
+                  const{dComm,pmComm}=calcComm(p,invoices);
+                  const myComm=p.designer===myName?dComm:pmComm;
+                  const alreadyAdv=(commAdvances||[]).filter(a=>a.projectId===p.id&&a.appliedBy===myName&&(a.status==='Pending'||a.status==='Approved'||a.status==='Paid')).reduce((s,a)=>s+a.amount,0);
+                  return <option key={p.id} value={p.id}>{p.name} — Commission: {fmtSGD(myComm)}{alreadyAdv>0?` (${fmtSGD(alreadyAdv)} advanced)`:''}</option>;
+                })}
+              </select>
+            </div>
+            <Field label="Advance Amount (S$, max 1,000)" type="number" value={advForm.amount} onChange={af('amount')} placeholder="e.g. 500"/>
+            <Field label="Reason / Note (optional)" value={advForm.reason} onChange={af('reason')} placeholder="e.g. Bridging for personal expense"/>
+            <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
+              <Btn variant="secondary" onClick={()=>setAdvModal(false)}>Cancel</Btn>
+              <Btn onClick={submitAdvance} disabled={!advForm.projectId||!advForm.amount}>
+                <DollarSign size={13}/>Submit Request
+              </Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Reject Modal ── */}
+      {rejectModal&&(
+        <Modal title="Reject Advance Request" onClose={()=>setRejectModal(null)}>
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            <div style={{fontSize:13,color:T.muted}}>Provide a reason for rejection (optional):</div>
+            <input value={rejectReason} onChange={e=>setRejectReason(e.target.value)}
+              placeholder="e.g. Insufficient project progress" style={{...iStyle}}/>
+            <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
+              <Btn variant="secondary" onClick={()=>setRejectModal(null)}>Cancel</Btn>
+              <Btn onClick={rejectAdv} style={{background:T.danger,color:'#fff'}}><X size={13}/>Reject</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Pay out confirmation modal — enhanced */}
       {payModal&&pending&&(
         <Modal title="Record Commission Payout" onClose={()=>setPayModal(null)}>
           <div style={{display:'flex',flexDirection:'column',gap:14}}>
             {/* Summary */}
-            <div style={{background:T.bg,borderRadius:12,padding:'14px 16px'}}>
-              <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:8}}>{pending.name}</div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:8}}>
-                <div style={{background:T.card,borderRadius:10,padding:'10px 14px',border:`1px solid ${T.accent}20`}}>
-                  <div style={{fontSize:11,color:T.dim,marginBottom:2}}>{pending.designer} (Designer)</div>
-                  <div style={{fontSize:16,fontWeight:800,color:T.accent}}>{fmtSGD(pending.dComm)}</div>
+            {(()=>{
+              const dAdv=advDeductions(pending.id,pending.designer);
+              const pmAdv=advDeductions(pending.id,pending.pm);
+              const dNet=Math.max(0,pending.dComm-dAdv);
+              const pmNet=Math.max(0,pending.pmComm-pmAdv);
+              return(
+              <div style={{background:T.bg,borderRadius:12,padding:'14px 16px'}}>
+                <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:8}}>{pending.name}</div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:8}}>
+                  <div style={{background:T.card,borderRadius:10,padding:'10px 14px',border:`1px solid ${T.accent}20`}}>
+                    <div style={{fontSize:11,color:T.dim,marginBottom:2}}>{pending.designer} (Designer)</div>
+                    <div style={{fontSize:16,fontWeight:800,color:T.accent}}>{fmtSGD(pending.dComm)}</div>
+                    {dAdv>0&&<div style={{fontSize:11,color:T.danger,marginTop:3}}>− {fmtSGD(dAdv)} advance · <span style={{color:T.success,fontWeight:700}}>Pay {fmtSGD(dNet)}</span></div>}
+                  </div>
+                  <div style={{background:T.card,borderRadius:10,padding:'10px 14px',border:`1px solid ${T.info}20`}}>
+                    <div style={{fontSize:11,color:T.dim,marginBottom:2}}>{pending.pm} (Project Manager)</div>
+                    <div style={{fontSize:16,fontWeight:800,color:T.info}}>{fmtSGD(pending.pmComm)}</div>
+                    {pmAdv>0&&<div style={{fontSize:11,color:T.danger,marginTop:3}}>− {fmtSGD(pmAdv)} advance · <span style={{color:T.success,fontWeight:700}}>Pay {fmtSGD(pmNet)}</span></div>}
+                  </div>
                 </div>
-                <div style={{background:T.card,borderRadius:10,padding:'10px 14px',border:`1px solid ${T.info}20`}}>
-                  <div style={{fontSize:11,color:T.dim,marginBottom:2}}>{pending.pm} (Project Manager)</div>
-                  <div style={{fontSize:16,fontWeight:800,color:T.info}}>{fmtSGD(pending.pmComm)}</div>
+                <div style={{marginTop:10,padding:'8px 12px',background:T.successLight,borderRadius:9,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:12,color:T.success,fontWeight:600}}>Total to Pay Now</span>
+                  <span style={{fontSize:15,fontWeight:800,color:T.success}}>{fmtSGD(dNet+pmNet)}</span>
                 </div>
+                {(dAdv+pmAdv)>0&&<div style={{marginTop:6,fontSize:11,color:T.dim,textAlign:'center'}}>Total advance already paid: {fmtSGD(dAdv+pmAdv)}</div>}
               </div>
-              <div style={{marginTop:10,padding:'8px 12px',background:T.successLight,borderRadius:9,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                <span style={{fontSize:12,color:T.success,fontWeight:600}}>Total Payout</span>
-                <span style={{fontSize:15,fontWeight:800,color:T.success}}>{fmtSGD(pending.dComm+pending.pmComm)}</span>
-              </div>
-            </div>
+              );
+            })()}
 
             {/* Payment details */}
             <div>
@@ -16865,6 +17075,7 @@ export default function App(){
   const [workerClaims,setWorkerClaims]=useState([]);
   const [staffClaims,setStaffClaims]=useState([]);
   const [invoiceBatches,setInvoiceBatches]=useState([]);
+  const [commAdvances,setCommAdvances]=useState([]);
   const [reconciliation,setReconciliation]=useState({});
   const [notices,setNotices]=useState([]);
   const [systemChangelog,setSystemChangelog]=useState([]);
@@ -17144,7 +17355,7 @@ export default function App(){
   const loadAllData = useCallback(async()=>{
     setSyncing(true);
     try{
-      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,al,no,qt,sr,oc,rec,sc2,fl]=await Promise.all([
+      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,ca,al,no,qt,sr,oc,rec,sc2,fl]=await Promise.all([
         loadS('projects',SEED_PROJ),
         loadS('invoices',SEED_INV),
         loadS('payments',SEED_PAY),
@@ -17157,6 +17368,7 @@ export default function App(){
         loadS('workerClaims',[]),
         loadS('staffClaims',[]),
         loadS('invoiceBatches',[]),
+        loadS('commAdvances',[]),
         loadS('actionLog',[]),
         loadS('notices',[]),
         loadS('quotes',[]),
@@ -17233,6 +17445,7 @@ export default function App(){
       setWorkerClaims(Array.isArray(wc)?wc:[]);
       setStaffClaims(Array.isArray(sc)?sc:[]);
       setInvoiceBatches(Array.isArray(ib)?ib:[]);
+      setCommAdvances(Array.isArray(ca)?ca:[]);
       setReconciliation(rec&&typeof rec==='object'&&!Array.isArray(rec)?rec:{});
       setNotices(Array.isArray(no)?no:[]);
       setSystemChangelog(Array.isArray(sc2)&&sc2.length>0?sc2:SEED_CHANGELOG);
@@ -17752,7 +17965,7 @@ export default function App(){
           {tab==='payments'&&<Payments payments={payments} setPayments={setPayments} projects={userProjects} invoices={invoices} isAdmin={isAdmin} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='contacts'&&<Contacts projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments}/>}
           {tab==='reports'&&<Reports projects={userProjects} invoices={invoices} payments={payments} acctSettings={acctSettings}/>}
-          {tab==='commissions'&&<Commissions projects={projects} setProjects={setProjects} invoices={invoices} isAdmin={isAdmin} users={users}/>}
+          {tab==='commissions'&&<Commissions projects={projects} setProjects={setProjects} invoices={invoices} isAdmin={isAdmin} users={users} commAdvances={commAdvances} setCommAdvances={setCommAdvances} activeUser={activeUser} acctSettings={acctSettings}/>}
           {tab==='claims'&&<StaffClaims claims={staffClaims} setClaims={setStaffClaims} projects={userProjects} users={users} activeUser={activeUser} isAdmin={isAdmin} invoices={invoices} setInvoices={setInvoices} acctSettings={acctSettings} trash={trash} setTrash={setTrash}/>}
           {tab==='quotations'&&<Quotations quotes={quotes} setQuotes={setQuotes} projects={userProjects} isAdmin={isAdmin} acctSettings={acctSettings} onShowToast={handleShowToast} onSoftDelete={handleSoftDelete}/>}
           {tab==='sitereports'&&<SiteReports reports={siteReports} setReports={setSiteReports} projects={userProjects} acctSettings={acctSettings} isAdmin={isAdmin} activeUser={activeUser} onShowToast={handleShowToast} users={users} onSoftDelete={handleSoftDelete}/>}
