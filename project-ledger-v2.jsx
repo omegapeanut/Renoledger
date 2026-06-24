@@ -12159,7 +12159,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const handleCanvasMouseMove=useCallback((e)=>{
     const canvas=overlayRef.current; if(!canvas) return;
     const rect=canvas.getBoundingClientRect();
-    const nx=(e.clientX-rect.left)/canvas.width, ny=(e.clientY-rect.top)/canvas.height;
+    const nx=(e.clientX-rect.left)/rect.width, ny=(e.clientY-rect.top)/rect.height;
     if(legendDragRef.current){
       const{offsetX,offsetY}=legendDragRef.current;
       setLegendPos({x:Math.max(0,Math.min(0.88,nx-offsetX)),y:Math.max(0,Math.min(0.88,ny-offsetY))});
@@ -12173,22 +12173,51 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     legendDragRef.current=null;
   },[]);
 
+  // ── Touch support for overlay canvas (iPad / mobile) ─────────────────────
+  const handleOverlayTouchStart=useCallback((e)=>{
+    if(e.touches.length!==1) return;
+    e.preventDefault();
+    const t=e.touches[0];
+    handleCanvasMouseDown({clientX:t.clientX,clientY:t.clientY,preventDefault:()=>{}});
+  },[handleCanvasMouseDown]);
+  const handleOverlayTouchMove=useCallback((e)=>{
+    if(e.touches.length!==1) return;
+    e.preventDefault();
+    const t=e.touches[0];
+    handleCanvasMouseMove({clientX:t.clientX,clientY:t.clientY});
+  },[handleCanvasMouseMove]);
+  const handleOverlayTouchEnd=useCallback((e)=>{
+    e.preventDefault();
+    const t=e.changedTouches[0];
+    handleCanvasMouseUp();
+    // Simulate click for marker placement (tap = no legend drag)
+    handleOverlayClick({clientX:t.clientX,clientY:t.clientY,shiftKey:false});
+  },[handleCanvasMouseUp,handleOverlayClick]);
+
   // ── Interactions ──────────────────────────────────────────────────────────
   const loadFile=async(file)=>{
     const isImg=file.type.startsWith('image/')||/\.(jpe?g|png|gif|webp|bmp)$/i.test(file.name);
     setUploading(true); setPdfFilename(file.name); setFileType(isImg?'image':'pdf');
-    const ab=await file.arrayBuffer(); setPdfBytes(ab);
     if(isImg){
-      const blob=new Blob([ab],{type:file.type||'image/jpeg'});
-      const blobUrl=URL.createObjectURL(blob);
+      // Use object URL directly — works reliably on iOS Safari / iPad
+      const blobUrl=URL.createObjectURL(file);
       const img=new Image();
-      img.onload=()=>{setImgEl(img);setPdfDoc(null);setTotalPages(1);setCurrentPage(1);URL.revokeObjectURL(blobUrl);};
-      img.onerror=()=>{alert('Could not load image.');URL.revokeObjectURL(blobUrl);};
+      img.onload=()=>{
+        setImgEl(img);setPdfDoc(null);setTotalPages(1);setCurrentPage(1);
+        setUploading(false);
+        URL.revokeObjectURL(blobUrl);
+      };
+      img.onerror=()=>{alert('Could not load image. Try JPG or PNG.');setUploading(false);URL.revokeObjectURL(blobUrl);};
       img.src=blobUrl;
-      if(takeoff?.id) savePdfToIdb(takeoff.id,ab);
+      // Read bytes in background for PDF export support
+      file.arrayBuffer().then(ab=>{
+        setPdfBytes(ab);
+        if(takeoff?.id) savePdfToIdb(takeoff.id,ab);
+      }).catch(()=>{});
       const up=uploadToCloudinary(file).then(url=>{if(url)setPdfUrl(url);pdfUploadRef.current=null;return url;});
       pdfUploadRef.current=up;
     } else {
+      const ab=await file.arrayBuffer(); setPdfBytes(ab);
       if(!window.pdfjsLib){alert('PDF viewer not ready, please wait a moment.');setUploading(false);return;}
       try{
         const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
@@ -12197,15 +12226,15 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       if(takeoff?.id) savePdfToIdb(takeoff.id,ab);
       const up=uploadRawPdfToCloudinary(file).then(url=>{if(url)setPdfUrl(url);pdfUploadRef.current=null;return url;});
       pdfUploadRef.current=up;
+      setUploading(false);
     }
-    setUploading(false);
   };
 
   const handleOverlayClick=(e)=>{
     if(didDragLegendRef.current){didDragLegendRef.current=false;return;}
     const canvas=overlayRef.current; if(!canvas) return;
     const rect=canvas.getBoundingClientRect();
-    const nx=(e.clientX-rect.left)/canvas.width, ny=(e.clientY-rect.top)/canvas.height;
+    const nx=(e.clientX-rect.left)/rect.width, ny=(e.clientY-rect.top)/rect.height;
     const sz=Math.round(symSize*Math.max(0.6,scale/1.5));
     const thr=(sz/canvas.width)*1.6;
     const hit=markers.filter(m=>m.page===currentPage).find(m=>Math.abs(m.x-nx)<thr&&Math.abs(m.y-ny)<thr);
@@ -12261,10 +12290,11 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave=async()=>{
     setSaving(true);
-    // If PDF upload is still in flight, wait for it so the URL is persisted
     let finalPdfUrl=pdfUrl;
     if(pdfUploadRef.current){
-      const url=await pdfUploadRef.current;
+      // Wait for Cloudinary upload with 15s timeout so save never hangs
+      const timeout=new Promise(r=>setTimeout(()=>r(null),15000));
+      const url=await Promise.race([pdfUploadRef.current,timeout]);
       if(url) finalPdfUrl=url;
     }
     onSave({...takeoff,id:takeoff?.id||uid(),name,pdfFilename,pdfUrl:finalPdfUrl,fileType,markers,links,pipes,areas,prefixes,globalPrefix,symSize,legendPos,
@@ -13044,12 +13074,15 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             <div style={{position:'relative',display:'inline-block',boxShadow:'0 4px 24px rgba(0,0,0,0.25)',lineHeight:0}}>
               <canvas ref={pdfCanvasRef} style={{display:'block'}}/>
               <canvas ref={overlayRef}
-                style={{position:'absolute',top:0,left:0,cursor:legendDragRef.current?'grabbing':(mode==='place'||mode==='pipe')?'crosshair':'default'}}
+                style={{position:'absolute',top:0,left:0,cursor:legendDragRef.current?'grabbing':(mode==='place'||mode==='pipe')?'crosshair':'default',touchAction:'none'}}
                 onClick={handleOverlayClick}
                 onMouseDown={handleCanvasMouseDown}
                 onMouseMove={handleCanvasMouseMove}
                 onMouseUp={handleCanvasMouseUp}
                 onMouseLeave={()=>{legendDragRef.current=null;setCursorPos(null);}}
+                onTouchStart={handleOverlayTouchStart}
+                onTouchMove={handleOverlayTouchMove}
+                onTouchEnd={handleOverlayTouchEnd}
                 onContextMenu={e=>{
                   e.preventDefault();
                   setLinkStartId(null);
