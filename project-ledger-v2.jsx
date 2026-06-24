@@ -2443,6 +2443,127 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
   );
 }
 
+// Extracted from Dashboard IIFE to comply with React Rules of Hooks.
+// useState must be called unconditionally at the top level of a component.
+function FinancialWidgets({widgets,payments,invoices,projects,catBreak,totExp}){
+  const [chartRange,setChartRange]=useState('12m');
+  const now=new Date();
+  const numMonths=chartRange==='6m'?6:chartRange==='24m'?24:12;
+  const months=[];
+  for(let m=numMonths-1;m>=0;m--){
+    const d=new Date(now.getFullYear(),now.getMonth()-m,1);
+    const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const label=numMonths>12?d.toLocaleString('en-SG',{month:'short',year:'2-digit'}):d.toLocaleString('en-SG',{month:'short'});
+    const rev=payments.filter(py=>py.status==='Received'&&py.date?.startsWith(key)).reduce((s,py)=>s+py.amount,0);
+    const exp=invoices.filter(i=>i.invoiceDate?.startsWith(key)).reduce((s,i)=>s+i.total,0);
+    months.push({label,rev,exp});
+  }
+  const maxVal=Math.max(...months.map(m=>Math.max(m.rev,m.exp)),1);
+  const niceMax=(v)=>{const e=Math.pow(10,Math.floor(Math.log10(v||1)));const f=v/e;return(f<=1?1:f<=2?2:f<=5?5:10)*e;};
+  const yMax=niceMax(maxVal);
+  const yTicks=[0.25,0.5,0.75,1].map(f=>Math.round(yMax*f));
+  const fmtY=(v)=>v>=1000?`$${(v/1000).toFixed(v>=10000?0:1)}k`:`$${v}`;
+  const PAD_L=42,PAD_B=22,PAD_T=8,PAD_R=8,W=460,H=130;
+  const chartW=W-PAD_L-PAD_R,chartH=H-PAD_B-PAD_T;
+  const px=(i)=>PAD_L+(i/(months.length-1||1))*chartW;
+  const py=(v)=>PAD_T+chartH-(v/yMax)*chartH;
+  const revPath=months.map((m,i)=>`${i===0?'M':'L'}${px(i)},${py(m.rev)}`).join(' ');
+  const expPath=months.map((m,i)=>`${i===0?'M':'L'}${px(i)},${py(m.exp)}`).join(' ');
+  const revArea=`${revPath} L${px(months.length-1)},${PAD_T+chartH} L${PAD_L},${PAD_T+chartH} Z`;
+  const expArea=`${expPath} L${px(months.length-1)},${PAD_T+chartH} L${PAD_L},${PAD_T+chartH} Z`;
+  const labelStep=numMonths<=6?1:numMonths<=12?1:numMonths<=18?2:3;
+  const statusCounts={Planning:0,Active:0,'In Progress':0,Completed:0,Cancelled:0};
+  projects.forEach(p=>{if(statusCounts[p.status]!==undefined)statusCounts[p.status]++;else statusCounts['Active']++;});
+  const donutData=Object.entries(statusCounts).filter(([,v])=>v>0).map(([k,v])=>({name:k,value:v}));
+  const DONUT_COLORS={Planning:'#C4A882',Active:'#1A1A1A','In Progress':'#8A6A3A',Completed:'#2D7A4F',Cancelled:'#AEAEB2'};
+  const dTotal=donutData.reduce((s,d)=>s+d.value,0)||1;
+  let cumA=-Math.PI/2;
+  const donutSegs=donutData.map(d=>{
+    const angle=(d.value/dTotal)*Math.PI*2;
+    const x1=Math.cos(cumA)*38+50,y1=Math.sin(cumA)*38+50;
+    cumA+=angle;
+    const x2=Math.cos(cumA)*38+50,y2=Math.sin(cumA)*38+50;
+    return {...d,path:`M50,50 L${x1},${y1} A38,38 0 ${angle>Math.PI?1:0},1 ${x2},${y2} Z`};
+  });
+  return (
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:14}}>
+      {widgets.includes('budget')&&(
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:'22px 24px',boxShadow:T.shadow,gridColumn:'span 2'}}>
+        <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:600,color:T.text}}>Revenue Overview</div>
+            <div style={{fontSize:11,color:T.muted,marginTop:2}}>Payments collected vs expenses</div>
+          </div>
+          <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+            {[{id:'6m',label:'6M'},{id:'12m',label:'12M'},{id:'24m',label:'2Y'}].map(o=>(
+              <button key={o.id} onClick={()=>setChartRange(o.id)}
+                style={{padding:'4px 10px',borderRadius:7,border:`1px solid ${T.borderLight}`,
+                  background:chartRange===o.id?T.text:'transparent',color:chartRange===o.id?T.bg:T.muted,
+                  fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit',transition:'all .12s'}}>
+                {o.label}
+              </button>
+            ))}
+            <div style={{marginLeft:8,display:'flex',gap:12}}>
+              {[{color:T.text,label:'Collected'},{color:T.tan,label:'Expenses'}].map(({color,label})=>(
+                <div key={label} style={{display:'flex',alignItems:'center',gap:5}}>
+                  <div style={{width:14,height:2,background:color,borderRadius:2}}/>
+                  <span style={{fontSize:10,color:T.muted}}>{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',overflow:'visible'}}>
+          <defs>
+            <linearGradient id="rg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.text} stopOpacity="0.10"/><stop offset="100%" stopColor={T.text} stopOpacity="0"/></linearGradient>
+            <linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.tan} stopOpacity="0.22"/><stop offset="100%" stopColor={T.tan} stopOpacity="0"/></linearGradient>
+          </defs>
+          {yTicks.map(v=>(<g key={v}><line x1={PAD_L} y1={py(v)} x2={W-PAD_R} y2={py(v)} stroke={T.borderLight} strokeWidth="1"/><text x={PAD_L-4} y={py(v)+3} textAnchor="end" fontSize="8" fill={T.dim}>{fmtY(v)}</text></g>))}
+          <path d={expArea} fill="url(#eg)"/><path d={revArea} fill="url(#rg)"/>
+          <path d={expPath} fill="none" stroke={T.tan} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d={revPath} fill="none" stroke={T.text} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+          {months.map((m,i)=>(<g key={i}>{i%labelStep===0&&<text x={px(i)} y={H-6} textAnchor="middle" fontSize="8" fill={T.dim}>{m.label}</text>}<circle cx={px(i)} cy={py(m.rev)} r="2.5" fill={T.card} stroke={T.text} strokeWidth="1.5"/><circle cx={px(i)} cy={py(m.exp)} r="2.5" fill={T.card} stroke={T.tan} strokeWidth="1.5"/></g>))}
+        </svg>
+        <div style={{marginTop:14,borderTop:`1px solid ${T.borderLight}`,paddingTop:12,display:'flex',flexDirection:'column',gap:7}}>
+          <div style={{fontSize:11,fontWeight:600,color:T.muted,marginBottom:2}}>Budget utilization by project</div>
+          {projects.filter(p=>p.status!=='Cancelled').slice(0,5).map(p=>{
+            const exp=invoices.filter(i=>i.projectId===p.id).reduce((s,i)=>s+i.total,0);
+            const rev=(p.contractAmount||0)+(p.variationOrders||0);
+            const pct=rev>0?Math.min(exp/rev*100,100):0;
+            const over=pct>85&&p.status!=='Completed';
+            return (<div key={p.id}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:2}}><span style={{color:T.text,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'60%'}}>{p.name}</span><span style={{color:over?T.danger:T.muted,fontWeight:600,flexShrink:0}}>{pct.toFixed(0)}%</span></div><div style={{height:3,background:T.bg,borderRadius:2,overflow:'hidden'}}><div style={{height:'100%',width:`${pct}%`,background:over?T.danger:T.tan,borderRadius:2,transition:'width .6s ease'}}/></div></div>);
+          })}
+          {projects.length===0&&<div style={{color:T.dim,fontSize:11,textAlign:'center',padding:'6px 0'}}>No projects yet</div>}
+        </div>
+      </div>
+      )}
+      {widgets.includes('catbreak')&&(
+      <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:'22px 24px',boxShadow:T.shadow}}>
+        <div style={{fontSize:14,fontWeight:600,color:T.text,marginBottom:4}}>Project Status</div>
+        <div style={{fontSize:11,color:T.muted,marginBottom:14}}>{projects.length} total projects</div>
+        <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:16}}>
+          <svg viewBox="0 0 100 100" width="80" height="80" style={{flexShrink:0}}>
+            {donutSegs.length>0?donutSegs.map((d,i)=><path key={i} d={d.path} fill={DONUT_COLORS[d.name]||T.dim}/>):<circle cx="50" cy="50" r="38" fill={T.borderLight}/>}
+            <circle cx="50" cy="50" r="24" fill={T.card}/><text x="50" y="54" textAnchor="middle" fontSize="14" fontWeight="700" fill={T.text}>{projects.length}</text>
+          </svg>
+          <div style={{display:'flex',flexDirection:'column',gap:5,flex:1}}>
+            {donutSegs.map(d=>(<div key={d.name} style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}><div style={{display:'flex',alignItems:'center',gap:6}}><div style={{width:7,height:7,borderRadius:2,background:DONUT_COLORS[d.name]||T.dim,flexShrink:0}}/><span style={{fontSize:11,color:T.muted}}>{d.name}</span></div><span style={{fontSize:11,fontWeight:600,color:T.text}}>{d.value}</span></div>))}
+          </div>
+        </div>
+        <div style={{borderTop:`1px solid ${T.borderLight}`,paddingTop:12}}>
+          <div style={{fontSize:11,fontWeight:600,color:T.muted,marginBottom:8}}>Expenses by category</div>
+          {catBreak.slice(0,5).map(([cat,amt])=>{
+            const pct=totExp>0?amt/totExp*100:0;
+            return (<div key={cat} style={{marginBottom:7}}><div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}><span style={{color:T.muted,display:'flex',alignItems:'center',gap:4}}><span style={{width:5,height:5,borderRadius:'50%',background:CAT_CLR[cat]||T.tan,display:'inline-block'}}/>{cat}</span><span style={{color:T.text,fontWeight:600}}>{fmtSGD(amt)}</span></div><div style={{height:3,background:T.bg,borderRadius:2,overflow:'hidden'}}><div style={{height:'100%',width:`${pct}%`,background:CAT_CLR[cat]||T.tan,borderRadius:2}}/></div></div>);
+          })}
+          {catBreak.length===0&&<div style={{color:T.dim,fontSize:11,textAlign:'center',padding:'6px 0'}}>No expenses yet</div>}
+        </div>
+      </div>
+      )}
+    </div>
+  );
+}
+
 function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId,notices=[],setNotices,isAdmin,attendance=[],isSuperAdmin=false,systemChangelog=[],setSystemChangelog=()=>{},fieldLogs=[],setFieldLogs=()=>{},activeUser=null}){
   const totRev = useMemo(()=>projects.reduce((s,p)=>s+(p.contractAmount||0)+(p.variationOrders||0),0),[projects]);
   const totExp = useMemo(()=>invoices.reduce((s,i)=>s+(i.total||0),0),[invoices]);
@@ -3080,124 +3201,9 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
         </div>
       )}
 
-      {(widgets.includes('budget')||widgets.includes('catbreak'))&&(()=>{
-        const [chartRange,setChartRange]=useState('12m');
-        const now=new Date();
-        const numMonths=chartRange==='6m'?6:chartRange==='24m'?24:12;
-        const months=[];
-        for(let m=numMonths-1;m>=0;m--){
-          const d=new Date(now.getFullYear(),now.getMonth()-m,1);
-          const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-          const label=numMonths>12?d.toLocaleString('en-SG',{month:'short',year:'2-digit'}):d.toLocaleString('en-SG',{month:'short'});
-          const rev=payments.filter(py=>py.status==='Received'&&py.date?.startsWith(key)).reduce((s,py)=>s+py.amount,0);
-          const exp=invoices.filter(i=>i.invoiceDate?.startsWith(key)).reduce((s,i)=>s+i.total,0);
-          months.push({label,rev,exp});
-        }
-        const maxVal=Math.max(...months.map(m=>Math.max(m.rev,m.exp)),1);
-        const niceMax=(v)=>{const e=Math.pow(10,Math.floor(Math.log10(v||1)));const f=v/e;return(f<=1?1:f<=2?2:f<=5?5:10)*e;};
-        const yMax=niceMax(maxVal);
-        const yTicks=[0.25,0.5,0.75,1].map(f=>Math.round(yMax*f));
-        const fmtY=(v)=>v>=1000?`$${(v/1000).toFixed(v>=10000?0:1)}k`:`$${v}`;
-        const PAD_L=42,PAD_B=22,PAD_T=8,PAD_R=8,W=460,H=130;
-        const chartW=W-PAD_L-PAD_R,chartH=H-PAD_B-PAD_T;
-        const px=(i)=>PAD_L+(i/(months.length-1||1))*chartW;
-        const py=(v)=>PAD_T+chartH-(v/yMax)*chartH;
-        const revPath=months.map((m,i)=>`${i===0?'M':'L'}${px(i)},${py(m.rev)}`).join(' ');
-        const expPath=months.map((m,i)=>`${i===0?'M':'L'}${px(i)},${py(m.exp)}`).join(' ');
-        const revArea=`${revPath} L${px(months.length-1)},${PAD_T+chartH} L${PAD_L},${PAD_T+chartH} Z`;
-        const expArea=`${expPath} L${px(months.length-1)},${PAD_T+chartH} L${PAD_L},${PAD_T+chartH} Z`;
-        const labelStep=numMonths<=6?1:numMonths<=12?1:numMonths<=18?2:3;
-        const statusCounts={Planning:0,Active:0,'In Progress':0,Completed:0,Cancelled:0};
-        projects.forEach(p=>{if(statusCounts[p.status]!==undefined)statusCounts[p.status]++;else statusCounts['Active']++;});
-        const donutData=Object.entries(statusCounts).filter(([,v])=>v>0).map(([k,v])=>({name:k,value:v}));
-        const DONUT_COLORS={Planning:'#C4A882',Active:'#1A1A1A','In Progress':'#8A6A3A',Completed:'#2D7A4F',Cancelled:'#AEAEB2'};
-        const dTotal=donutData.reduce((s,d)=>s+d.value,0)||1;
-        let cumA=-Math.PI/2;
-        const donutSegs=donutData.map(d=>{
-          const angle=(d.value/dTotal)*Math.PI*2;
-          const x1=Math.cos(cumA)*38+50,y1=Math.sin(cumA)*38+50;
-          cumA+=angle;
-          const x2=Math.cos(cumA)*38+50,y2=Math.sin(cumA)*38+50;
-          return {...d,path:`M50,50 L${x1},${y1} A38,38 0 ${angle>Math.PI?1:0},1 ${x2},${y2} Z`};
-        });
-        return (
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:14}}>
-            {widgets.includes('budget')&&(
-            <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:'22px 24px',boxShadow:T.shadow,gridColumn:'span 2'}}>
-              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10}}>
-                <div>
-                  <div style={{fontSize:14,fontWeight:600,color:T.text}}>Revenue Overview</div>
-                  <div style={{fontSize:11,color:T.muted,marginTop:2}}>Payments collected vs expenses</div>
-                </div>
-                <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
-                  {[{id:'6m',label:'6M'},{id:'12m',label:'12M'},{id:'24m',label:'2Y'}].map(o=>(
-                    <button key={o.id} onClick={()=>setChartRange(o.id)}
-                      style={{padding:'4px 10px',borderRadius:7,border:`1px solid ${T.borderLight}`,
-                        background:chartRange===o.id?T.text:'transparent',color:chartRange===o.id?T.bg:T.muted,
-                        fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'inherit',transition:'all .12s'}}>
-                      {o.label}
-                    </button>
-                  ))}
-                  <div style={{marginLeft:8,display:'flex',gap:12}}>
-                    {[{color:T.text,label:'Collected'},{color:T.tan,label:'Expenses'}].map(({color,label})=>(
-                      <div key={label} style={{display:'flex',alignItems:'center',gap:5}}>
-                        <div style={{width:14,height:2,background:color,borderRadius:2}}/>
-                        <span style={{fontSize:10,color:T.muted}}>{label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',overflow:'visible'}}>
-                <defs>
-                  <linearGradient id="rg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.text} stopOpacity="0.10"/><stop offset="100%" stopColor={T.text} stopOpacity="0"/></linearGradient>
-                  <linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.tan} stopOpacity="0.22"/><stop offset="100%" stopColor={T.tan} stopOpacity="0"/></linearGradient>
-                </defs>
-                {yTicks.map(v=>(<g key={v}><line x1={PAD_L} y1={py(v)} x2={W-PAD_R} y2={py(v)} stroke={T.borderLight} strokeWidth="1"/><text x={PAD_L-4} y={py(v)+3} textAnchor="end" fontSize="8" fill={T.dim}>{fmtY(v)}</text></g>))}
-                <path d={expArea} fill="url(#eg)"/><path d={revArea} fill="url(#rg)"/>
-                <path d={expPath} fill="none" stroke={T.tan} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d={revPath} fill="none" stroke={T.text} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                {months.map((m,i)=>(<g key={i}>{i%labelStep===0&&<text x={px(i)} y={H-6} textAnchor="middle" fontSize="8" fill={T.dim}>{m.label}</text>}<circle cx={px(i)} cy={py(m.rev)} r="2.5" fill={T.card} stroke={T.text} strokeWidth="1.5"/><circle cx={px(i)} cy={py(m.exp)} r="2.5" fill={T.card} stroke={T.tan} strokeWidth="1.5"/></g>))}
-              </svg>
-              <div style={{marginTop:14,borderTop:`1px solid ${T.borderLight}`,paddingTop:12,display:'flex',flexDirection:'column',gap:7}}>
-                <div style={{fontSize:11,fontWeight:600,color:T.muted,marginBottom:2}}>Budget utilization by project</div>
-                {projects.filter(p=>p.status!=='Cancelled').slice(0,5).map(p=>{
-                  const exp=invoices.filter(i=>i.projectId===p.id).reduce((s,i)=>s+i.total,0);
-                  const rev=(p.contractAmount||0)+(p.variationOrders||0);
-                  const pct=rev>0?Math.min(exp/rev*100,100):0;
-                  const over=pct>85&&p.status!=='Completed';
-                  return (<div key={p.id}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:2}}><span style={{color:T.text,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'60%'}}>{p.name}</span><span style={{color:over?T.danger:T.muted,fontWeight:600,flexShrink:0}}>{pct.toFixed(0)}%</span></div><div style={{height:3,background:T.bg,borderRadius:2,overflow:'hidden'}}><div style={{height:'100%',width:`${pct}%`,background:over?T.danger:T.tan,borderRadius:2,transition:'width .6s ease'}}/></div></div>);
-                })}
-                {projects.length===0&&<div style={{color:T.dim,fontSize:11,textAlign:'center',padding:'6px 0'}}>No projects yet</div>}
-              </div>
-            </div>
-            )}
-            {widgets.includes('catbreak')&&(
-            <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,padding:'22px 24px',boxShadow:T.shadow}}>
-              <div style={{fontSize:14,fontWeight:600,color:T.text,marginBottom:4}}>Project Status</div>
-              <div style={{fontSize:11,color:T.muted,marginBottom:14}}>{projects.length} total projects</div>
-              <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:16}}>
-                <svg viewBox="0 0 100 100" width="80" height="80" style={{flexShrink:0}}>
-                  {donutSegs.length>0?donutSegs.map((d,i)=><path key={i} d={d.path} fill={DONUT_COLORS[d.name]||T.dim}/>):<circle cx="50" cy="50" r="38" fill={T.borderLight}/>}
-                  <circle cx="50" cy="50" r="24" fill={T.card}/><text x="50" y="54" textAnchor="middle" fontSize="14" fontWeight="700" fill={T.text}>{projects.length}</text>
-                </svg>
-                <div style={{display:'flex',flexDirection:'column',gap:5,flex:1}}>
-                  {donutSegs.map(d=>(<div key={d.name} style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}><div style={{display:'flex',alignItems:'center',gap:6}}><div style={{width:7,height:7,borderRadius:2,background:DONUT_COLORS[d.name]||T.dim,flexShrink:0}}/><span style={{fontSize:11,color:T.muted}}>{d.name}</span></div><span style={{fontSize:11,fontWeight:600,color:T.text}}>{d.value}</span></div>))}
-                </div>
-              </div>
-              <div style={{borderTop:`1px solid ${T.borderLight}`,paddingTop:12}}>
-                <div style={{fontSize:11,fontWeight:600,color:T.muted,marginBottom:8}}>Expenses by category</div>
-                {catBreak.slice(0,5).map(([cat,amt])=>{
-                  const pct=totExp>0?amt/totExp*100:0;
-                  return (<div key={cat} style={{marginBottom:7}}><div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:2}}><span style={{color:T.muted,display:'flex',alignItems:'center',gap:4}}><span style={{width:5,height:5,borderRadius:'50%',background:CAT_CLR[cat]||T.tan,display:'inline-block'}}/>{cat}</span><span style={{color:T.text,fontWeight:600}}>{fmtSGD(amt)}</span></div><div style={{height:3,background:T.bg,borderRadius:2,overflow:'hidden'}}><div style={{height:'100%',width:`${pct}%`,background:CAT_CLR[cat]||T.tan,borderRadius:2}}/></div></div>);
-                })}
-                {catBreak.length===0&&<div style={{color:T.dim,fontSize:11,textAlign:'center',padding:'6px 0'}}>No expenses yet</div>}
-              </div>
-            </div>
-            )}
-          </div>
-        );
-      })()}
+      {(widgets.includes('budget')||widgets.includes('catbreak'))&&(
+        <FinancialWidgets widgets={widgets} payments={payments} invoices={invoices} projects={projects} catBreak={catBreak} totExp={totExp}/>
+      )}
 
 
       {/* ══ PROJECT HEALTH ══════════════════════════════════════════ */}
