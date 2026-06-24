@@ -1533,12 +1533,12 @@ const buildReceiptHTML = (payment, proj, receiptNo, co) => `
 const buildSOAHTML = (proj, projInv, projPay, co) => {
   const rev=(proj.contractAmount||0)+(proj.variationOrders||0);
   const totalPaid=projPay.filter(p=>p.status==='Received').reduce((s,p)=>s+p.amount,0);
-  const outstanding=rev-totalPaid;
+  const outstanding=Math.max(0,rev-totalPaid);
   const payRows=[...projPay].sort((a,b)=>new Date(a.date||0)-new Date(b.date||0)).map(p=>`
     <tr style="border-bottom:1px solid #EDE9E1;">
       <td style="padding:7px 4px;font-size:11px;color:#1A1A1A;">${p.date?new Date(p.date).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}):'—'}</td>
       <td style="padding:7px 4px;font-size:11px;color:#1A1A1A;">${p.type} Payment</td>
-      <td style="padding:7px 4px;font-size:11px;color:#2D7A4F;text-align:right;font-weight:700;">S$${Number(p.amount).toLocaleString('en-SG',{minimumFractionDigits:2})}</td>
+      <td style="padding:7px 4px;font-size:11px;color:${p.status==='Received'?'#2D7A4F':'#8A6A3A'};text-align:right;font-weight:700;">S$${Number(p.amount).toLocaleString('en-SG',{minimumFractionDigits:2})}</td>
       <td style="padding:7px 4px;font-size:10px;text-align:center;"><span style="background:${p.status==='Received'?'rgba(45,122,79,0.1)':'rgba(196,168,130,0.2)'};color:${p.status==='Received'?'#2D7A4F':'#8A6A3A'};padding:2px 8px;border-radius:20px;font-weight:600;">${p.status}</span></td>
     </tr>`).join('');
   return `
@@ -2444,10 +2444,10 @@ function TrashBin({trash,onRestore,onPermanentDelete,isSuperAdmin}){
 }
 
 function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlinePresence=[],activeUserId,notices=[],setNotices,isAdmin,attendance=[],isSuperAdmin=false,systemChangelog=[],setSystemChangelog=()=>{},fieldLogs=[],setFieldLogs=()=>{},activeUser=null}){
-  const totRev = useMemo(()=>projects.reduce((s,p)=>s+p.contractAmount+(p.variationOrders||0),0),[projects]);
-  const totExp = useMemo(()=>invoices.reduce((s,i)=>s+i.total,0),[invoices]);
+  const totRev = useMemo(()=>projects.reduce((s,p)=>s+(p.contractAmount||0)+(p.variationOrders||0),0),[projects]);
+  const totExp = useMemo(()=>invoices.reduce((s,i)=>s+(i.total||0),0),[invoices]);
   const totRecv = useMemo(()=>payments.filter(p=>p.status==='Received').reduce((s,p)=>s+p.amount,0),[payments]);
-  const pendAmt = useMemo(()=>invoices.filter(i=>i.status==='Pending').reduce((s,i)=>s+i.total,0),[invoices]);
+  const pendAmt = useMemo(()=>invoices.filter(i=>i.status==='Pending').reduce((s,i)=>s+(i.total||0),0),[invoices]);
   const grossP = totRev - totExp;
   const margin = totRev>0?grossP/totRev*100:0;
 
@@ -3163,7 +3163,7 @@ function Dashboard({projects,invoices,payments,widgets=[],siteWorkers=[],onlineP
                 <div style={{fontSize:11,fontWeight:600,color:T.muted,marginBottom:2}}>Budget utilization by project</div>
                 {projects.filter(p=>p.status!=='Cancelled').slice(0,5).map(p=>{
                   const exp=invoices.filter(i=>i.projectId===p.id).reduce((s,i)=>s+i.total,0);
-                  const rev=p.contractAmount+(p.variationOrders||0);
+                  const rev=(p.contractAmount||0)+(p.variationOrders||0);
                   const pct=rev>0?Math.min(exp/rev*100,100):0;
                   const over=pct>85&&p.status!=='Completed';
                   return (<div key={p.id}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:2}}><span style={{color:T.text,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'60%'}}>{p.name}</span><span style={{color:over?T.danger:T.muted,fontWeight:600,flexShrink:0}}>{pct.toFixed(0)}%</span></div><div style={{height:3,background:T.bg,borderRadius:2,overflow:'hidden'}}><div style={{height:'100%',width:`${pct}%`,background:over?T.danger:T.tan,borderRadius:2,transition:'width .6s ease'}}/></div></div>);
@@ -3740,9 +3740,11 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
     // Sort by start date descending; projects with no start date go to the bottom
     const da=a.startDate?new Date(a.startDate):null;
     const db=b.startDate?new Date(b.startDate):null;
-    if(!da&&!db) return 0;
-    if(!da) return 1;
-    if(!db) return -1;
+    const validA=da&&!isNaN(da);
+    const validB=db&&!isNaN(db);
+    if(!validA&&!validB) return 0;
+    if(!validA) return 1;
+    if(!validB) return -1;
     return db-da;
   }),[projects]);
 
@@ -3755,7 +3757,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
   const [projFormErr,setProjFormErr]=useState('');
   const save_=()=>{
     if(!form.name||!form.client){setProjFormErr('Project name and client are required.');return;}
-    if(parseFloat(form.contractAmount)<=0){setProjFormErr('Contract amount must be greater than $0.');return;}
+    if(!form.contractAmount||parseFloat(form.contractAmount)<=0){setProjFormErr('Contract amount must be greater than $0.');return;}
     setProjFormErr('');
     // Auto-compute variationOrders from voList
     const voTotal=(form.voList||[]).reduce((s,v)=>s+(parseFloat(v.amount)||0),0);
@@ -3771,7 +3773,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
     const newId=uid();
     let finalD={...d};
     if(isNew){
-      const yr=new Date().getFullYear();
+      const yr=form.projectYear||new Date().getFullYear();
       const sameYear=projects.filter(p=>(p.projectYear||(p.createdAt?new Date(p.createdAt).getFullYear():yr))===yr);
       const maxNum=sameYear.reduce((m,p)=>Math.max(m,p.projectNumber||0),0);
       finalD.projectNumber=maxNum+1;
@@ -3797,7 +3799,7 @@ function Projects({projects,setProjects,invoices,payments,isAdmin,onSoftDelete,o
     setProjects(upd);saveProjects(upd);
     setDeleteTarget(null);
     onShowToast(`"${proj.name}" moved to Trash`,()=>{
-      setProjects(prev=>[...prev,proj]);saveProjects([...projects,proj]);
+      setProjects(prev=>{const restored=[...prev,proj];saveProjects(restored);return restored;});
     });
   };
 
@@ -4994,6 +4996,8 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
     if(selected.size<2||!batchName.trim()) return;
     const ids=[...selected];
     const invList=ids.map(id=>invoices.find(i=>i.id===id)).filter(Boolean);
+    const uniqueSuppliers=[...new Set(invList.map(i=>i.supplier))];
+    if(uniqueSuppliers.length>1&&!window.confirm(`Selected invoices span ${uniqueSuppliers.length} suppliers (${uniqueSuppliers.join(', ')}). Batches are typically for a single supplier. Continue anyway?`)) return;
     const combined=invList.reduce((s,i)=>s+(parseFloat(i.total)||0),0);
 
     // Capture any deposits/partial payments already made on individual invoices
@@ -5099,7 +5103,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
       if(!batch.invoiceIds.includes(inv.id)) return inv;
       // Recalculate status from own paymentRecords (batch payments won't apply)
       const ownPaid=(inv.paymentRecords||[]).reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
-      const status=ownPaid<=0?'Pending':ownPaid>=inv.total?'Paid':'Partial';
+      const status=ownPaid<=0?'Pending':ownPaid>=(parseFloat(inv.total)||0)?'Paid':'Partial';
       return {...inv,status};
     });
     setInvoices(updInvoices);saveInvoices(updInvoices);
@@ -5150,7 +5154,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
   );
   const activeInv=filt.filter(i=>i.status!=='Paid');
   const archivedInv=filt.filter(i=>i.status==='Paid');
-  const pendAmt=invoices.filter(i=>i.status==='Pending'||i.status==='Partial').reduce((s,i)=>s+i.total,0);
+  const pendAmt=invoices.filter(i=>i.status==='Pending'||i.status==='Partial').reduce((s,i)=>s+(parseFloat(i.total)||0),0);
   const [showArchived,setShowArchived]=useState(false);
   const [editTarget,setEditTarget]=useState(null);
   const [editForm,setEditForm]=useState({});
@@ -5496,9 +5500,9 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
 
       {Object.entries(activeByProject).map(([projId,invList])=>{
         const proj=projects.find(p=>p.id===projId);
-        const projTotal=invList.reduce((s,i)=>s+i.total,0);
-        const projPaid=invList.filter(i=>i.status==='Paid').reduce((s,i)=>s+i.total,0);
-        const projPending=projTotal-projPaid;
+        const projTotal=invList.reduce((s,i)=>s+(parseFloat(i.total)||0),0);
+        const projPaid=invList.reduce((s,i)=>s+(i.paymentRecords||[]).reduce((ps,r)=>ps+(parseFloat(r.amount)||0),0),0);
+        const projPending=Math.max(0,projTotal-projPaid);
         return(
           <div key={projId} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:18,overflow:'hidden',boxShadow:T.shadow}}>
             <div style={{padding:'14px 20px',borderBottom:`1px solid ${T.borderLight}`,display:'flex',alignItems:'center',justifyContent:'space-between',background:T.bg}}>
@@ -6119,6 +6123,7 @@ function Invoices({invoices,setInvoices,projects,isAdmin,onSoftDelete,onShowToas
 }
 function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,onShowToast,acctSettings,logAction=()=>{}}){
   const [modal,setModal]=useState(false);
+  const [lightbox,setLightbox]=useState(null);
   const [form,setForm]=useState({projectId:'',type:'Deposit',amount:'',date:'',status:'Received',paymentMethod:'',reference:''});
   const [deleteTarget,setDeleteTarget]=useState(null);
   const [receipt,setReceipt]=useState(null);
@@ -6174,7 +6179,7 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
 
   const [payErr,setPayErr]=useState('');
   const save_=()=>{
-    if(!form.projectId||!form.amount){setPayErr('Please select a project and enter an amount.');return;}
+    if(!form.projectId||!form.amount||!form.date){setPayErr('Please select a project, enter an amount, and select a date.');return;}
     if(parseFloat(form.amount)<=0){setPayErr('Payment amount must be greater than $0.');return;}
     setPayErr('');
     const pay={...form,id:uid(),amount:parseFloat(form.amount)||0,
@@ -6201,10 +6206,10 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
     onSoftDelete({...pay,_trashType:'payment',_deletedAt:new Date().toISOString()});
     const upd=payments.filter(p=>p.id!==pay.id);setPayments(upd);saveS('payments',upd);
     setDeleteTarget(null);
-    onShowToast(`${pay.type} payment of ${fmtSGD(pay.amount)} moved to Trash`,()=>{setPayments(prev=>[...prev,pay]);saveS('payments',[...payments,pay]);});
+    onShowToast(`${pay.type} payment of ${fmtSGD(pay.amount)} moved to Trash`,()=>{setPayments(prev=>{const u=[...prev,pay];saveS('payments',u);return u;});});
   };
 
-  const totalOut=projects.reduce((s,p)=>{
+  const totalOut=projects.filter(p=>!p.archived&&p.status!=='Cancelled').reduce((s,p)=>{
     const rev=p.contractAmount+(p.variationOrders||0);
     const recv=payments.filter(py=>py.projectId===p.id&&py.status==='Received').reduce((s2,py)=>s2+py.amount,0);
     return s+Math.max(0,rev-recv);
@@ -6285,10 +6290,13 @@ function Payments({payments,setPayments,projects,invoices,isAdmin,onSoftDelete,o
       })()}
 
       {projects.map(proj=>{
-        const pp=payments.filter(p=>p.projectId===proj.id).sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+        const pp=payments.filter(p=>p.projectId===proj.id).sort((a,b)=>{
+  if(!a.date&&!b.date)return 0;if(!a.date)return 1;if(!b.date)return -1;
+  return new Date(b.date)-new Date(a.date);
+});
         if(pp.length===0)return null;
         const projInv=invoices.filter(i=>i.projectId===proj.id);
-        const rev=proj.contractAmount+(proj.variationOrders||0);
+        const rev=(proj.contractAmount||0)+(proj.variationOrders||0);
         const recv=pp.filter(p=>p.status==='Received').reduce((s,p)=>s+p.amount,0);
         const out=rev-recv;
         const pct=rev>0?Math.min(recv/rev*100,100):0;
@@ -8048,7 +8056,7 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
         img.src=initialSession.imageDataUrl;
       }
     }
-  },[]);
+  },[initialSession]);
 
   // ── History helpers ─────────────────────────────────────────
   const pushHistory=(anns)=>{
@@ -8084,7 +8092,7 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
     };
     window.addEventListener('keydown',onKey);
     return ()=>window.removeEventListener('keydown',onKey);
-  });
+  },[histIdx,history,selected,annotations]);
 
   // ── Canvas draw ─────────────────────────────────────────────
   useEffect(()=>{
@@ -8387,15 +8395,27 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
     const t=e.touches[0]||e.changedTouches[0];
     return {clientX:t.clientX,clientY:t.clientY,button:0,altKey:false};
   }
-  const onTouchStart=(e)=>{
+  const onTouchStart=useCallback((e)=>{
     if(e.touches.length===1){e.preventDefault();onMouseDown(touchToMouse(e));}
-  };
-  const onTouchMove=(e)=>{
+  },[onMouseDown]);
+  const onTouchMove=useCallback((e)=>{
     if(e.touches.length===1){e.preventDefault();onMouseMove(touchToMouse(e));}
-  };
-  const onTouchEnd=(e)=>{
+  },[onMouseMove]);
+  const onTouchEnd=useCallback((e)=>{
     e.preventDefault();onMouseUp(touchToMouse(e));
-  };
+  },[onMouseUp]);
+  useEffect(()=>{
+    const c=canvasRef.current;
+    if(!c) return;
+    c.addEventListener('touchstart',onTouchStart,{passive:false});
+    c.addEventListener('touchmove',onTouchMove,{passive:false});
+    c.addEventListener('touchend',onTouchEnd,{passive:false});
+    return ()=>{
+      c.removeEventListener('touchstart',onTouchStart);
+      c.removeEventListener('touchmove',onTouchMove);
+      c.removeEventListener('touchend',onTouchEnd);
+    };
+  },[onTouchStart,onTouchMove,onTouchEnd]);
 
   // ── Annotation helpers ──────────────────────────────────────
   function deleteAnnotation(id){
@@ -8452,9 +8472,12 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
     let preview=null;
     if(canvas&&image){
       const tmp=document.createElement('canvas');
-      tmp.width=canvas.width;tmp.height=canvas.height;
+      tmp.width=image.w;tmp.height=image.h;
       const tCtx=tmp.getContext('2d');
-      tCtx.drawImage(canvas,0,0);
+      const baseImg=new window.Image();
+      baseImg.src=image.dataUrl;
+      tCtx.drawImage(baseImg,0,0,image.w,image.h);
+      annotations.forEach(a=>drawAnnotation(tCtx,a,false));
       preview=tmp.toDataURL('image/jpeg',0.4);
     }
     const sess={id:activeSession||uid(),name,imageDataUrl:image?.dataUrl||null,annotations,createdAt:activeSession?(sessions.find(s=>s.id===activeSession)?.createdAt||new Date().toISOString()):new Date().toISOString(),updatedAt:new Date().toISOString(),preview};
@@ -8653,7 +8676,7 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
                 onMouseMove={onMouseMove}
                 onMouseUp={onMouseUp}
                 onMouseLeave={onMouseUp}
-                onWheel={onWheel}
+                // remove onWheel JSX prop; attach imperatively in useEffect with {passive:false}
                 onTouchStart={onTouchStart}
                 onTouchMove={onTouchMove}
                 onTouchEnd={onTouchEnd}
@@ -8698,6 +8721,7 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
 }
 
 function Commissions({projects,setProjects,invoices,isAdmin,users=[],commAdvances=[],setCommAdvances=()=>{},activeUser=null,acctSettings={}}){
+  const iStyle={width:'100%',padding:'8px 10px',border:`1px solid ${T.borderLight}`,borderRadius:8,background:T.bg,color:T.text,fontFamily:'inherit',fontSize:13,boxSizing:'border-box'};
   const [payModal,setPayModal]=useState(null);
   const [payForm,setPayForm]=useState({date:new Date().toISOString().slice(0,10),method:'bank_transfer',reference:'',notes:'',dPaid:true,pmPaid:true});
   const pf=k=>v=>setPayForm(p=>({...p,[k]:v}));
@@ -8712,13 +8736,13 @@ function Commissions({projects,setProjects,invoices,isAdmin,users=[],commAdvance
   const saveAdvances=(next)=>{setCommAdvances(next);saveS('commAdvances',next);};
   const myName=activeUser?.name||'';
   const myRole=activeUser?.role||'';
-  const myProjects=projects.filter(p=>!p.archived&&(p.designer===myName||p.pm===myName));
-  const isDesignerOrPM=myRole==='designer'||myRole==='pm'||myProjects.length>0;
-  const myAdvances=(commAdvances||[]).filter(a=>a.appliedBy===myName);
+  const myProjects=myName?projects.filter(p=>!p.archived&&(p.designer===myName||p.pm===myName)):[];
+  const isDesignerOrPM=myName&&(myRole==='designer'||myRole==='pm'||myProjects.length>0);
+  const myAdvances=myName?(commAdvances||[]).filter(a=>a.appliedBy===myName):[];
   const pendingAdv=(commAdvances||[]).filter(a=>a.status==='Pending');
   const approvedUnpaidAdv=(commAdvances||[]).filter(a=>a.status==='Approved');
   const advDeductions=(projId,name)=>(commAdvances||[]).filter(a=>a.projectId===projId&&a.appliedBy===name&&a.status==='Paid').reduce((s,a)=>s+a.amount,0);
-  const totalAdvPaid=(projId)=>(commAdvances||[]).filter(a=>a.projectId===projId&&a.status==='Paid').reduce((s,a)=>s+a.amount,0);
+  // Remove the line, or use totalAdvPaid(pending.id) in the modal summary in place of (dAdv+pmAdv)
   const submitAdvance=()=>{
     if(!advForm.projectId||!advForm.amount) return;
     const proj=projects.find(p=>p.id===advForm.projectId);
@@ -8752,6 +8776,10 @@ function Commissions({projects,setProjects,invoices,isAdmin,users=[],commAdvance
   };
 
   const markPaid=(proj)=>{
+    const dAdv=advDeductions(proj.id,proj.designer);
+    const pmAdv=advDeductions(proj.id,proj.pm);
+    const dNet=Math.max(0,proj.dComm-dAdv);
+    const pmNet=Math.max(0,proj.pmComm-pmAdv);
     const payout={
       date:payForm.date,
       method:payForm.method,
@@ -8768,7 +8796,7 @@ function Commissions({projects,setProjects,invoices,isAdmin,users=[],commAdvance
       commissionPaidAt:new Date().toISOString(),
       commissionPayout:payout,
       // Store individual payout records
-      commissionPayoutHistory:[...(p.commissionPayoutHistory||[]),{...payout,dComm:proj.dComm,pmComm:proj.pmComm,id:uid()}],
+      commissionPayoutHistory:[...(p.commissionPayoutHistory||[]),{...payout,dComm:proj.dComm,pmComm:proj.pmComm,dNet,pmNet,dAdv,pmAdv,id:uid()}],
     }:p);
     setProjects(upd);saveProjects(upd);setPayModal(null);
   };
@@ -9045,7 +9073,7 @@ function Commissions({projects,setProjects,invoices,isAdmin,users=[],commAdvance
                       <td style={{padding:'10px 14px'}}>
                         {isAdmin&&(
                           canPayout(r)
-                            ? <Btn size="sm" onClick={()=>setPayModal(r.id)}><CheckCircle size={11}/>Pay Out</Btn>
+                            ? <Btn size="sm" onClick={()=>{setPayModal(r.id);setPayForm({date:new Date().toISOString().slice(0,10),method:'bank_transfer',reference:'',notes:'',dPaid:true,pmPaid:true});}}><CheckCircle size={11}/>Pay Out</Btn>
                             : <span title="All supplier invoices must be Paid before commission can be released"
                                 style={{fontSize:11,color:T.dim,display:'flex',alignItems:'center',gap:4,cursor:'help'}}>
                                 <Lock size={11}/>Invoices pending
@@ -9472,7 +9500,7 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
     setUsers(prev=>prev.map(u=>{
       if(u.id!==uid)return u;
 
-      if(u.role==='admin'&&tabId==='admin')return u;
+      if(u.role==='admin')return u;
       const has=u.tabs.includes(tabId);
       return {...u,tabs:has?u.tabs.filter(x=>x!==tabId):[...u.tabs,tabId]};
     }));
@@ -9522,16 +9550,22 @@ function Admin({users,setUsers,projects,onSoftDelete,onShowToast,actionLog=[],on
   const ALL_TABS=[
     {id:'dashboard',label:'Dashboard'},
     {id:'projects',label:'Projects'},
+    {id:'quotations',label:'Quotations & VO'},
+    {id:'sitereports',label:'Site Meeting Reports'},
+    {id:'fieldlogs',label:'Field Logs'},
     {id:'invoices',label:'Invoices'},
     {id:'payments',label:'Payments'},
     {id:'contacts',label:'Contacts'},
     {id:'reports',label:'Project Report'},
     {id:'commissions',label:'Commissions'},
     {id:'warranty',label:'Warranty'},
+    {id:'claims',label:'Expense Claims'},
+    {id:'tools',label:'Tools (Takeoffs & Markup)'},
     {id:'workers',label:'Site Workers'},
     {id:'checkin',label:'Check In/Out (Workers)'},
     {id:'accounts',label:'Company Accounts (Admin only)'},
     {id:'trash',label:'Trash (Admin only)'},
+    {id:'orgchart',label:'Org Chart'},
     {id:'admin',label:'Admin (restricted)'},
   ];
 
@@ -11501,7 +11535,7 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete, m
         initialSession={editing?.id?editing:null}/>
     );
     return(
-      <TakeoffEditor key={editing?.id||'new-lt'} takeoff={editing} symbolTypes={LIGHTING_TYPES}
+      <TakeoffEditor key={editing?.id||'new-lt'} takeoff={editing} symbolTypes={LIGHTING_TYPES} toolKind="lighting"
         onSave={(t)=>{saveLighting(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
     );
   }
@@ -11652,7 +11686,7 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete, m
                   </div>
                   <div style={{display:'flex',gap:8,flexShrink:0}}>
                     <Btn variant="secondary" size="sm" onClick={()=>{setEditingKind('markup');setEditing(s);}}><Edit3 size={12}/>Open</Btn>
-                    {isAdmin&&<button onClick={()=>{const next=markupSessions.filter(x=>x.id!==s.id);setMarkupSessions(next);saveS('markupSessions',next);}} title="Delete" style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'4px'}}><Trash2 size={14}/></button>}
+                    {isAdmin&&<button onClick={()=>{const next=markupSessions.filter(x=>x.id!==s.id);setMarkupSessions(next);saveS('markupSessions',next);onSoftDelete?.({...s,_trashType:'markup',_deletedAt:new Date().toISOString()});}} title="Delete" style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'4px'}}><Trash2 size={14}/></button>}
                   </div>
                 </div>
               </div>
@@ -12270,7 +12304,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     const t=e.changedTouches[0];
     handleCanvasMouseUp();
     handleOverlayClick({clientX:t.clientX,clientY:t.clientY,shiftKey:false});
-  },[handleCanvasMouseUp,handleOverlayClick]);
+  },[handleCanvasMouseUp]);// handleOverlayClick is a plain arrow fn, recreated each render — omit from deps
 
   const alignH=()=>{
     if(selectedIds.size<2) return;
@@ -14891,7 +14925,7 @@ function BankStatementMatcher({statements=[],setStatements,projects=[],invoices=
         method:'POST',
         headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
         body:JSON.stringify({
-          model:'claude-haiku-4-5-20251001',max_tokens:4096,
+          model:'claude-haiku-4-5',max_tokens:4096,
           messages:[{role:'user',content:[
             {type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},
             {type:'text',text:'Extract ALL transactions from this bank statement. Return ONLY a valid JSON array with no other text, no markdown fences:\n[{"date":"YYYY-MM-DD","description":"full transaction text","amount":0.00,"type":"credit","balance":0.00}]\nRules: date=YYYY-MM-DD. amount=positive number always. type="credit" if money received/deposited, "debit" if money paid/withdrawn. balance=running balance after the transaction (0 if not shown). Include every single transaction row without skipping any.'}
@@ -14900,6 +14934,7 @@ function BankStatementMatcher({statements=[],setStatements,projects=[],invoices=
       });
       const data=await res.json();
       if(data.error) throw new Error(data.error.message);
+      if(data.stop_reason==='max_tokens') throw new Error('Statement too large — response was cut off. Try a single-month statement or contact support.');
       const txt=(data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
       const parsed=JSON.parse(txt);
       if(!Array.isArray(parsed)||parsed.length===0) throw new Error('No transactions found in this PDF.');
@@ -14916,7 +14951,7 @@ function BankStatementMatcher({statements=[],setStatements,projects=[],invoices=
           status:'unmatched',matchType:null,projectId:null,invoiceId:null,note:'',
         }))
       };
-      setStatements([...statements,newStmt]);
+      setStatements(prev=>[...prev,newStmt]);
       setActiveId(stmtId);
       setFilter('unmatched');
     }catch(err){
@@ -15216,6 +15251,7 @@ function BankStatementMatcher({statements=[],setStatements,projects=[],invoices=
 function CompanyAccounts({projects,invoices,payments,acctSettings,setAcctSettings,staffClaims=[],workerClaims=[],invoiceBatches=[],reconciliation={},setReconciliation=()=>{}}){
   const [tab,setTab]=useState('overview');
   const [settings,setSettings]=useState(acctSettings);
+useEffect(()=>{ setSettings(acctSettings); },[acctSettings]);
   const [generating,setGenerating]=useState(false);
   const [uploadMonth,setUploadMonth]=useState(null);
   const [reconcileMonth,setReconcileMonth]=useState(null);
