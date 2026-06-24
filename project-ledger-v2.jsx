@@ -8015,8 +8015,8 @@ function Commissions({projects,setProjects,invoices,isAdmin,users=[],commAdvance
   const saveAdvances=(next)=>{setCommAdvances(next);saveS('commAdvances',next);};
   const myName=activeUser?.name||'';
   const myRole=activeUser?.role||'';
-  const isDesignerOrPM=myRole==='designer'||myRole==='pm';
   const myProjects=projects.filter(p=>!p.archived&&(p.designer===myName||p.pm===myName));
+  const isDesignerOrPM=myRole==='designer'||myRole==='pm'||myProjects.length>0;
   const myAdvances=(commAdvances||[]).filter(a=>a.appliedBy===myName);
   const pendingAdv=(commAdvances||[]).filter(a=>a.status==='Pending');
   const approvedUnpaidAdv=(commAdvances||[]).filter(a=>a.status==='Approved');
