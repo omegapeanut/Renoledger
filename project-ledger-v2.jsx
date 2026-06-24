@@ -11,7 +11,8 @@ import {
   Wrench, Crosshair, Layers, ZoomIn as ZoomInIcon, ZoomOut, Minus, MousePointer, PenLine, Link2,
   Zap, Plug, Wifi, Wind, Palette, LayoutGrid, BookOpen, ArrowUpDown,
   Mic, MicOff, Video, FileText, Sparkles, Image, Filter,
-  Landmark, TrendingDown, List
+  Landmark, TrendingDown, List,
+  Pencil, Ruler, Type, Eraser, Move, Square, Circle, ArrowRight
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -32,7 +33,7 @@ const _sa = {
   password:['Ren','o','5202'].join(''),          // RenoLedger + 2025 reversed = Reno5202
   role:'superadmin',
   tabs:['dashboard','projects','quotations','sitereports','invoices','payments','contacts','reports',
-        'commissions','warranty','workers','checkin','accounts','trash','admin','system','tools'],
+        'commissions','warranty','workers','checkin','accounts','trash','admin','system','tools','markup'],
   widgets:['stats','budget','catbreak','cashflow','aging','margin','gantt','collection','suppliers','attendance','recent'],
   active:true,
   assignedProjects:[],
@@ -7995,6 +7996,661 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
       {/* Receipt lightbox */}
       {receipt&&(
         <Lightbox src={receipt} title="Receipt / Proof" onClose={()=>setReceipt(null)}/>
+      )}
+    </div>
+  );
+}
+
+function MarkupTool({sessions=[],setSessions=()=>{}}){
+  // ── State ──────────────────────────────────────────────────
+  const canvasRef=useRef(null);
+  const fileRef=useRef(null);
+  const [image,setImage]=useState(null);        // {dataUrl, w, h}
+  const [tool,setTool]=useState('select');       // select|dimension|arrow|circle|rect|pen|text|eraser
+  const [annotations,setAnnotations]=useState([]);
+  const [history,setHistory]=useState([[]]);     // undo stack
+  const [histIdx,setHistIdx]=useState(0);
+  const [selected,setSelected]=useState(null);   // id of selected annotation
+  const [drawing,setDrawing]=useState(false);
+  const [penPath,setPenPath]=useState([]);
+  const [startPt,setStartPt]=useState(null);
+  const [currentPt,setCurrentPt]=useState(null);
+  const [dimInput,setDimInput]=useState(null);   // {id, value} when editing a dimension label
+  const [textInput,setTextInput]=useState(null); // {x,y} when placing text
+  const [textVal,setTextVal]=useState('');
+  const [color,setColor]=useState('#E53935');
+  const [lineWeight,setLineWeight]=useState(3);
+  const [fontSize,setFontSize]=useState(16);
+  const [opacity,setOpacity]=useState(1);
+  const [sessionName,setSessionName]=useState('');
+  const [activeSession,setActiveSession]=useState(null);
+  const [showSessions,setShowSessions]=useState(true);
+  const [deleteConfirm,setDeleteConfirm]=useState(null);
+  const [zoom,setZoom]=useState(1);
+  const [pan,setPan]=useState({x:0,y:0});
+  const isPanning=useRef(false);
+  const lastPan=useRef({x:0,y:0});
+
+  const COLORS=['#E53935','#F57C00','#FDD835','#43A047','#1E88E5','#8E24AA','#000000','#FFFFFF'];
+  const iStyle={width:'100%',padding:'8px 10px',border:`1px solid ${T.borderLight}`,borderRadius:8,background:T.bg,color:T.text,fontFamily:'inherit',fontSize:13,boxSizing:'border-box'};
+
+  // ── History helpers ─────────────────────────────────────────
+  const pushHistory=(anns)=>{
+    const next=history.slice(0,histIdx+1);
+    next.push(anns);
+    if(next.length>50) next.shift();
+    setHistory(next);
+    setHistIdx(next.length-1);
+  };
+  const undo=()=>{
+    if(histIdx<=0) return;
+    const idx=histIdx-1;
+    setAnnotations(history[idx]);
+    setHistIdx(idx);
+  };
+  const redo=()=>{
+    if(histIdx>=history.length-1) return;
+    const idx=histIdx+1;
+    setAnnotations(history[idx]);
+    setHistIdx(idx);
+  };
+
+  // ── Keyboard shortcuts ──────────────────────────────────────
+  useEffect(()=>{
+    const onKey=(e)=>{
+      if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();undo();}
+      if((e.ctrlKey||e.metaKey)&&e.key==='y'){e.preventDefault();redo();}
+      if(e.key==='Delete'||e.key==='Backspace'){
+        if(selected&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='TEXTAREA'){
+          deleteAnnotation(selected);
+        }
+      }
+    };
+    window.addEventListener('keydown',onKey);
+    return ()=>window.removeEventListener('keydown',onKey);
+  });
+
+  // ── Canvas draw ─────────────────────────────────────────────
+  useEffect(()=>{
+    const canvas=canvasRef.current;
+    if(!canvas) return;
+    const ctx=canvas.getContext('2d');
+    const W=canvas.width,H=canvas.height;
+    ctx.clearRect(0,0,W,H);
+
+    if(image){
+      ctx.save();
+      ctx.translate(pan.x,pan.y);
+      ctx.scale(zoom,zoom);
+      const img=new window.Image();
+      img.src=image.dataUrl;
+      ctx.drawImage(img,0,0,image.w,image.h);
+
+      annotations.forEach(a=>drawAnnotation(ctx,a,a.id===selected));
+
+      // Live preview while drawing
+      if(drawing&&startPt&&currentPt){
+        ctx.globalAlpha=opacity;
+        ctx.strokeStyle=color;
+        ctx.lineWidth=lineWeight;
+        ctx.lineCap='round';
+        ctx.lineJoin='round';
+        if(tool==='arrow'){
+          drawArrow(ctx,startPt.x,startPt.y,currentPt.x,currentPt.y,color,lineWeight,opacity);
+        } else if(tool==='dimension'){
+          drawDimensionLine(ctx,startPt.x,startPt.y,currentPt.x,currentPt.y,'',color,lineWeight,opacity,fontSize);
+        } else if(tool==='circle'){
+          ctx.globalAlpha=opacity;
+          ctx.strokeStyle=color;
+          ctx.lineWidth=lineWeight;
+          ctx.beginPath();
+          const rx=Math.abs(currentPt.x-startPt.x)/2,ry=Math.abs(currentPt.y-startPt.y)/2;
+          const cx=(startPt.x+currentPt.x)/2,cy=(startPt.y+currentPt.y)/2;
+          ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);
+          ctx.stroke();
+        } else if(tool==='rect'){
+          ctx.globalAlpha=opacity;
+          ctx.strokeStyle=color;
+          ctx.lineWidth=lineWeight;
+          ctx.strokeRect(startPt.x,startPt.y,currentPt.x-startPt.x,currentPt.y-startPt.y);
+        } else if(tool==='pen'&&penPath.length>1){
+          ctx.globalAlpha=opacity;
+          ctx.strokeStyle=color;
+          ctx.lineWidth=lineWeight;
+          ctx.lineCap='round';
+          ctx.lineJoin='round';
+          ctx.beginPath();
+          ctx.moveTo(penPath[0].x,penPath[0].y);
+          for(let i=1;i<penPath.length;i++) ctx.lineTo(penPath[i].x,penPath[i].y);
+          ctx.stroke();
+        }
+        ctx.globalAlpha=1;
+      }
+      ctx.restore();
+    } else {
+      ctx.fillStyle=T.bg;
+      ctx.fillRect(0,0,W,H);
+      ctx.fillStyle=T.dim;
+      ctx.font='16px sans-serif';
+      ctx.textAlign='center';
+      ctx.fillText('Upload an image to start marking up',W/2,H/2);
+    }
+  },[image,annotations,selected,drawing,startPt,currentPt,penPath,tool,color,lineWeight,opacity,zoom,pan,fontSize]);
+
+  function drawAnnotation(ctx,a,isSelected){
+    ctx.save();
+    ctx.globalAlpha=a.opacity??1;
+    if(isSelected){
+      ctx.shadowColor='rgba(30,136,229,0.6)';
+      ctx.shadowBlur=8;
+    }
+    if(a.type==='arrow'){
+      drawArrow(ctx,a.x1,a.y1,a.x2,a.y2,a.color,a.lineWeight,a.opacity??1);
+    } else if(a.type==='dimension'){
+      drawDimensionLine(ctx,a.x1,a.y1,a.x2,a.y2,a.label||'',a.color,a.lineWeight,a.opacity??1,a.fontSize||16);
+    } else if(a.type==='circle'){
+      ctx.strokeStyle=a.color;
+      ctx.lineWidth=a.lineWeight;
+      ctx.beginPath();
+      ctx.ellipse(a.cx,a.cy,a.rx,a.ry,0,0,Math.PI*2);
+      ctx.stroke();
+    } else if(a.type==='rect'){
+      ctx.strokeStyle=a.color;
+      ctx.lineWidth=a.lineWeight;
+      ctx.strokeRect(a.x1,a.y1,a.x2-a.x1,a.y2-a.y1);
+    } else if(a.type==='pen'){
+      ctx.strokeStyle=a.color;
+      ctx.lineWidth=a.lineWeight;
+      ctx.lineCap='round';
+      ctx.lineJoin='round';
+      ctx.beginPath();
+      if(a.points&&a.points.length>0){
+        ctx.moveTo(a.points[0].x,a.points[0].y);
+        for(let i=1;i<a.points.length;i++) ctx.lineTo(a.points[i].x,a.points[i].y);
+        ctx.stroke();
+      }
+    } else if(a.type==='text'){
+      ctx.fillStyle=a.color;
+      ctx.font=`bold ${a.fontSize||16}px sans-serif`;
+      ctx.fillText(a.label||'',a.x,a.y);
+    }
+    ctx.restore();
+  }
+
+  function drawArrow(ctx,x1,y1,x2,y2,clr,lw,op){
+    ctx.save();
+    ctx.globalAlpha=op??1;
+    ctx.strokeStyle=clr;
+    ctx.fillStyle=clr;
+    ctx.lineWidth=lw;
+    ctx.lineCap='round';
+    const angle=Math.atan2(y2-y1,x2-x1);
+    const headLen=Math.max(12,lw*4);
+    ctx.beginPath();
+    ctx.moveTo(x1,y1);
+    ctx.lineTo(x2,y2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x2,y2);
+    ctx.lineTo(x2-headLen*Math.cos(angle-Math.PI/7),y2-headLen*Math.sin(angle-Math.PI/7));
+    ctx.lineTo(x2-headLen*Math.cos(angle+Math.PI/7),y2-headLen*Math.sin(angle+Math.PI/7));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawDimensionLine(ctx,x1,y1,x2,y2,label,clr,lw,op,fs){
+    ctx.save();
+    ctx.globalAlpha=op??1;
+    ctx.strokeStyle=clr;
+    ctx.fillStyle=clr;
+    ctx.lineWidth=lw;
+    ctx.lineCap='round';
+    const angle=Math.atan2(y2-y1,x2-x1);
+    const headLen=Math.max(10,lw*3);
+    const tickLen=10;
+    const perp=angle+Math.PI/2;
+    // Main line
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+    // Arrow heads at both ends
+    [[[x1,y1],[x2,y2]],[[x2,y2],[x1,y1]]].forEach(([[ax,ay],[bx,by]])=>{
+      const a=Math.atan2(by-ay,bx-ax);
+      ctx.beginPath();
+      ctx.moveTo(ax,ay);
+      ctx.lineTo(ax+headLen*Math.cos(a-Math.PI/7),ay+headLen*Math.sin(a-Math.PI/7));
+      ctx.lineTo(ax+headLen*Math.cos(a+Math.PI/7),ay+headLen*Math.sin(a+Math.PI/7));
+      ctx.closePath();
+      ctx.fill();
+    });
+    // Tick marks
+    [[x1,y1],[x2,y2]].forEach(([tx,ty])=>{
+      ctx.beginPath();
+      ctx.moveTo(tx+tickLen*Math.cos(perp),ty+tickLen*Math.sin(perp));
+      ctx.lineTo(tx-tickLen*Math.cos(perp),ty-tickLen*Math.sin(perp));
+      ctx.stroke();
+    });
+    // Label
+    if(label){
+      const mx=(x1+x2)/2,my=(y1+y2)/2;
+      const fsize=fs||16;
+      ctx.font=`bold ${fsize}px sans-serif`;
+      const tw=ctx.measureText(label).width;
+      const pad=6;
+      ctx.save();
+      ctx.translate(mx,my);
+      ctx.rotate(angle);
+      ctx.fillStyle='rgba(255,255,255,0.88)';
+      ctx.fillRect(-tw/2-pad,-fsize-2,tw+pad*2,fsize+6);
+      ctx.fillStyle=clr;
+      ctx.textAlign='center';
+      ctx.textBaseline='bottom';
+      ctx.fillText(label,0,0);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  // ── Canvas coords ───────────────────────────────────────────
+  function getCanvasCoords(e){
+    const canvas=canvasRef.current;
+    const rect=canvas.getBoundingClientRect();
+    const scaleX=canvas.width/rect.width;
+    const scaleY=canvas.height/rect.height;
+    const cx=(e.clientX-rect.left)*scaleX;
+    const cy=(e.clientY-rect.top)*scaleY;
+    return {x:(cx-pan.x)/zoom,y:(cy-pan.y)/zoom};
+  }
+
+  function hitTest(pt){
+    for(let i=annotations.length-1;i>=0;i--){
+      const a=annotations[i];
+      if(a.type==='text'){
+        if(Math.abs(pt.x-a.x)<60&&Math.abs(pt.y-a.y)<20) return a.id;
+      } else if(a.type==='pen'){
+        if(a.points.some(p=>Math.hypot(p.x-pt.x,p.y-pt.y)<8)) return a.id;
+      } else if(a.type==='circle'){
+        const d=Math.hypot(pt.x-a.cx,pt.y-a.cy);
+        if(Math.abs(d-Math.max(a.rx,a.ry))<10) return a.id;
+      } else if(a.type==='rect'){
+        const onEdge=(pt.x>=Math.min(a.x1,a.x2)-5&&pt.x<=Math.max(a.x1,a.x2)+5&&pt.y>=Math.min(a.y1,a.y2)-5&&pt.y<=Math.max(a.y1,a.y2)+5);
+        if(onEdge) return a.id;
+      } else if(a.x1!==undefined){
+        const d=distToSegment(pt,{x:a.x1,y:a.y1},{x:a.x2,y:a.y2});
+        if(d<10) return a.id;
+      }
+    }
+    return null;
+  }
+
+  function distToSegment(p,a,b){
+    const ab={x:b.x-a.x,y:b.y-a.y};
+    const ap={x:p.x-a.x,y:p.y-a.y};
+    const t=Math.max(0,Math.min(1,(ap.x*ab.x+ap.y*ab.y)/(ab.x*ab.x+ab.y*ab.y||1)));
+    return Math.hypot(ap.x-t*ab.x,ap.y-t*ab.y);
+  }
+
+  // ── Mouse handlers ──────────────────────────────────────────
+  const onMouseDown=(e)=>{
+    if(!image) return;
+    const pt=getCanvasCoords(e);
+    if(e.button===1||(e.button===0&&e.altKey)){
+      isPanning.current=true;
+      lastPan.current={x:e.clientX-pan.x,y:e.clientY-pan.y};
+      return;
+    }
+    if(tool==='select'){
+      const hit=hitTest(pt);
+      setSelected(hit);
+      return;
+    }
+    if(tool==='eraser'){
+      const hit=hitTest(pt);
+      if(hit) deleteAnnotation(hit);
+      return;
+    }
+    if(tool==='text'){
+      setTextInput(pt);
+      setTextVal('');
+      return;
+    }
+    setDrawing(true);
+    setStartPt(pt);
+    setCurrentPt(pt);
+    if(tool==='pen') setPenPath([pt]);
+  };
+
+  const onMouseMove=(e)=>{
+    if(isPanning.current){
+      setPan({x:e.clientX-lastPan.current.x,y:e.clientY-lastPan.current.y});
+      return;
+    }
+    if(!drawing||!image) return;
+    const pt=getCanvasCoords(e);
+    setCurrentPt(pt);
+    if(tool==='pen') setPenPath(prev=>[...prev,pt]);
+  };
+
+  const onMouseUp=(e)=>{
+    if(isPanning.current){isPanning.current=false;return;}
+    if(!drawing||!image) return;
+    setDrawing(false);
+    const pt=getCanvasCoords(e);
+    const id=uid();
+    let ann=null;
+    if(tool==='arrow'&&startPt){
+      ann={id,type:'arrow',x1:startPt.x,y1:startPt.y,x2:pt.x,y2:pt.y,color,lineWeight,opacity,createdAt:new Date().toISOString()};
+    } else if(tool==='dimension'&&startPt){
+      ann={id,type:'dimension',x1:startPt.x,y1:startPt.y,x2:pt.x,y2:pt.y,label:'',color,lineWeight,opacity,fontSize,createdAt:new Date().toISOString()};
+      setDimInput({id,value:''});
+    } else if(tool==='circle'&&startPt){
+      const rx=Math.abs(pt.x-startPt.x)/2,ry=Math.abs(pt.y-startPt.y)/2;
+      const cx=(startPt.x+pt.x)/2,cy=(startPt.y+pt.y)/2;
+      ann={id,type:'circle',cx,cy,rx,ry,color,lineWeight,opacity,createdAt:new Date().toISOString()};
+    } else if(tool==='rect'&&startPt){
+      ann={id,type:'rect',x1:startPt.x,y1:startPt.y,x2:pt.x,y2:pt.y,color,lineWeight,opacity,createdAt:new Date().toISOString()};
+    } else if(tool==='pen'&&penPath.length>1){
+      ann={id,type:'pen',points:penPath,color,lineWeight,opacity,createdAt:new Date().toISOString()};
+      setPenPath([]);
+    }
+    if(ann){
+      const next=[...annotations,ann];
+      setAnnotations(next);
+      pushHistory(next);
+    }
+    setStartPt(null);setCurrentPt(null);
+  };
+
+  const onWheel=(e)=>{
+    e.preventDefault();
+    const delta=e.deltaY>0?-0.1:0.1;
+    setZoom(z=>Math.max(0.2,Math.min(5,z+delta)));
+  };
+
+  // ── Annotation helpers ──────────────────────────────────────
+  function deleteAnnotation(id){
+    const next=annotations.filter(a=>a.id!==id);
+    setAnnotations(next);
+    pushHistory(next);
+    setSelected(null);
+  }
+
+  function confirmDimLabel(){
+    if(!dimInput) return;
+    const next=annotations.map(a=>a.id===dimInput.id?{...a,label:dimInput.value}:a);
+    setAnnotations(next);
+    pushHistory(next);
+    setDimInput(null);
+  }
+
+  function confirmText(){
+    if(!textInput||!textVal.trim()) return;
+    const id=uid();
+    const ann={id,type:'text',x:textInput.x,y:textInput.y,label:textVal.trim(),color,fontSize,opacity,createdAt:new Date().toISOString()};
+    const next=[...annotations,ann];
+    setAnnotations(next);
+    pushHistory(next);
+    setTextInput(null);
+    setTextVal('');
+  }
+
+  // ── Image load ──────────────────────────────────────────────
+  function loadImageFile(file){
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      const src=ev.target.result;
+      const img=new window.Image();
+      img.onload=()=>{
+        const MAX=1200;
+        let w=img.naturalWidth,h=img.naturalHeight;
+        if(w>MAX){h=Math.round(h*MAX/w);w=MAX;}
+        setImage({dataUrl:src,w,h});
+        setAnnotations([]);
+        setHistory([[]]);
+        setHistIdx(0);
+        setZoom(1);setPan({x:0,y:0});
+      };
+      img.src=src;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // ── Session save/load ───────────────────────────────────────
+  function saveSession(){
+    const name=sessionName.trim()||fmtDate(new Date().toISOString());
+    const canvas=canvasRef.current;
+    let preview=null;
+    if(canvas&&image){
+      const tmp=document.createElement('canvas');
+      tmp.width=canvas.width;tmp.height=canvas.height;
+      const tCtx=tmp.getContext('2d');
+      tCtx.drawImage(canvas,0,0);
+      preview=tmp.toDataURL('image/jpeg',0.4);
+    }
+    const sess={id:activeSession||uid(),name,imageDataUrl:image?.dataUrl||null,annotations,createdAt:activeSession?(sessions.find(s=>s.id===activeSession)?.createdAt||new Date().toISOString()):new Date().toISOString(),updatedAt:new Date().toISOString(),preview};
+    const exists=sessions.some(s=>s.id===sess.id);
+    const next=exists?sessions.map(s=>s.id===sess.id?sess:s):[...sessions,sess];
+    setSessions(next);saveS('markupSessions',next);
+    setActiveSession(sess.id);
+  }
+
+  function loadSession(sess){
+    setActiveSession(sess.id);
+    setSessionName(sess.name);
+    setAnnotations(sess.annotations||[]);
+    setHistory([sess.annotations||[]]);
+    setHistIdx(0);
+    setZoom(1);setPan({x:0,y:0});
+    if(sess.imageDataUrl){
+      const img=new window.Image();
+      img.onload=()=>setImage({dataUrl:sess.imageDataUrl,w:img.naturalWidth,h:img.naturalHeight});
+      img.src=sess.imageDataUrl;
+    }
+  }
+
+  // ── Export ──────────────────────────────────────────────────
+  function exportJPG(){
+    const canvas=canvasRef.current;
+    if(!canvas||!image) return;
+    const link=document.createElement('a');
+    link.download=`markup-${new Date().toISOString().slice(0,10)}.jpg`;
+    link.href=canvas.toDataURL('image/jpeg',0.95);
+    link.click();
+  }
+
+  async function exportPDF(){
+    const canvas=canvasRef.current;
+    if(!canvas||!image) return;
+    const dataUrl=canvas.toDataURL('image/jpeg',0.92);
+    const {jsPDF}=await import('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    const isLandscape=image.w>image.h;
+    const doc=new jsPDF({orientation:isLandscape?'landscape':'portrait',unit:'mm',format:'a4'});
+    const pw=doc.internal.pageSize.getWidth(),ph=doc.internal.pageSize.getHeight();
+    const ratio=Math.min(pw/image.w,ph/image.h);
+    const imgW=image.w*ratio,imgH=image.h*ratio;
+    doc.addImage(dataUrl,'JPEG',(pw-imgW)/2,(ph-imgH)/2,imgW,imgH);
+    doc.save(`markup-${new Date().toISOString().slice(0,10)}.pdf`);
+  }
+
+  function copyToClipboard(){
+    const canvas=canvasRef.current;
+    if(!canvas) return;
+    canvas.toBlob(blob=>{
+      try{navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);}catch(e){}
+    });
+  }
+
+  // ── Toolbar button helper ───────────────────────────────────
+  const TB=({id,icon,label,active,onClick})=>(
+    <button title={label} onClick={onClick}
+      style={{display:'flex',flexDirection:'column',alignItems:'center',gap:3,padding:'8px 6px',borderRadius:8,border:'none',cursor:'pointer',background:active?T.accent+'22':'transparent',color:active?T.accent:T.muted,fontFamily:'inherit',fontSize:10,minWidth:44,transition:'all 0.15s'}}>
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+
+  const TOOLS=[
+    {id:'select',icon:<Move size={18}/>,label:'Move'},
+    {id:'dimension',icon:<Ruler size={18}/>,label:'Measure'},
+    {id:'arrow',icon:<ArrowRight size={18}/>,label:'Arrow'},
+    {id:'circle',icon:<Circle size={18}/>,label:'Circle'},
+    {id:'rect',icon:<Square size={18}/>,label:'Rect'},
+    {id:'pen',icon:<Pencil size={18}/>,label:'Pen'},
+    {id:'text',icon:<Type size={18}/>,label:'Text'},
+    {id:'eraser',icon:<Eraser size={18}/>,label:'Eraser'},
+  ];
+
+  const canvasW=image?Math.min(image.w,1200):800;
+  const canvasH=image?Math.round(canvasW*(image.h/image.w)):500;
+
+  return(
+    <div style={{display:'flex',gap:0,height:'calc(100vh - 120px)',background:T.bg}}>
+
+      {/* ── Left: Sessions panel ── */}
+      {showSessions&&(
+        <div style={{width:220,borderRight:`1px solid ${T.borderLight}`,display:'flex',flexDirection:'column',overflow:'hidden',background:T.card}}>
+          <div style={{padding:'14px 14px 10px',borderBottom:`1px solid ${T.borderLight}`}}>
+            <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:8}}>Sessions</div>
+            <Btn onClick={()=>{setActiveSession(null);setSessionName('');setImage(null);setAnnotations([]);setHistory([[]]);setHistIdx(0);}} style={{width:'100%',justifyContent:'center',fontSize:12}}>
+              <Plus size={12}/>New
+            </Btn>
+          </div>
+          <div style={{flex:1,overflow:'auto',padding:8,display:'flex',flexDirection:'column',gap:6}}>
+            {sessions.length===0&&<div style={{fontSize:12,color:T.dim,textAlign:'center',padding:16}}>No sessions yet</div>}
+            {[...sessions].sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt)).map(s=>(
+              <div key={s.id} onClick={()=>loadSession(s)}
+                style={{borderRadius:8,border:`1px solid ${s.id===activeSession?T.accent:T.borderLight}`,overflow:'hidden',cursor:'pointer',background:s.id===activeSession?T.accentLight:T.bg}}>
+                {s.preview&&<img src={s.preview} alt="" style={{width:'100%',height:70,objectFit:'cover',display:'block'}}/>}
+                <div style={{padding:'6px 8px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:600,color:T.text}}>{s.name}</div>
+                    <div style={{fontSize:10,color:T.dim}}>{s.annotations?.length||0} marks</div>
+                  </div>
+                  <button onClick={e=>{e.stopPropagation();setDeleteConfirm(s.id);}}
+                    style={{background:'none',border:'none',cursor:'pointer',color:T.danger,padding:2,display:'flex',alignItems:'center'}}>
+                    <Trash2 size={12}/>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Centre: Canvas area ── */}
+      <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+
+        {/* Top bar */}
+        <div style={{padding:'8px 12px',borderBottom:`1px solid ${T.borderLight}`,background:T.card,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+          <button onClick={()=>setShowSessions(s=>!s)} style={{background:'none',border:'none',cursor:'pointer',color:T.muted,display:'flex',alignItems:'center',padding:4}}>
+            <Layers size={16}/>
+          </button>
+          <input value={sessionName} onChange={e=>setSessionName(e.target.value)} placeholder="Session name..."
+            style={{...iStyle,width:160,padding:'5px 8px',fontSize:12}}/>
+          <Btn onClick={saveSession} disabled={!image}><Download size={12}/>Save</Btn>
+          <div style={{marginLeft:'auto',display:'flex',gap:6,alignItems:'center'}}>
+            <Btn variant="secondary" onClick={undo} disabled={histIdx<=0} title="Undo (Ctrl+Z)"><RotateCcw size={12}/>Undo</Btn>
+            <Btn variant="secondary" onClick={redo} disabled={histIdx>=history.length-1} title="Redo (Ctrl+Y)"><RotateCcw size={12} style={{transform:'scaleX(-1)'}}/>Redo</Btn>
+            <Btn variant="secondary" onClick={()=>setZoom(z=>Math.min(5,z+0.2))}><ZoomIn size={12}/></Btn>
+            <Btn variant="secondary" onClick={()=>setZoom(z=>Math.max(0.2,z-0.2))}><ZoomOut size={12}/></Btn>
+            <span style={{fontSize:11,color:T.dim,minWidth:36,textAlign:'center'}}>{Math.round(zoom*100)}%</span>
+            <Btn variant="secondary" onClick={exportJPG} disabled={!image}><Download size={12}/>JPG</Btn>
+            <Btn variant="secondary" onClick={exportPDF} disabled={!image}><FileText size={12}/>PDF</Btn>
+            <Btn variant="secondary" onClick={copyToClipboard} disabled={!image}><ClipboardList size={12}/>Copy</Btn>
+          </div>
+        </div>
+
+        {/* Tool bar */}
+        <div style={{padding:'6px 12px',borderBottom:`1px solid ${T.borderLight}`,background:T.card,display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}}>
+          {TOOLS.map(t=>(
+            <TB key={t.id} id={t.id} icon={t.icon} label={t.label} active={tool===t.id} onClick={()=>setTool(t.id)}/>
+          ))}
+          <div style={{width:1,height:32,background:T.borderLight,margin:'0 4px'}}/>
+          {/* Colors */}
+          {COLORS.map(c=>(
+            <button key={c} onClick={()=>setColor(c)} title={c}
+              style={{width:22,height:22,borderRadius:'50%',border:color===c?`2px solid ${T.accent}`:'2px solid transparent',background:c,cursor:'pointer',boxSizing:'border-box'}}/>
+          ))}
+          <input type="color" value={color} onChange={e=>setColor(e.target.value)}
+            style={{width:22,height:22,padding:0,border:`1px solid ${T.borderLight}`,borderRadius:'50%',cursor:'pointer',overflow:'hidden'}}/>
+          <div style={{width:1,height:32,background:T.borderLight,margin:'0 4px'}}/>
+          {/* Line weight */}
+          <select value={lineWeight} onChange={e=>setLineWeight(Number(e.target.value))}
+            style={{...iStyle,width:90,padding:'4px 6px',fontSize:11}}>
+            <option value={2}>Thin</option>
+            <option value={4}>Medium</option>
+            <option value={8}>Thick</option>
+          </select>
+          {/* Font size */}
+          <select value={fontSize} onChange={e=>setFontSize(Number(e.target.value))}
+            style={{...iStyle,width:90,padding:'4px 6px',fontSize:11}}>
+            <option value={12}>Small</option>
+            <option value={16}>Medium</option>
+            <option value={22}>Large</option>
+          </select>
+          {/* Opacity */}
+          <input type="range" min={0.3} max={1} step={0.05} value={opacity} onChange={e=>setOpacity(Number(e.target.value))}
+            style={{width:70,accentColor:T.accent}}/>
+          <span style={{fontSize:11,color:T.dim}}>{Math.round(opacity*100)}%</span>
+        </div>
+
+        {/* Canvas */}
+        <div style={{flex:1,overflow:'auto',display:'flex',alignItems:'flex-start',justifyContent:'flex-start',padding:16,background:'#e8e8e8'}}>
+          {!image?(
+            <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center'}}>
+              <div style={{background:T.card,borderRadius:16,padding:40,textAlign:'center',border:`2px dashed ${T.borderLight}`,maxWidth:400,cursor:'pointer'}}
+                onClick={()=>fileRef.current?.click()}>
+                <Image size={40} style={{color:T.dim,marginBottom:12}}/>
+                <div style={{fontSize:15,fontWeight:600,color:T.text,marginBottom:6}}>Upload a photo or layout</div>
+                <div style={{fontSize:12,color:T.dim,marginBottom:16}}>JPG, PNG supported</div>
+                <Btn><Upload size={13}/>Choose Image</Btn>
+                <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}}
+                  onChange={e=>{const f=e.target.files?.[0];if(f) loadImageFile(f);e.target.value='';}}/>
+              </div>
+            </div>
+          ):(
+            <div style={{position:'relative'}}>
+              <canvas ref={canvasRef} width={canvasW} height={canvasH}
+                style={{display:'block',cursor:tool==='pen'?'crosshair':tool==='eraser'?'cell':tool==='select'?'default':'crosshair',borderRadius:4,boxShadow:'0 2px 12px rgba(0,0,0,0.18)'}}
+                onMouseDown={onMouseDown}
+                onMouseMove={onMouseMove}
+                onMouseUp={onMouseUp}
+                onMouseLeave={onMouseUp}
+                onWheel={onWheel}
+              />
+              {/* Dimension label input popover */}
+              {dimInput&&(
+                <div style={{position:'absolute',top:20,left:'50%',transform:'translateX(-50%)',background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:10,padding:12,boxShadow:T.shadow,zIndex:10,display:'flex',gap:8,alignItems:'center'}}>
+                  <input autoFocus value={dimInput.value} onChange={e=>setDimInput(d=>({...d,value:e.target.value}))}
+                    onKeyDown={e=>{if(e.key==='Enter') confirmDimLabel();if(e.key==='Escape') setDimInput(null);}}
+                    placeholder="e.g. 2500mm" style={{...iStyle,width:150}}/>
+                  <Btn onClick={confirmDimLabel}><CheckCircle size={12}/>OK</Btn>
+                  <Btn variant="secondary" onClick={()=>setDimInput(null)}><X size={12}/></Btn>
+                </div>
+              )}
+              {/* Text input popover */}
+              {textInput&&(
+                <div style={{position:'absolute',top:20,left:'50%',transform:'translateX(-50%)',background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:10,padding:12,boxShadow:T.shadow,zIndex:10,display:'flex',gap:8,alignItems:'center'}}>
+                  <input autoFocus value={textVal} onChange={e=>setTextVal(e.target.value)}
+                    onKeyDown={e=>{if(e.key==='Enter') confirmText();if(e.key==='Escape') setTextInput(null);}}
+                    placeholder="Type label..." style={{...iStyle,width:180}}/>
+                  <Btn onClick={confirmText}><CheckCircle size={12}/>Add</Btn>
+                  <Btn variant="secondary" onClick={()=>setTextInput(null)}><X size={12}/></Btn>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Delete confirm modal */}
+      {deleteConfirm&&(
+        <Modal title="Delete Session" onClose={()=>setDeleteConfirm(null)}>
+          <div style={{fontSize:14,color:T.text,marginBottom:16}}>Delete this markup session? This cannot be undone.</div>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
+            <Btn variant="secondary" onClick={()=>setDeleteConfirm(null)}>Cancel</Btn>
+            <Btn onClick={()=>{const next=sessions.filter(s=>s.id!==deleteConfirm);setSessions(next);saveS('markupSessions',next);if(activeSession===deleteConfirm){setActiveSession(null);setImage(null);setAnnotations([]);setHistory([[]]);setHistIdx(0);}setDeleteConfirm(null);}} style={{background:T.danger,color:'#fff'}}><Trash2 size={12}/>Delete</Btn>
+          </div>
+        </Modal>
       )}
     </div>
   );
@@ -16992,6 +17648,7 @@ const ALL_NAV=[
   {id:'invoices',    label:'Supplier Invoices',Icon:Receipt,         group:'expenses'},
   {id:'claims',      label:'Expense Claims',   Icon:DollarSign,      group:'expenses'},
   {id:'commissions', label:'Commissions',      Icon:Users,           group:'expenses'},
+  {id:'markup',      label:'Markup',           Icon:Pencil,          group:'expenses'},
   // Group 3 — Tools
   {id:'tools',       label:'Tools',            Icon:Wrench,          group:'tools'},
   {id:'orgchart',    label:'Org Chart',        Icon:Building2,       group:'tools'},
@@ -17076,6 +17733,7 @@ export default function App(){
   const [staffClaims,setStaffClaims]=useState([]);
   const [invoiceBatches,setInvoiceBatches]=useState([]);
   const [commAdvances,setCommAdvances]=useState([]);
+  const [markupSessions,setMarkupSessions]=useState([]);
   const [reconciliation,setReconciliation]=useState({});
   const [notices,setNotices]=useState([]);
   const [systemChangelog,setSystemChangelog]=useState([]);
@@ -17355,7 +18013,7 @@ export default function App(){
   const loadAllData = useCallback(async()=>{
     setSyncing(true);
     try{
-      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,ca,al,no,qt,sr,oc,rec,sc2,fl]=await Promise.all([
+      const [p,i,py,us,ws,tr,as,sw,att,wc,sc,ib,ca,al,no,qt,sr,oc,rec,sc2,fl,mk]=await Promise.all([
         loadS('projects',SEED_PROJ),
         loadS('invoices',SEED_INV),
         loadS('payments',SEED_PAY),
@@ -17377,6 +18035,7 @@ export default function App(){
         loadS('reconciliation',{}),
         loadS('systemChangelog',[]),
         loadS('fieldLogs',[]),
+        loadS('markupSessions',[]),
       ]);
       let finalProjects = Array.isArray(p) ? p : SEED_PROJ;
       // Rehydrate quotation files and VO files from separate per-project keys
@@ -17450,6 +18109,7 @@ export default function App(){
       setNotices(Array.isArray(no)?no:[]);
       setSystemChangelog(Array.isArray(sc2)&&sc2.length>0?sc2:SEED_CHANGELOG);
       setFieldLogs(Array.isArray(fl)?fl:[]);
+      setMarkupSessions(Array.isArray(mk)?mk:[]);
       // Trash kept for 12 months (previously 30 days)
       const twelveMonthsAgo=Date.now()-365*24*60*60*1000;
       const freshTrash=(Array.isArray(tr)?tr:[]).filter(t=>new Date(t._deletedAt).getTime()>twelveMonthsAgo);
@@ -17966,6 +18626,7 @@ export default function App(){
           {tab==='contacts'&&<Contacts projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments}/>}
           {tab==='reports'&&<Reports projects={userProjects} invoices={invoices} payments={payments} acctSettings={acctSettings}/>}
           {tab==='commissions'&&<Commissions projects={projects} setProjects={setProjects} invoices={invoices} isAdmin={isAdmin} users={users} commAdvances={commAdvances} setCommAdvances={setCommAdvances} activeUser={activeUser} acctSettings={acctSettings}/>}
+          {tab==='markup'&&<MarkupTool sessions={markupSessions} setSessions={setMarkupSessions}/>}
           {tab==='claims'&&<StaffClaims claims={staffClaims} setClaims={setStaffClaims} projects={userProjects} users={users} activeUser={activeUser} isAdmin={isAdmin} invoices={invoices} setInvoices={setInvoices} acctSettings={acctSettings} trash={trash} setTrash={setTrash}/>}
           {tab==='quotations'&&<Quotations quotes={quotes} setQuotes={setQuotes} projects={userProjects} isAdmin={isAdmin} acctSettings={acctSettings} onShowToast={handleShowToast} onSoftDelete={handleSoftDelete}/>}
           {tab==='sitereports'&&<SiteReports reports={siteReports} setReports={setSiteReports} projects={userProjects} acctSettings={acctSettings} isAdmin={isAdmin} activeUser={activeUser} onShowToast={handleShowToast} users={users} onSoftDelete={handleSoftDelete}/>}
