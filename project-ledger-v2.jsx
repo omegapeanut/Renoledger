@@ -144,10 +144,10 @@ const ROLE_LABEL = {admin:'Admin',accounts:'Accounts',designer:'Designer',pm:'Pr
 const ROLE_CLR = {admin:'#ef4444',accounts:'#3b82f6',designer:'#7c3aed',pm:'#0891b2',expense_entry:'#059669',superadmin:'#6d28d9'};
 
 const ROLE_DEFAULT_TABS = {
-  admin:       ['dashboard','projects','quotations','sitereports','fieldlogs','payments','reports','warranty','invoices','claims','commissions','tools','admin','workers','checkin','accounts','contacts','trash','orgchart'],
+  admin:       ['dashboard','projects','quotations','sitereports','fieldlogs','payments','reports','warranty','invoices','claims','commissions','markup','tools','admin','workers','checkin','accounts','contacts','trash','orgchart'],
   accounts:    ['dashboard','payments','reports','invoices'],
-  designer:    ['dashboard','projects','quotations','sitereports','fieldlogs','claims'],
-  pm:          ['dashboard','projects','quotations','sitereports','fieldlogs','payments','warranty','invoices','claims','workers','orgchart'],
+  designer:    ['dashboard','projects','quotations','sitereports','fieldlogs','claims','markup'],
+  pm:          ['dashboard','projects','quotations','sitereports','fieldlogs','payments','warranty','invoices','claims','workers','orgchart','markup'],
   expense_entry:['invoices','claims'],
   site_worker: ['checkin'],
 };
