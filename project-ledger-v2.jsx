@@ -8382,6 +8382,21 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
     setZoom(z=>Math.max(0.2,Math.min(5,z+delta)));
   };
 
+  // ── Touch support (iPad / mobile) ───────────────────────────
+  function touchToMouse(e){
+    const t=e.touches[0]||e.changedTouches[0];
+    return {clientX:t.clientX,clientY:t.clientY,button:0,altKey:false};
+  }
+  const onTouchStart=(e)=>{
+    if(e.touches.length===1){e.preventDefault();onMouseDown(touchToMouse(e));}
+  };
+  const onTouchMove=(e)=>{
+    if(e.touches.length===1){e.preventDefault();onMouseMove(touchToMouse(e));}
+  };
+  const onTouchEnd=(e)=>{
+    e.preventDefault();onMouseUp(touchToMouse(e));
+  };
+
   // ── Annotation helpers ──────────────────────────────────────
   function deleteAnnotation(id){
     const next=annotations.filter(a=>a.id!==id);
@@ -8633,12 +8648,15 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
           ):(
             <div style={{position:'relative'}}>
               <canvas ref={canvasRef} width={canvasW} height={canvasH}
-                style={{display:'block',cursor:tool==='pen'?'crosshair':tool==='eraser'?'cell':tool==='select'?'default':'crosshair',borderRadius:4,boxShadow:'0 2px 12px rgba(0,0,0,0.18)'}}
+                style={{display:'block',cursor:tool==='pen'?'crosshair':tool==='eraser'?'cell':tool==='select'?'default':'crosshair',borderRadius:4,boxShadow:'0 2px 12px rgba(0,0,0,0.18)',touchAction:'none'}}
                 onMouseDown={onMouseDown}
                 onMouseMove={onMouseMove}
                 onMouseUp={onMouseUp}
                 onMouseLeave={onMouseUp}
                 onWheel={onWheel}
+                onTouchStart={onTouchStart}
+                onTouchMove={onTouchMove}
+                onTouchEnd={onTouchEnd}
               />
               {/* Dimension label input popover */}
               {dimInput&&(
