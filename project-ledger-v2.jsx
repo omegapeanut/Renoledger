@@ -12,7 +12,7 @@ import {
   Zap, Plug, Wifi, Wind, Palette, LayoutGrid, BookOpen, ArrowUpDown,
   Mic, MicOff, Video, FileText, Sparkles, Image, Filter,
   Landmark, TrendingDown, List,
-  Pencil, Ruler, Type, Eraser, Move, Square, Circle, ArrowRight
+  Pencil, Ruler, Type, Eraser, Move, Square, Circle, ArrowRight, ArrowLeft
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -33,7 +33,7 @@ const _sa = {
   password:['Ren','o','5202'].join(''),          // RenoLedger + 2025 reversed = Reno5202
   role:'superadmin',
   tabs:['dashboard','projects','quotations','sitereports','invoices','payments','contacts','reports',
-        'commissions','warranty','workers','checkin','accounts','trash','admin','system','tools','markup'],
+        'commissions','warranty','workers','checkin','accounts','trash','admin','system','tools'],
   widgets:['stats','budget','catbreak','cashflow','aging','margin','gantt','collection','suppliers','attendance','recent'],
   active:true,
   assignedProjects:[],
@@ -144,10 +144,10 @@ const ROLE_LABEL = {admin:'Admin',accounts:'Accounts',designer:'Designer',pm:'Pr
 const ROLE_CLR = {admin:'#ef4444',accounts:'#3b82f6',designer:'#7c3aed',pm:'#0891b2',expense_entry:'#059669',superadmin:'#6d28d9'};
 
 const ROLE_DEFAULT_TABS = {
-  admin:       ['dashboard','projects','quotations','sitereports','fieldlogs','payments','reports','warranty','invoices','claims','commissions','markup','tools','admin','workers','checkin','accounts','contacts','trash','orgchart'],
+  admin:       ['dashboard','projects','quotations','sitereports','fieldlogs','payments','reports','warranty','invoices','claims','commissions','tools','admin','workers','checkin','accounts','contacts','trash','orgchart'],
   accounts:    ['dashboard','payments','reports','invoices'],
-  designer:    ['dashboard','projects','quotations','sitereports','fieldlogs','claims','markup'],
-  pm:          ['dashboard','projects','quotations','sitereports','fieldlogs','payments','warranty','invoices','claims','workers','orgchart','markup'],
+  designer:    ['dashboard','projects','quotations','sitereports','fieldlogs','claims'],
+  pm:          ['dashboard','projects','quotations','sitereports','fieldlogs','payments','warranty','invoices','claims','workers','orgchart'],
   expense_entry:['invoices','claims'],
   site_worker: ['checkin'],
 };
@@ -8001,7 +8001,7 @@ function StaffClaims({claims,setClaims,projects,users,activeUser,isAdmin,invoice
   );
 }
 
-function MarkupTool({sessions=[],setSessions=()=>{}}){
+function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=null}){
   // ── State ──────────────────────────────────────────────────
   const canvasRef=useRef(null);
   const fileRef=useRef(null);
@@ -8033,6 +8033,22 @@ function MarkupTool({sessions=[],setSessions=()=>{}}){
 
   const COLORS=['#E53935','#F57C00','#FDD835','#43A047','#1E88E5','#8E24AA','#000000','#FFFFFF'];
   const iStyle={width:'100%',padding:'8px 10px',border:`1px solid ${T.borderLight}`,borderRadius:8,background:T.bg,color:T.text,fontFamily:'inherit',fontSize:13,boxSizing:'border-box'};
+
+  // Load initial session if provided
+  useEffect(()=>{
+    if(initialSession){
+      setActiveSession(initialSession.id);
+      setSessionName(initialSession.name||'');
+      setAnnotations(initialSession.annotations||[]);
+      setHistory([initialSession.annotations||[]]);
+      setHistIdx(0);
+      if(initialSession.imageDataUrl){
+        const img=new window.Image();
+        img.onload=()=>setImage({dataUrl:initialSession.imageDataUrl,w:img.naturalWidth,h:img.naturalHeight});
+        img.src=initialSession.imageDataUrl;
+      }
+    }
+  },[]);
 
   // ── History helpers ─────────────────────────────────────────
   const pushHistory=(anns)=>{
@@ -8506,7 +8522,7 @@ function MarkupTool({sessions=[],setSessions=()=>{}}){
     <div style={{display:'flex',gap:0,height:'calc(100vh - 120px)',background:T.bg}}>
 
       {/* ── Left: Sessions panel ── */}
-      {showSessions&&(
+      {!onBack&&showSessions&&(
         <div style={{width:220,borderRight:`1px solid ${T.borderLight}`,display:'flex',flexDirection:'column',overflow:'hidden',background:T.card}}>
           <div style={{padding:'14px 14px 10px',borderBottom:`1px solid ${T.borderLight}`}}>
             <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:8}}>Sessions</div>
@@ -8541,9 +8557,16 @@ function MarkupTool({sessions=[],setSessions=()=>{}}){
 
         {/* Top bar */}
         <div style={{padding:'8px 12px',borderBottom:`1px solid ${T.borderLight}`,background:T.card,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-          <button onClick={()=>setShowSessions(s=>!s)} style={{background:'none',border:'none',cursor:'pointer',color:T.muted,display:'flex',alignItems:'center',padding:4}}>
-            <Layers size={16}/>
-          </button>
+          {onBack&&(
+            <button onClick={onBack} style={{background:'none',border:'none',cursor:'pointer',color:T.muted,display:'flex',alignItems:'center',gap:5,padding:'4px 8px',borderRadius:6,fontSize:12,fontFamily:'inherit'}}>
+              <ArrowLeft size={14}/>Back
+            </button>
+          )}
+          {!onBack&&(
+            <button onClick={()=>setShowSessions(s=>!s)} style={{background:'none',border:'none',cursor:'pointer',color:T.muted,display:'flex',alignItems:'center',padding:4}}>
+              <Layers size={16}/>
+            </button>
+          )}
           <input value={sessionName} onChange={e=>setSessionName(e.target.value)} placeholder="Session name..."
             style={{...iStyle,width:160,padding:'5px 8px',fontSize:12}}/>
           <Btn onClick={saveSession} disabled={!image}><Download size={12}/>Save</Btn>
@@ -11373,7 +11396,7 @@ function QuoteEditor({quote, onSave, onCancel, projects, acctSettings, allQuotes
 }
 
 // ─── TOOLS HUB ───────────────────────────────────────────────────────────────
-function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
+function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete, markupSessions=[], setMarkupSessions=()=>{}}){
   const [lightings,setLightings]=useState([]);
   const [powers,setPowers]=useState([]);
   const [networks,setNetworks]=useState([]);
@@ -11454,6 +11477,11 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
       <TakeoffEditor key={editing?.id||'new-fl'} takeoff={editing} symbolTypes={FLOOR_TYPES} toolKind="floor"
         onSave={(t)=>{saveFloor(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
     );
+    if(editingKind==='markup') return(
+      <MarkupTool sessions={markupSessions} setSessions={setMarkupSessions}
+        onBack={()=>setEditing(null)}
+        initialSession={editing?.id?editing:null}/>
+    );
     return(
       <TakeoffEditor key={editing?.id||'new-lt'} takeoff={editing} symbolTypes={LIGHTING_TYPES}
         onSave={(t)=>{saveLighting(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
@@ -11495,7 +11523,7 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
 
   const ToolCard=({icon:Icon,iconBg,iconColor,title,desc,label,kind})=>(
     <div style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:20,cursor:'pointer',transition:'all 0.15s'}}
-      onClick={()=>{setEditingKind(kind);setEditing(newBlank());}}>
+      onClick={()=>{setEditingKind(kind);setEditing(kind==='markup'?{id:'',name:'',createdAt:new Date().toISOString()}:newBlank());}}>
       <div style={{width:44,height:44,background:iconBg,borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12}}>
         <Icon size={22} style={{color:iconColor}}/>
       </div>
@@ -11538,6 +11566,9 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
         <ToolCard icon={LayoutGrid} iconBg="rgba(147,197,253,0.25)" iconColor="#3b82f6"
           title="Floor Finishing" kind="floor" label="New Floor Markup"
           desc="Mark out floor areas, auto-calculate square footage and indicate finishing material type."/>
+        <ToolCard icon={Pencil} iconBg="rgba(99,102,241,0.1)" iconColor="#6366f1"
+          title="Measurement Markup" kind="markup" label="New Measurement Markup"
+          desc="Annotate photos and layouts with dimension lines, arrows, circles, freehand pen and text labels."/>
       </div>
 
       {loaded&&lightings.length>0&&(
@@ -11587,6 +11618,28 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete}){
           <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Floor Markups</div>
           <SavedList items={floors} symTypes={FLOOR_TYPES} accentColor="#3b82f6"
             onOpen={t=>{setEditingKind('floor');setEditing(t);}} onDelete={delFloor}/>
+        </div>
+      )}
+      {markupSessions.length>0&&(
+        <div style={{marginBottom:28}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:12}}>Saved Measurement Markups</div>
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {[...markupSessions].sort((a,b)=>new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt)).map(s=>(
+              <div key={s.id} style={{background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:14,overflow:'hidden',display:'flex',alignItems:'stretch',boxShadow:T.shadow}}>
+                {s.preview&&<img src={s.preview} alt="" style={{width:80,height:64,objectFit:'cover',flexShrink:0}}/>}
+                <div style={{flex:1,padding:'12px 16px',display:'flex',alignItems:'center',gap:12,minWidth:0}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:2}}>{s.name||'Untitled'}</div>
+                    <div style={{fontSize:11,color:T.muted}}>{s.annotations?.length||0} annotation{s.annotations?.length!==1?'s':''} · {fmtDate(s.updatedAt||s.createdAt)}</div>
+                  </div>
+                  <div style={{display:'flex',gap:8,flexShrink:0}}>
+                    <Btn variant="secondary" size="sm" onClick={()=>{setEditingKind('markup');setEditing(s);}}><Edit3 size={12}/>Open</Btn>
+                    {isAdmin&&<button onClick={()=>{const next=markupSessions.filter(x=>x.id!==s.id);setMarkupSessions(next);saveS('markupSessions',next);}} title="Delete" style={{background:'none',border:'none',cursor:'pointer',color:T.dim,padding:'4px'}}><Trash2 size={14}/></button>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -17648,7 +17701,6 @@ const ALL_NAV=[
   {id:'invoices',    label:'Supplier Invoices',Icon:Receipt,         group:'expenses'},
   {id:'claims',      label:'Expense Claims',   Icon:DollarSign,      group:'expenses'},
   {id:'commissions', label:'Commissions',      Icon:Users,           group:'expenses'},
-  {id:'markup',      label:'Markup',           Icon:Pencil,          group:'expenses'},
   // Group 3 — Tools
   {id:'tools',       label:'Tools',            Icon:Wrench,          group:'tools'},
   {id:'orgchart',    label:'Org Chart',        Icon:Building2,       group:'tools'},
@@ -18626,7 +18678,6 @@ export default function App(){
           {tab==='contacts'&&<Contacts projects={userProjects} invoices={invoices.filter(i=>userProjects.some(p=>p.id===i.projectId))} payments={payments}/>}
           {tab==='reports'&&<Reports projects={userProjects} invoices={invoices} payments={payments} acctSettings={acctSettings}/>}
           {tab==='commissions'&&<Commissions projects={projects} setProjects={setProjects} invoices={invoices} isAdmin={isAdmin} users={users} commAdvances={commAdvances} setCommAdvances={setCommAdvances} activeUser={activeUser} acctSettings={acctSettings}/>}
-          {tab==='markup'&&<MarkupTool sessions={markupSessions} setSessions={setMarkupSessions}/>}
           {tab==='claims'&&<StaffClaims claims={staffClaims} setClaims={setStaffClaims} projects={userProjects} users={users} activeUser={activeUser} isAdmin={isAdmin} invoices={invoices} setInvoices={setInvoices} acctSettings={acctSettings} trash={trash} setTrash={setTrash}/>}
           {tab==='quotations'&&<Quotations quotes={quotes} setQuotes={setQuotes} projects={userProjects} isAdmin={isAdmin} acctSettings={acctSettings} onShowToast={handleShowToast} onSoftDelete={handleSoftDelete}/>}
           {tab==='sitereports'&&<SiteReports reports={siteReports} setReports={setSiteReports} projects={userProjects} acctSettings={acctSettings} isAdmin={isAdmin} activeUser={activeUser} onShowToast={handleShowToast} users={users} onSoftDelete={handleSoftDelete}/>}
@@ -18635,7 +18686,7 @@ export default function App(){
           {tab==='workers'&&<WorkerAdmin siteWorkers={siteWorkers} setSiteWorkers={setSiteWorkers} attendance={attendance} setAttendance={setAttendance} projects={projects} invoices={invoices} setInvoices={setInvoices} claims={workerClaims} setClaims={setWorkerClaims} acctSettings={acctSettings} logAction={logAction}/>}
           {tab==='checkin'&&<WorkerLoginScreen siteWorkers={siteWorkers} onLogin={(w)=>setWorkerSession(w)} onAdminLogin={()=>setTab('dashboard')} acctSettings={acctSettings}/>}
           {tab==='accounts'&&isAdmin&&(<CompanyAccounts projects={projects} invoices={invoices} payments={payments} acctSettings={acctSettings} setAcctSettings={setAcctSettings} staffClaims={staffClaims} workerClaims={workerClaims} invoiceBatches={invoiceBatches} reconciliation={reconciliation} setReconciliation={setReconciliation}/>)}
-          {tab==='tools'&&<ToolsHub acctSettings={acctSettings} projects={userProjects} isAdmin={isAdmin} onShowToast={handleShowToast} onSoftDelete={handleSoftDelete}/>}
+          {tab==='tools'&&<ToolsHub acctSettings={acctSettings} projects={userProjects} isAdmin={isAdmin} onShowToast={handleShowToast} onSoftDelete={handleSoftDelete} markupSessions={markupSessions} setMarkupSessions={setMarkupSessions}/>}
           {tab==='trash'&&isAdmin&&(<TrashBin trash={trash} onRestore={handleRestore} onPermanentDelete={handlePermanentDelete} isSuperAdmin={isSuperAdmin}/>)}
           {tab==='admin'&&isAdmin&&(<Admin users={users.filter(u=>u.id!=='__sa__')} setUsers={setUsers} projects={projects} onSoftDelete={handleSoftDelete} onShowToast={handleShowToast} actionLog={actionLog} onUndoAction={handleRestore} isSuperAdmin={isSuperAdmin}/>)}
           {tab==='system'&&isSuperAdmin&&(<SystemPanel projects={projects} invoices={invoices} payments={payments} siteWorkers={siteWorkers} attendance={attendance} users={users} warranties={warranties} trash={trash} acctSettings={acctSettings} setAcctSettings={setAcctSettings} actionLog={actionLog} setActionLog={setActionLog} logAction={logAction}/>)}
