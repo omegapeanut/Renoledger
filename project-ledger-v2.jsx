@@ -12173,27 +12173,6 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     legendDragRef.current=null;
   },[]);
 
-  // ── Touch support for overlay canvas (iPad / mobile) ─────────────────────
-  const handleOverlayTouchStart=useCallback((e)=>{
-    if(e.touches.length!==1) return;
-    e.preventDefault();
-    const t=e.touches[0];
-    handleCanvasMouseDown({clientX:t.clientX,clientY:t.clientY,preventDefault:()=>{}});
-  },[handleCanvasMouseDown]);
-  const handleOverlayTouchMove=useCallback((e)=>{
-    if(e.touches.length!==1) return;
-    e.preventDefault();
-    const t=e.touches[0];
-    handleCanvasMouseMove({clientX:t.clientX,clientY:t.clientY});
-  },[handleCanvasMouseMove]);
-  const handleOverlayTouchEnd=useCallback((e)=>{
-    e.preventDefault();
-    const t=e.changedTouches[0];
-    handleCanvasMouseUp();
-    // Simulate click for marker placement (tap = no legend drag)
-    handleOverlayClick({clientX:t.clientX,clientY:t.clientY,shiftKey:false});
-  },[handleCanvasMouseUp,handleOverlayClick]);
-
   // ── Interactions ──────────────────────────────────────────────────────────
   const loadFile=async(file)=>{
     const isImg=file.type.startsWith('image/')||/\.(jpe?g|png|gif|webp|bmp)$/i.test(file.name);
@@ -12272,6 +12251,26 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       }
     }
   };
+
+  // ── Touch support for overlay canvas (iPad / mobile) ─────────────────────
+  const handleOverlayTouchStart=useCallback((e)=>{
+    if(e.touches.length!==1) return;
+    e.preventDefault();
+    const t=e.touches[0];
+    handleCanvasMouseDown({clientX:t.clientX,clientY:t.clientY,preventDefault:()=>{}});
+  },[handleCanvasMouseDown]);
+  const handleOverlayTouchMove=useCallback((e)=>{
+    if(e.touches.length!==1) return;
+    e.preventDefault();
+    const t=e.touches[0];
+    handleCanvasMouseMove({clientX:t.clientX,clientY:t.clientY});
+  },[handleCanvasMouseMove]);
+  const handleOverlayTouchEnd=useCallback((e)=>{
+    e.preventDefault();
+    const t=e.changedTouches[0];
+    handleCanvasMouseUp();
+    handleOverlayClick({clientX:t.clientX,clientY:t.clientY,shiftKey:false});
+  },[handleCanvasMouseUp,handleOverlayClick]);
 
   const alignH=()=>{
     if(selectedIds.size<2) return;
