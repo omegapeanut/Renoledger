@@ -11744,7 +11744,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const [totalPages,setTotalPages]=useState(0);
   const [scale,setScale]=useState(1.5);
   const [pdfDoc,setPdfDoc]=useState(null);
-  const [imgEl,setImgEl]=useState(null);   // loaded Image element when source is an image
+  const [imgEl,setImgEl]=useState(null);         // {dataUrl,w,h} when source is an image (mirrors MarkupTool pattern)
   const [fileType,setFileType]=useState(takeoff?.fileType||'pdf'); // 'pdf' | 'image'
   const [pdfBytes,setPdfBytes]=useState(null);
   const [pdfFilename,setPdfFilename]=useState(takeoff?.pdfFilename||'');
@@ -11863,8 +11863,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           // Use data URL (not blob URL) — reliable across all mobile browsers
           const base64=btoa(new Uint8Array(ab).reduce((s,b)=>s+String.fromCharCode(b),''));
           const dataUrl=`data:${mime};base64,${base64}`;
-          const img=new Image();
-          img.onload=()=>{setImgEl(img);setPdfDoc(null);setTotalPages(1);setCurrentPage(1);};
+          const img=new window.Image();
+          img.onload=()=>{setImgEl({dataUrl,w:img.naturalWidth,h:img.naturalHeight});setPdfDoc(null);setTotalPages(1);setCurrentPage(1);};
           img.onerror=()=>{console.warn('Auto-load image failed');};
           img.src=dataUrl;
         } else {
@@ -11884,11 +11884,16 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const renderPage=async(doc,pageNum,sc)=>{
     const canvas=pdfCanvasRef.current; if(!canvas) return;
     if(imgEl){
-      const w=Math.round(imgEl.naturalWidth*sc), h=Math.round(imgEl.naturalHeight*sc);
+      // Mirror MarkupTool: draw from cached dataUrl using a fresh Image each time.
+      // Storing Image elements in state can have lifecycle issues; dataUrl is always stable.
+      const w=Math.round(imgEl.w*sc), h=Math.round(imgEl.h*sc);
       canvas.width=w; canvas.height=h;
       const ov=overlayRef.current; if(ov){ov.width=w;ov.height=h;}
-      setPageSize({w:imgEl.naturalWidth,h:imgEl.naturalHeight});
-      canvas.getContext('2d').drawImage(imgEl,0,0,w,h);
+      setPageSize({w:imgEl.w,h:imgEl.h});
+      const tmp=new window.Image();
+      tmp.src=imgEl.dataUrl;
+      // drawImage works immediately if dataUrl is cached (it always is at this point)
+      canvas.getContext('2d').drawImage(tmp,0,0,w,h);
       return;
     }
     if(!doc||renderingRef.current) return;
@@ -12228,24 +12233,31 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     setUploading(true); setPdfFilename(file.name); setFileType(isImg?'image':'pdf');
     if(isImg){
       // FileReader → data URL: universally reliable on iOS/Android/desktop.
-      // Blob URLs can silently fail to trigger onload on some mobile browsers.
+      // Use FileReader → dataUrl (same pattern as MarkupTool which works reliably).
+      // Store {dataUrl,w,h} in state instead of the Image element — drawing uses
+      // new Image() from cached dataUrl each frame (proven pattern, no stale-ref issues).
+      // Background ops start ONLY after image confirms loaded to avoid concurrent File reads.
       const reader=new FileReader();
       reader.onload=(ev)=>{
         const dataUrl=ev.target.result;
-        const img=new Image();
-        img.onload=()=>{setImgEl(img);setPdfDoc(null);setTotalPages(1);setCurrentPage(1);setUploading(false);};
+        const img=new window.Image();
+        img.onload=()=>{
+          const w=img.naturalWidth, h=img.naturalHeight;
+          setImgEl({dataUrl,w,h});
+          setPdfDoc(null);setTotalPages(1);setCurrentPage(1);setUploading(false);
+          // Background: IDB store + Cloudinary (starts after image confirmed loaded)
+          file.arrayBuffer().then(ab=>{
+            setPdfBytes(ab);
+            if(takeoff?.id) savePdfToIdb(takeoff.id,ab);
+          }).catch(()=>{});
+          const up=uploadToCloudinary(file).then(url=>{if(url)setPdfUrl(url);pdfUploadRef.current=null;return url;}).catch(()=>null);
+          pdfUploadRef.current=up;
+        };
         img.onerror=()=>{alert('Could not load image. Try JPG or PNG.');setUploading(false);};
         img.src=dataUrl;
       };
       reader.onerror=()=>{alert('Could not read file.');setUploading(false);};
       reader.readAsDataURL(file);
-      // Read bytes in background for IndexedDB / PDF-export
-      file.arrayBuffer().then(ab=>{
-        setPdfBytes(ab);
-        if(takeoff?.id) savePdfToIdb(takeoff.id,ab);
-      }).catch(()=>{});
-      const up=uploadToCloudinary(file).then(url=>{if(url)setPdfUrl(url);pdfUploadRef.current=null;return url;});
-      pdfUploadRef.current=up;
     } else {
       const ab=await file.arrayBuffer(); setPdfBytes(ab);
       if(!window.pdfjsLib){alert('PDF viewer not ready, please wait a moment.');setUploading(false);return;}
