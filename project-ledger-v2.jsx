@@ -510,18 +510,28 @@ function drawTakeoffSymbol(ctx, typeId, cx, cy, sz, color, alpha=1){
   ctx.restore();
 }
 
-// Draw the label (number) to the right of a symbol
-function drawTakeoffLabel(ctx, label, cx, cy, sz, color){
+// Draw the label (number) beside a symbol. pos: 'right'|'left'|'top'|'bottom'
+function drawTakeoffLabel(ctx, label, cx, cy, sz, color, pos){
+  pos=pos||'right';
   ctx.save();
   const fs=Math.max(9,Math.round(sz*0.62));
   ctx.font=`bold ${fs}px Arial`;
-  ctx.textAlign='left'; ctx.textBaseline='middle';
   const tw=ctx.measureText(label).width;
-  const px=cx+sz/2+3, py=cy;
+  const r=sz/2+3;
+  let tx,ty,rx;
+  if(pos==='left'){
+    tx=cx-r; ty=cy; ctx.textAlign='right'; ctx.textBaseline='middle'; rx=tx-tw-1;
+  } else if(pos==='top'){
+    tx=cx; ty=cy-r-fs*0.7; ctx.textAlign='center'; ctx.textBaseline='middle'; rx=tx-tw/2-1;
+  } else if(pos==='bottom'){
+    tx=cx; ty=cy+r+fs*0.7; ctx.textAlign='center'; ctx.textBaseline='middle'; rx=tx-tw/2-1;
+  } else { // right (default)
+    tx=cx+r; ty=cy; ctx.textAlign='left'; ctx.textBaseline='middle'; rx=tx-1;
+  }
   ctx.fillStyle='rgba(255,255,255,0.88)';
-  ctx.fillRect(px-1,py-fs*0.62,tw+4,fs*1.24);
+  ctx.fillRect(rx,ty-fs*0.62,tw+4,fs*1.24);
   ctx.fillStyle=color;
-  ctx.fillText(label,px+1,py+1);
+  ctx.fillText(label,tx,ty+1);
   ctx.restore();
 }
 
@@ -11958,7 +11968,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         ctx.beginPath(); ctx.arc(cx,cy,sz/2+6,0,Math.PI*2); ctx.stroke(); ctx.restore();
       }
       drawTakeoffSymbol(ctx,m.type,cx,cy,sz,color);
-      drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes,globalPrefix),cx,cy,sz,color);
+      drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes,globalPrefix),cx,cy,sz,color,m.labelPos);
       // Highlight link start
       if(mode==='link'&&m.id===linkStartId){
         ctx.save(); ctx.strokeStyle='#f97316'; ctx.lineWidth=2.5; ctx.setLineDash([3,2]);
@@ -12347,6 +12357,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     handleCanvasMouseUp();
     handleOverlayClick({clientX:t.clientX,clientY:t.clientY,shiftKey:false});
   },[handleCanvasMouseUp]);// handleOverlayClick is a plain arrow fn, recreated each render — omit from deps
+
+  const setLabelPos=(pos)=>{
+    pushHistory(markers.map(m=>selectedIds.has(m.id)?{...m,labelPos:pos}:m));
+  };
 
   const alignH=()=>{
     if(selectedIds.size<2) return;
@@ -12871,6 +12885,16 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
                 </button>
               </>
             )}
+            <div style={{display:'flex',alignItems:'center',gap:3,borderLeft:`1px solid ${T.borderLight}`,paddingLeft:8}}>
+              <span style={{fontSize:10,color:T.muted,whiteSpace:'nowrap'}}>Label:</span>
+              {[['top','↑'],['left','←'],['right','→'],['bottom','↓']].map(([pos,icon])=>(
+                <button key={pos} onClick={()=>setLabelPos(pos)} title={`Label ${pos}`}
+                  style={{width:24,height:24,border:`1px solid ${T.borderLight}`,borderRadius:5,cursor:'pointer',
+                    background:T.bg,color:T.text,fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',padding:0,fontFamily:'inherit'}}>
+                  {icon}
+                </button>
+              ))}
+            </div>
             <button onClick={deleteSelected}
               style={{background:T.dangerLight,border:'none',borderRadius:8,padding:'5px 10px',cursor:'pointer',color:T.danger,fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5}}>
               <Trash2 size={12}/>Delete{selCount>1?` (${selCount})`:''}
