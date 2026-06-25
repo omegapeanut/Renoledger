@@ -11916,11 +11916,28 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     return c;
   },[markers]);
 
-  // Circuit key = the SW-type endpoint of a link (or fromId as fallback)
+  // Circuit key = ID of the SW switch reachable from this link via graph traversal.
+  // If no SW found, fall back to fromId so each disconnected leg still gets a color.
   const getCircuitKey=useCallback((l)=>{
+    // First check direct endpoints (fast path)
     const fm=markers.find(m=>m.id===l.fromId), tm=markers.find(m=>m.id===l.toId);
-    return (fm?.type==='SW')?l.fromId:(tm?.type==='SW')?l.toId:l.fromId;
-  },[markers]);
+    if(fm?.type==='SW') return l.fromId;
+    if(tm?.type==='SW') return l.toId;
+    // BFS from both endpoints through the link graph to find a connected switch
+    const adj={}; // markerId → [markerId]
+    links.forEach(lk=>{ (adj[lk.fromId]=adj[lk.fromId]||[]).push(lk.toId); (adj[lk.toId]=adj[lk.toId]||[]).push(lk.fromId); });
+    const bfsFind=(startId)=>{
+      const visited=new Set([startId]); const queue=[startId];
+      while(queue.length){
+        const id=queue.shift();
+        const m=markers.find(x=>x.id===id);
+        if(m?.type==='SW') return id;
+        (adj[id]||[]).forEach(nid=>{ if(!visited.has(nid)){visited.add(nid);queue.push(nid);} });
+      }
+      return null;
+    };
+    return bfsFind(l.fromId)||bfsFind(l.toId)||l.fromId;
+  },[markers,links]);
 
   const circuitColorMap=useMemo(()=>{
     const keys=[...new Set(links.map(l=>getCircuitKey(l)))];
