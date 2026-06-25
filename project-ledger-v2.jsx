@@ -11766,6 +11766,14 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const legendDragRef=useRef(null); // {offsetX,offsetY} normalized
   const didDragLegendRef=useRef(false);
   const pdfUploadRef=useRef(null); // pending Cloudinary upload promise
+  const [isMobile,setIsMobile]=useState(()=>typeof window!=='undefined'&&window.innerWidth<700);
+  const [showPanel,setShowPanel]=useState(false);
+
+  useEffect(()=>{
+    const h=()=>setIsMobile(window.innerWidth<700);
+    window.addEventListener('resize',h);
+    return ()=>window.removeEventListener('resize',h);
+  },[]);
 
   // ── History ───────────────────────────────────────────────────────────────
   const pushHistory=useCallback((newMarkers)=>{
@@ -11852,12 +11860,13 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         if(isImg){
           const ext=pdfFilename.split('.').pop().toLowerCase();
           const mime={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',webp:'image/webp',bmp:'image/bmp'}[ext]||'image/jpeg';
-          const blob=new Blob([ab],{type:mime});
-          const blobUrl=URL.createObjectURL(blob);
+          // Use data URL (not blob URL) — reliable across all mobile browsers
+          const base64=btoa(new Uint8Array(ab).reduce((s,b)=>s+String.fromCharCode(b),''));
+          const dataUrl=`data:${mime};base64,${base64}`;
           const img=new Image();
-          img.onload=()=>{setImgEl(img);setPdfDoc(null);setTotalPages(1);setCurrentPage(1);URL.revokeObjectURL(blobUrl);};
-          img.onerror=()=>URL.revokeObjectURL(blobUrl);
-          img.src=blobUrl;
+          img.onload=()=>{setImgEl(img);setPdfDoc(null);setTotalPages(1);setCurrentPage(1);};
+          img.onerror=()=>{console.warn('Auto-load image failed');};
+          img.src=dataUrl;
         } else {
           const doc=await window.pdfjsLib.getDocument({data:ab.slice(0)}).promise;
           setPdfDoc(doc); setImgEl(null); setTotalPages(doc.numPages); setCurrentPage(1);
@@ -12218,17 +12227,19 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     const isImg=file.type.startsWith('image/')||/\.(jpe?g|png|gif|webp|bmp)$/i.test(file.name);
     setUploading(true); setPdfFilename(file.name); setFileType(isImg?'image':'pdf');
     if(isImg){
-      // Use object URL directly — works reliably on iOS Safari / iPad
-      const blobUrl=URL.createObjectURL(file);
-      const img=new Image();
-      img.onload=()=>{
-        setImgEl(img);setPdfDoc(null);setTotalPages(1);setCurrentPage(1);
-        setUploading(false);
-        URL.revokeObjectURL(blobUrl);
+      // FileReader → data URL: universally reliable on iOS/Android/desktop.
+      // Blob URLs can silently fail to trigger onload on some mobile browsers.
+      const reader=new FileReader();
+      reader.onload=(ev)=>{
+        const dataUrl=ev.target.result;
+        const img=new Image();
+        img.onload=()=>{setImgEl(img);setPdfDoc(null);setTotalPages(1);setCurrentPage(1);setUploading(false);};
+        img.onerror=()=>{alert('Could not load image. Try JPG or PNG.');setUploading(false);};
+        img.src=dataUrl;
       };
-      img.onerror=()=>{alert('Could not load image. Try JPG or PNG.');setUploading(false);URL.revokeObjectURL(blobUrl);};
-      img.src=blobUrl;
-      // Read bytes in background for PDF export support
+      reader.onerror=()=>{alert('Could not read file.');setUploading(false);};
+      reader.readAsDataURL(file);
+      // Read bytes in background for IndexedDB / PDF-export
       file.arrayBuffer().then(ab=>{
         setPdfBytes(ab);
         if(takeoff?.id) savePdfToIdb(takeoff.id,ab);
@@ -12754,8 +12765,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           {uploading?<Loader2 size={12} style={{animation:'spin 1s linear infinite'}}/>:<Upload size={12}/>}
           {pdfFilename||'Upload PDF / Image'}
         </button>
-        {/* Mode */}
-        <div style={{display:'flex',border:`1px solid ${T.borderLight}`,borderRadius:8,overflow:'hidden'}}>
+        {/* Mode — hidden on mobile (bottom bar handles tool selection) */}
+        {!isMobile&&<div style={{display:'flex',border:`1px solid ${T.borderLight}`,borderRadius:8,overflow:'hidden'}}>
           {!hasPipeMode&&!hasAreaMode&&(
             <button onClick={()=>{setMode('place');setSelectedIds(new Set());setLinkStartId(null);setPipeInProgress(null);}}
               style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
@@ -12789,9 +12800,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
               <Link2 size={11}/>Switch Leg
             </button>
           )}
-        </div>
+        </div>}
         {/* Pipe/line type picker */}
-        {mode==='pipe'&&hasPipeMode&&(
+        {!isMobile&&mode==='pipe'&&hasPipeMode&&(
           <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
             {activePipeTypeList.map(pt=>(
               <button key={pt.id} onClick={()=>setActivePipeType(pt.id)}
@@ -12841,8 +12852,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             </button>
           </>
         )}
-        {/* Undo / Redo */}
-        <div style={{display:'flex',gap:3,marginLeft:'auto'}}>
+        {/* Undo / Redo — hidden on mobile (bottom bar handles this via gestures) */}
+        {!isMobile&&<div style={{display:'flex',gap:3,marginLeft:'auto'}}>
           <button onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)"
             style={{padding:'5px 9px',border:`1px solid ${T.borderLight}`,borderRadius:6,cursor:canUndo?'pointer':'default',opacity:canUndo?1:0.35,background:T.bg,color:T.text,display:'flex',alignItems:'center',gap:4,fontSize:11,fontFamily:'inherit'}}>
             ↩ Undo
@@ -12851,23 +12862,64 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             style={{padding:'5px 9px',border:`1px solid ${T.borderLight}`,borderRadius:6,cursor:canRedo?'pointer':'default',opacity:canRedo?1:0.35,background:T.bg,color:T.text,display:'flex',alignItems:'center',gap:4,fontSize:11,fontFamily:'inherit'}}>
             ↪ Redo
           </button>
-        </div>
-        {/* Zoom */}
-        <div style={{display:'flex',alignItems:'center',gap:4}}>
+        </div>}
+        {/* Undo/Redo on mobile */}
+        {isMobile&&<div style={{display:'flex',gap:3,marginLeft:'auto'}}>
+          <button onClick={undo} disabled={!canUndo} style={{padding:'6px 10px',border:`1px solid ${T.borderLight}`,borderRadius:6,cursor:canUndo?'pointer':'default',opacity:canUndo?1:0.35,background:T.bg,color:T.text,fontSize:15}}>↩</button>
+          <button onClick={redo} disabled={!canRedo} style={{padding:'6px 10px',border:`1px solid ${T.borderLight}`,borderRadius:6,cursor:canRedo?'pointer':'default',opacity:canRedo?1:0.35,background:T.bg,color:T.text,fontSize:15}}>↪</button>
+        </div>}
+        {/* Zoom — hidden on mobile (bottom bar) */}
+        {!isMobile&&<div style={{display:'flex',alignItems:'center',gap:4}}>
           <button onClick={()=>setScale(s=>Math.max(0.5,+(s-0.25).toFixed(2)))} style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'4px 7px',cursor:'pointer',color:T.text}}><Minus size={12}/></button>
           <span style={{fontSize:11,fontWeight:700,color:T.muted,minWidth:38,textAlign:'center'}}>{Math.round(scale*100)}%</span>
           <button onClick={()=>setScale(s=>Math.min(5,+(s+0.25).toFixed(2)))} style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'4px 7px',cursor:'pointer',color:T.text}}><Plus size={12}/></button>
-        </div>
+        </div>}
         <Btn onClick={handleSave} loading={saving} disabled={saving}>
-          {saving&&pdfUploadRef.current?'Uploading PDF…':'Save'}
+          {saving&&pdfUploadRef.current?'Uploading…':'Save'}
         </Btn>
-        <Btn variant="secondary" onClick={exportPdf} loading={exporting}><Download size={12}/>Export PDF</Btn>
+        {!isMobile&&<Btn variant="secondary" onClick={exportPdf} loading={exporting}><Download size={12}/>Export PDF</Btn>}
       </div>
 
       {/* Body */}
-      <div style={{flex:1,display:'flex',overflow:'hidden'}}>
-        {/* Sidebar */}
-        <div style={{width:210,background:T.card,borderRight:`1px solid ${T.borderLight}`,padding:'12px 10px',overflowY:'auto',flexShrink:0}}>
+      <div style={{flex:1,display:'flex',overflow:'hidden',position:'relative'}}>
+        {/* Sidebar — fixed left on desktop, slide-up overlay on mobile */}
+        {/* Mobile backdrop */}
+        {isMobile&&showPanel&&<div onClick={()=>setShowPanel(false)} style={{position:'fixed',inset:0,zIndex:199,background:'rgba(0,0,0,0.35)'}}/>}
+        <div style={isMobile?{
+          position:'fixed',bottom:0,left:0,right:0,zIndex:200,
+          background:T.card,borderTop:`2px solid ${T.borderLight}`,
+          padding:'12px 14px',overflowY:'auto',
+          maxHeight:'65vh',borderRadius:'18px 18px 0 0',
+          boxShadow:'0 -4px 32px rgba(0,0,0,0.18)',
+          transform:showPanel?'translateY(0)':'translateY(110%)',
+          transition:'transform 0.3s cubic-bezier(0.32,0.72,0,1)',
+        }:{width:210,background:T.card,borderRight:`1px solid ${T.borderLight}`,padding:'12px 10px',overflowY:'auto',flexShrink:0}}>
+        {isMobile&&<div style={{width:40,height:4,background:T.borderLight,borderRadius:2,margin:'0 auto 12px',cursor:'pointer'}} onClick={()=>setShowPanel(false)}/>}
+        {/* Mobile mode selector — shown at top of the slide panel */}
+        {isMobile&&(
+          <div style={{display:'flex',gap:6,marginBottom:14,flexWrap:'wrap'}}>
+            {!hasPipeMode&&!hasAreaMode&&<button onClick={()=>{setMode('place');setShowPanel(false);}}
+              style={{flex:1,padding:'8px',border:`1px solid ${mode==='place'?T.accent:T.borderLight}`,borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:700,fontFamily:'inherit',
+                background:mode==='place'?T.accent+'22':'transparent',color:mode==='place'?T.text:T.muted}}>
+              ✎ Place
+            </button>}
+            <button onClick={()=>{setMode('select');setShowPanel(false);}}
+              style={{flex:1,padding:'8px',border:`1px solid ${mode==='select'?T.accent:T.borderLight}`,borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:700,fontFamily:'inherit',
+                background:mode==='select'?T.accent+'22':'transparent',color:mode==='select'?T.text:T.muted}}>
+              ⊹ Select
+            </button>
+            {hasPipeMode&&<button onClick={()=>{setMode('pipe');setShowPanel(false);}}
+              style={{flex:1,padding:'8px',border:`1px solid ${mode==='pipe'?T.accent:T.borderLight}`,borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:700,fontFamily:'inherit',
+                background:mode==='pipe'?T.accent+'22':'transparent',color:mode==='pipe'?T.text:T.muted}}>
+              ∿ Draw
+            </button>}
+            {hasAreaMode&&<button onClick={()=>{setMode('area');setShowPanel(false);}}
+              style={{flex:1,padding:'8px',border:`1px solid ${mode==='area'?T.accent:T.borderLight}`,borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:700,fontFamily:'inherit',
+                background:mode==='area'?T.accent+'22':'transparent',color:mode==='area'?T.text:T.muted}}>
+              ⬡ Area
+            </button>}
+          </div>
+        )}
           {/* Symbol size control */}
           <div style={{marginBottom:12,padding:'8px',background:T.bg,borderRadius:8,border:`1px solid ${T.borderLight}`}}>
             <div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:6}}>Symbol Size</div>
@@ -12959,8 +13011,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           {toolKind!=='painting'&&toolKind!=='floor'&&<div style={{fontSize:10,fontWeight:700,color:T.dim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:8}}>Point Types</div>}
           {toolKind!=='painting'&&toolKind!=='floor'&&symbolTypes.map(tt=>(
             <div key={tt.id}
-              onClick={()=>{setActiveTool(tt.id);if(mode==='select')setMode('place');}}
-              style={{display:'flex',alignItems:'center',gap:8,padding:'7px 8px',borderRadius:8,marginBottom:4,cursor:'pointer',
+              onClick={()=>{setActiveTool(tt.id);if(mode==='select'||mode==='link')setMode('place');if(isMobile)setShowPanel(false);}}
+              style={{display:'flex',alignItems:'center',gap:8,padding:isMobile?'11px 10px':'7px 8px',borderRadius:8,marginBottom:4,cursor:'pointer',
                 border:`1px solid ${activeTool===tt.id&&mode==='place'?tt.color:T.borderLight}`,
                 background:activeTool===tt.id&&mode==='place'?tt.color+'14':'transparent',transition:'all 0.12s'}}>
               <canvas width={18} height={18} style={{flexShrink:0}} ref={el=>{
@@ -13140,6 +13192,31 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         </div>
         </DropZone>
       </div>
+      {/* Mobile bottom action bar */}
+      {isMobile&&(
+        <div style={{background:T.card,borderTop:`1px solid ${T.borderLight}`,padding:'10px 14px',display:'flex',alignItems:'center',gap:10,flexShrink:0,boxShadow:'0 -2px 12px rgba(0,0,0,0.1)'}}>
+          {/* Active tool chip */}
+          <div style={{flex:1,display:'flex',alignItems:'center',gap:8}}>
+            <div style={{fontSize:12,color:T.muted}}>Active:</div>
+            <div style={{background:T.accent+'22',border:`1px solid ${T.accent}44`,borderRadius:20,padding:'4px 12px',fontSize:12,fontWeight:700,color:T.text,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+              {mode==='select'?'Select'
+                :mode==='link'?'Link'
+                :mode==='pipe'?(activePipeTypeList.find(t=>t.id===activePipeType)?.label||'Draw')
+                :mode==='area'?(FLOOR_TYPES.find(t=>t.id===activeAreaType)?.label||'Area')
+                :(symbolTypes.find(t=>t.id===activeTool)?.label||'Place')}
+            </div>
+          </div>
+          {/* Zoom controls */}
+          <button onClick={()=>setScale(s=>Math.max(0.5,+(s-0.25).toFixed(2)))} style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'6px 10px',cursor:'pointer',color:T.text,fontSize:16,lineHeight:1}}>−</button>
+          <span style={{fontSize:11,fontWeight:700,color:T.muted,minWidth:36,textAlign:'center'}}>{Math.round(scale*100)}%</span>
+          <button onClick={()=>setScale(s=>Math.min(5,+(s+0.25).toFixed(2)))} style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'6px 10px',cursor:'pointer',color:T.text,fontSize:16,lineHeight:1}}>+</button>
+          {/* Tools toggle */}
+          <button onClick={()=>setShowPanel(v=>!v)}
+            style={{background:showPanel?T.text:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:10,padding:'7px 16px',cursor:'pointer',color:showPanel?T.bg:T.text,fontSize:13,fontWeight:700,fontFamily:'inherit',display:'flex',alignItems:'center',gap:6}}>
+            <PenLine size={14}/>Tools
+          </button>
+        </div>
+      )}
     </div>
   );
 }
