@@ -382,17 +382,16 @@ function drawTakeoffSymbol(ctx, typeId, cx, cy, sz, color, alpha=1){
       }
       ctx.beginPath();ctx.moveTo(cx-h*0.45,cy+h*0.4);ctx.lineTo(cx+h*0.45,cy+h*0.4);ctx.stroke();
       break;
-    case 'S2': // 2-Gang switch — circle with diagonal + "2"
+    case 'S2': // 2-Gang switch — circle with two parallel diagonal throws
       ctx.beginPath();ctx.arc(cx,cy,h-1,0,Math.PI*2);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(cx-h*0.5,cy+h*0.5);ctx.lineTo(cx+h*0.5,cy-h*0.5);ctx.stroke();
-      ctx.font=`bold ${Math.round(sz*0.38)}px Arial`;ctx.textAlign='left';ctx.textBaseline='top';
-      ctx.fillText('2',cx+h*0.2,cy-h*0.8);
+      ctx.beginPath();ctx.moveTo(cx-h*0.34,cy+h*0.56);ctx.lineTo(cx+h*0.56,cy-h*0.34);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx-h*0.56,cy+h*0.34);ctx.lineTo(cx+h*0.34,cy-h*0.56);ctx.stroke();
       break;
-    case 'S3': // 3-Gang switch — circle with diagonal + "3"
+    case 'S3': // 3-Gang switch — circle with three parallel diagonal throws
       ctx.beginPath();ctx.arc(cx,cy,h-1,0,Math.PI*2);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(cx-h*0.5,cy+h*0.5);ctx.lineTo(cx+h*0.5,cy-h*0.5);ctx.stroke();
-      ctx.font=`bold ${Math.round(sz*0.38)}px Arial`;ctx.textAlign='left';ctx.textBaseline='top';
-      ctx.fillText('3',cx+h*0.2,cy-h*0.8);
+      ctx.beginPath();ctx.moveTo(cx-h*0.45,cy+h*0.45);ctx.lineTo(cx+h*0.45,cy-h*0.45);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx-h*0.31,cy+h*0.59);ctx.lineTo(cx+h*0.59,cy-h*0.31);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx-h*0.59,cy+h*0.31);ctx.lineTo(cx+h*0.31,cy-h*0.59);ctx.stroke();
       break;
     // ── Power extras ─────────────────────────────────────────────────────────
     case 'WP': // Weatherproof socket — socket with WP badge
@@ -11919,28 +11918,25 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   // Circuit key = ID of the SW switch reachable from this link via graph traversal.
   // If no SW found, fall back to fromId so each disconnected leg still gets a color.
   const getCircuitKey=useCallback((l)=>{
-    // First check direct endpoints (fast path)
-    const fm=markers.find(m=>m.id===l.fromId), tm=markers.find(m=>m.id===l.toId);
-    if(fm?.type==='SW') return l.fromId;
-    if(tm?.type==='SW') return l.toId;
-    // BFS from both endpoints through the link graph to find a connected switch
-    const adj={}; // markerId → [markerId]
+    // Build undirected adjacency for the whole link graph
+    const adj={};
     links.forEach(lk=>{ (adj[lk.fromId]=adj[lk.fromId]||[]).push(lk.toId); (adj[lk.toId]=adj[lk.toId]||[]).push(lk.fromId); });
-    const bfsFind=(startId)=>{
-      const visited=new Set([startId]); const queue=[startId];
-      while(queue.length){
-        const id=queue.shift();
-        const m=markers.find(x=>x.id===id);
-        if(m?.type==='SW') return id;
-        (adj[id]||[]).forEach(nid=>{ if(!visited.has(nid)){visited.add(nid);queue.push(nid);} });
-      }
-      return null;
-    };
-    return bfsFind(l.fromId)||bfsFind(l.toId)||l.fromId;
+    // Single BFS covers the entire connected component from l.fromId
+    const visited=new Set([l.fromId]); const queue=[l.fromId];
+    let switchId=null;
+    while(queue.length){
+      const id=queue.shift();
+      if(!switchId){const m=markers.find(x=>x.id===id);if(m?.type==='SW')switchId=id;}
+      (adj[id]||[]).forEach(nid=>{ if(!visited.has(nid)){visited.add(nid);queue.push(nid);} });
+    }
+    // Switch found → use it; otherwise use lex-min node ID so every link in the same
+    // chain returns the same stable key even without a switch in the circuit.
+    return switchId||[...visited].reduce((a,b)=>a<b?a:b);
   },[markers,links]);
 
   const circuitColorMap=useMemo(()=>{
-    const keys=[...new Set(links.map(l=>getCircuitKey(l)))];
+    // Sort keys so color assignment is stable regardless of links array order
+    const keys=[...new Set(links.map(l=>getCircuitKey(l)))].sort();
     const map={}; keys.forEach((k,i)=>{map[k]=CIRCUIT_COLORS[i%CIRCUIT_COLORS.length];});
     return map;
   },[links,getCircuitKey]);
