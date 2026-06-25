@@ -11777,6 +11777,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const pdfUploadRef=useRef(null); // pending Cloudinary upload promise
   const [isMobile,setIsMobile]=useState(()=>typeof window!=='undefined'&&window.innerWidth<700);
   const [showPanel,setShowPanel]=useState(false);
+  const [stickyLabelPos,setStickyLabelPos]=useState('right');
 
   useEffect(()=>{
     const h=()=>setIsMobile(window.innerWidth<700);
@@ -12317,7 +12318,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       return;
     } else if(mode==='place'&&activeTool){
       const {x:sx,y:sy}=getSnapped(nx,ny,canvas);
-      pushHistory([...markers,{id:uid(),page:currentPage,x:sx,y:sy,type:activeTool}]);
+      pushHistory([...markers,{id:uid(),page:currentPage,x:sx,y:sy,type:activeTool,labelPos:stickyLabelPos}]);
     } else if(mode==='link'){
       if(!hit){setLinkStartId(null);return;} // click empty → cancel
       if(!linkStartId){setLinkStartId(hit.id);return;} // first click → set start
@@ -12357,10 +12358,6 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     handleCanvasMouseUp();
     handleOverlayClick({clientX:t.clientX,clientY:t.clientY,shiftKey:false});
   },[handleCanvasMouseUp]);// handleOverlayClick is a plain arrow fn, recreated each render — omit from deps
-
-  const setLabelPos=(pos)=>{
-    pushHistory(markers.map(m=>selectedIds.has(m.id)?{...m,labelPos:pos}:m));
-  };
 
   const alignH=()=>{
     if(selectedIds.size<2) return;
@@ -12885,16 +12882,6 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
                 </button>
               </>
             )}
-            <div style={{display:'flex',alignItems:'center',gap:3,borderLeft:`1px solid ${T.borderLight}`,paddingLeft:8}}>
-              <span style={{fontSize:10,color:T.muted,whiteSpace:'nowrap'}}>Label:</span>
-              {[['top','↑'],['left','←'],['right','→'],['bottom','↓']].map(([pos,icon])=>(
-                <button key={pos} onClick={()=>setLabelPos(pos)} title={`Label ${pos}`}
-                  style={{width:24,height:24,border:`1px solid ${T.borderLight}`,borderRadius:5,cursor:'pointer',
-                    background:T.bg,color:T.text,fontSize:13,display:'flex',alignItems:'center',justifyContent:'center',padding:0,fontFamily:'inherit'}}>
-                  {icon}
-                </button>
-              ))}
-            </div>
             <button onClick={deleteSelected}
               style={{background:T.dangerLight,border:'none',borderRadius:8,padding:'5px 10px',cursor:'pointer',color:T.danger,fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5}}>
               <Trash2 size={12}/>Delete{selCount>1?` (${selCount})`:''}
@@ -13225,6 +13212,21 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
                 onTouchEnd={handleOverlayTouchEnd}
                 onContextMenu={e=>{
                   e.preventDefault();
+                  const canvas=overlayRef.current;
+                  if(canvas){
+                    const rect=canvas.getBoundingClientRect();
+                    const nx=(e.clientX-rect.left)/rect.width, ny=(e.clientY-rect.top)/rect.height;
+                    const sz=Math.round(symSize*Math.max(0.6,scale/1.5));
+                    const thr=(sz/canvas.width)*1.6;
+                    const hit=markers.filter(m=>m.page===currentPage).find(m=>Math.abs(m.x-nx)<thr&&Math.abs(m.y-ny)<thr);
+                    if(hit){
+                      const cycle=['right','bottom','left','top'];
+                      const next=cycle[(cycle.indexOf(hit.labelPos||'right')+1)%4];
+                      pushHistory(markers.map(m=>m.id===hit.id?{...m,labelPos:next}:m));
+                      setStickyLabelPos(next);
+                      return;
+                    }
+                  }
                   setLinkStartId(null);
                   if(mode==='pipe'&&pipeInProgress){
                     if(pipeInProgress.points.length>=2) setPipes(ps=>[...ps,{...pipeInProgress,id:uid()}]);
