@@ -8186,7 +8186,7 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
     if(a.type==='arrow'){
       drawArrow(ctx,a.x1,a.y1,a.x2,a.y2,a.color,a.lineWeight,a.opacity??1);
     } else if(a.type==='dimension'){
-      drawDimensionLine(ctx,a.x1,a.y1,a.x2,a.y2,a.label||'',a.color,a.lineWeight,a.opacity??1,a.fontSize||16);
+      drawDimensionLine(ctx,a.x1,a.y1,a.x2,a.y2,a.label||'',a.color,a.lineWeight,a.opacity??1,a.fontSize||16,a.labelSide);
     } else if(a.type==='circle'){
       ctx.strokeStyle=a.color;
       ctx.lineWidth=a.lineWeight;
@@ -8238,7 +8238,7 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
     ctx.restore();
   }
 
-  function drawDimensionLine(ctx,x1,y1,x2,y2,label,clr,lw,op,fs){
+  function drawDimensionLine(ctx,x1,y1,x2,y2,label,clr,lw,op,fs,labelSide){
     ctx.save();
     ctx.globalAlpha=op??1;
     ctx.strokeStyle=clr;
@@ -8268,7 +8268,7 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
       ctx.lineTo(tx-tickLen*Math.cos(perp),ty-tickLen*Math.sin(perp));
       ctx.stroke();
     });
-    // Label
+    // Label — above line by default, below if labelSide==='below'
     if(label){
       const mx=(x1+x2)/2,my=(y1+y2)/2;
       const fsize=fs||16;
@@ -8279,11 +8279,19 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
       ctx.translate(mx,my);
       ctx.rotate(angle);
       ctx.fillStyle='rgba(255,255,255,0.88)';
-      ctx.fillRect(-tw/2-pad,-fsize-2,tw+pad*2,fsize+6);
-      ctx.fillStyle=clr;
-      ctx.textAlign='center';
-      ctx.textBaseline='bottom';
-      ctx.fillText(label,0,0);
+      if(labelSide==='below'){
+        ctx.fillRect(-tw/2-pad,2,tw+pad*2,fsize+4);
+        ctx.fillStyle=clr;
+        ctx.textAlign='center';
+        ctx.textBaseline='top';
+        ctx.fillText(label,0,4);
+      } else {
+        ctx.fillRect(-tw/2-pad,-fsize-2,tw+pad*2,fsize+6);
+        ctx.fillStyle=clr;
+        ctx.textAlign='center';
+        ctx.textBaseline='bottom';
+        ctx.fillText(label,0,0);
+      }
       ctx.restore();
     }
     ctx.restore();
@@ -8695,6 +8703,21 @@ function MarkupTool({sessions=[],setSessions=()=>{},onBack=null,initialSession=n
                 onTouchStart={onTouchStart}
                 onTouchMove={onTouchMove}
                 onTouchEnd={onTouchEnd}
+                onContextMenu={e=>{
+                  e.preventDefault();
+                  const {x,y}=getCanvasCoords(e);
+                  const dim=annotations.find(a=>{
+                    if(a.type!=='dimension') return false;
+                    const mx=(a.x1+a.x2)/2,my=(a.y1+a.y2)/2;
+                    return Math.hypot(x-mx,y-my)<40;
+                  });
+                  if(dim){
+                    const next=dim.labelSide==='below'?'above':'below';
+                    const updated=annotations.map(a=>a.id===dim.id?{...a,labelSide:next}:a);
+                    setAnnotations(updated);
+                    pushHistory(updated);
+                  }
+                }}
               />
               {/* Dimension label input popover */}
               {dimInput&&(
