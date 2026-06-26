@@ -610,20 +610,40 @@ const FIREBASE = {
 const FS_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE.projectId}/databases/(default)/documents/renoledger`;
 const FS_KEY  = `?key=${FIREBASE.apiKey}`;
 
+// Module-level memory cache — survives re-renders, reset on page refresh.
+// Keeps Firestore read count low: tab-switch reloads are skipped when data is fresh.
+const DATA_CACHE = {
+  _d: {}, _t: {},
+  TTL: 5 * 60 * 1000, // 5 minutes
+  get(k){ const age=Date.now()-(this._t[k]||0); return age<this.TTL?this._d[k]:undefined; },
+  set(k,v){ this._d[k]=v; this._t[k]=Date.now(); },
+  invalidate(k){ delete this._d[k]; delete this._t[k]; },
+  invalidateAll(){ this._d={}; this._t={}; },
+  lastFullLoad(){ return this._t['__full']||0; },
+  markFullLoad(){ this._t['__full']=Date.now(); },
+};
+
 const loadS = async (key, def) => {
+  // Serve from memory cache if fresh — avoids a Firestore read
+  const cached = DATA_CACHE.get(key);
+  if(cached !== undefined) return cached;
   try {
     const r = await fetch(`${FS_BASE}/${encodeURIComponent(key)}${FS_KEY}`, {
       mode: 'cors', credentials: 'omit',
     });
-    if (r.status === 404) return def;
+    if (r.status === 404) { DATA_CACHE.set(key, def); return def; }
     if (!r.ok) return def;
     const doc = await r.json();
     const str = doc.fields?.value?.stringValue;
-    return str ? JSON.parse(str) : def;
+    const val = str ? JSON.parse(str) : def;
+    DATA_CACHE.set(key, val);
+    return val;
   } catch { return def; }
 };
 
 const saveS = async (key, val) => {
+  // Write-through: update cache immediately so subsequent reads skip Firestore
+  DATA_CACHE.set(key, val);
   const payload = JSON.stringify(val);
   // Firestore has a 1MB document limit. Warn if we're approaching it.
   if(payload.length > 900000){
@@ -657,6 +677,7 @@ const saveS = async (key, val) => {
 };
 
 const clearS = async (key) => {
+  DATA_CACHE.invalidate(key);
   try {
     await fetch(`${FS_BASE}/${encodeURIComponent(key)}${FS_KEY}`, {
       method: 'DELETE', mode: 'cors', credentials: 'omit',
@@ -18415,6 +18436,7 @@ export default function App(){
       const freshLog=(Array.isArray(al)?al:[]).filter(e=>new Date(e.at)>sixMonthsAgo);
       setActionLog(freshLog);
       setLastSync(new Date());
+      DATA_CACHE.markFullLoad(); // record timestamp so tab-switch skips reload when fresh
     }catch(err){
       console.error('Storage load error:',err);
       setUsers(SEED_USERS);setAcctSettings(SEED_ACCT_SETTINGS);
@@ -18432,9 +18454,11 @@ export default function App(){
   },[]);
 
   // Auto-refresh when user returns to the app (switches tabs, unlocks phone, etc.)
+  // Skipped when data is less than 5 minutes old to avoid burning Firestore quota.
   useEffect(()=>{
     const onVisible=()=>{
       if(document.visibilityState==='visible'&&activeUserId){
+        if(Date.now()-DATA_CACHE.lastFullLoad()<DATA_CACHE.TTL) return;
         loadAllData();
       }
     };
@@ -18664,7 +18688,7 @@ export default function App(){
                     </span>
                   )}
                 </button>
-                <button onClick={()=>loadAllData()} disabled={syncing}
+                <button onClick={()=>{DATA_CACHE.invalidateAll();loadAllData();}} disabled={syncing}
                   style={{background:'none',border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'2px 8px',
                     cursor:'pointer',fontSize:10,color:T.dim,fontFamily:'inherit',display:'flex',alignItems:'center',gap:3}}>
                   <RefreshCw size={9} style={syncing?{animation:'spin 1s linear infinite'}:{}}/>Refresh
@@ -18792,7 +18816,7 @@ export default function App(){
               style={{background:'none',border:'none',padding:4,cursor:'pointer',fontSize:14}}>
               {darkMode?'☀️':'🌙'}
             </button>
-            <button onClick={()=>loadAllData()} disabled={syncing}
+            <button onClick={()=>{DATA_CACHE.invalidateAll();loadAllData();}} disabled={syncing}
               style={{background:'none',border:'none',padding:4,cursor:'pointer',
                 display:'flex',alignItems:'center',color:T.dim}}>
               <RefreshCw size={13} style={syncing?{animation:'spin 1s linear infinite'}:{}}/>
