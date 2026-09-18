@@ -511,7 +511,7 @@ function drawTakeoffSymbol(ctx, typeId, cx, cy, sz, color, alpha=1){
 }
 
 // Draw the label (number) beside a symbol. pos: 'right'|'left'|'top'|'bottom'
-// vertical: when true and pos is left/right, the number is rotated 90° (reads top-to-bottom)
+// vertical: when true the number is rotated 90° (reads top-to-bottom) on the chosen side
 function drawTakeoffLabel(ctx, label, cx, cy, sz, color, pos, vertical){
   pos=pos||'right';
   ctx.save();
@@ -519,9 +519,14 @@ function drawTakeoffLabel(ctx, label, cx, cy, sz, color, pos, vertical){
   ctx.font=`bold ${fs}px Arial`;
   const tw=ctx.measureText(label).width;
   const r=sz/2+3;
-  // Rotate the number vertically when placed on the left/right side
-  if(vertical&&(pos==='left'||pos==='right')){
-    ctx.translate(pos==='left'?cx-r-fs*0.55:cx+r+fs*0.55,cy);
+  // Rotate the number vertically on the chosen side
+  if(vertical){
+    let tx,ty;
+    if(pos==='left'){ tx=cx-r-fs*0.55; ty=cy; }
+    else if(pos==='top'){ tx=cx; ty=cy-r-tw/2; }
+    else if(pos==='bottom'){ tx=cx; ty=cy+r+tw/2; }
+    else { tx=cx+r+fs*0.55; ty=cy; } // right
+    ctx.translate(tx,ty);
     ctx.rotate(Math.PI/2);
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillStyle='rgba(255,255,255,0.88)';
@@ -12062,7 +12067,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         ctx.beginPath(); ctx.arc(cx,cy,sz/2+6,0,Math.PI*2); ctx.stroke(); ctx.restore();
       }
       drawTakeoffSymbol(ctx,m.type,cx,cy,sz,color);
-      drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes,globalPrefix,toolKind),cx,cy,sz,color,m.labelPos,false);
+      const lbP=m.labelPos||'right';
+      const lbV=m.labelVertical!=null?m.labelVertical:(lbP==='left'||lbP==='right');
+      drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes,globalPrefix,toolKind),cx,cy,sz,color,m.labelPos,lbV);
       // Highlight link start
       if(mode==='link'&&m.id===linkStartId){
         ctx.save(); ctx.strokeStyle='#f97316'; ctx.lineWidth=2.5; ctx.setLineDash([3,2]);
@@ -12654,12 +12661,16 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           const lbW=font.widthOfTextAtSize(lbTxt,lbSz)+2;
           const lbH=lbSz*1.2;
           const lbPos=m.labelPos||'right';
-          const lbVertical=false; // labels always horizontal (all positions) so long text fits
+          const lbVertical=m.labelVertical!=null?m.labelVertical:(lbPos==='left'||lbPos==='right');
           const gap=h+1;
           if(lbVertical){
-            // Number rotated to read top-to-bottom (matches on-screen), centred on the symbol
-            const oRight=lbPos==='right'?gap:-(gap+lbSz);
-            const {dx:lbdx,dy:lbdy}=dispOff(oRight,-lbW/2,rot);
+            // Number rotated to read top-to-bottom (matches on-screen), on the chosen side
+            let oRight,oDown;
+            if(lbPos==='left'){ oRight=-(gap+lbSz); oDown=-lbW/2; }
+            else if(lbPos==='top'){ oRight=-lbSz/2; oDown=-(gap+lbW); }
+            else if(lbPos==='bottom'){ oRight=-lbSz/2; oDown=gap; }
+            else { oRight=gap; oDown=-lbW/2; } // right
+            const {dx:lbdx,dy:lbdy}=dispOff(oRight,oDown,rot);
             page.drawRectangle({x:px+lbdx,y:py+lbdy,width:lbW,height:lbH,color:rgb(1,1,1),opacity:0.85,borderWidth:0,rotate:tDeg(rot-90)});
             page.drawText(lbTxt,{x:px+lbdx,y:py+lbdy,size:lbSz,font,color:col,rotate:tDeg(rot-90)});
           } else {
@@ -13402,9 +13413,17 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
                     const thr=(sz/canvas.width)*1.6;
                     const hit=markers.filter(m=>m.page===currentPage).find(m=>Math.abs(m.x-nx)<thr&&Math.abs(m.y-ny)<thr);
                     if(hit){
+                      if(e.shiftKey){
+                        // Rotate text only — flip orientation in place
+                        const p=hit.labelPos||'right';
+                        const cur=hit.labelVertical!=null?hit.labelVertical:(p==='left'||p==='right');
+                        pushHistory(markers.map(m=>m.id===hit.id?{...m,labelVertical:!cur}:m));
+                        return;
+                      }
+                      // Reposition only — cycle side; orientation returns to that side's default
                       const cycle=['right','bottom','left','top'];
                       const next=cycle[(cycle.indexOf(hit.labelPos||'right')+1)%4];
-                      pushHistory(markers.map(m=>m.id===hit.id?{...m,labelPos:next}:m));
+                      pushHistory(markers.map(m=>m.id===hit.id?{...m,labelPos:next,labelVertical:undefined}:m));
                       setStickyLabelPos(next);
                       return;
                     }
