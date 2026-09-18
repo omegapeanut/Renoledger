@@ -570,6 +570,25 @@ function getTakeoffLabel(marker, markers, prefixes, globalPrefix, toolKind){
   return prefix+String(seqOrIdx()).padStart(3,'0');
 }
 
+// How many points a symbol represents (for the legend count).
+// Explicit m.qty wins; otherwise a manual label like "1,2,3,4" counts as 4
+// and a range like "1-4" counts as 4. Everything else counts as 1.
+function markerQty(m){
+  if(typeof m.qty==='number' && m.qty>0) return m.qty;
+  if(m.customLabel){
+    const parts=String(m.customLabel).split(/[,\s/]+/).filter(Boolean);
+    if(parts.length){
+      let total=0;
+      parts.forEach(p=>{
+        const rng=p.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+        total+=rng?Math.abs(parseInt(rng[2])-parseInt(rng[1]))+1:1;
+      });
+      if(total>0) return total;
+    }
+  }
+  return 1;
+}
+
 const DASH_WIDGETS = [
   {id:'stats',      label:'Summary Stats (Revenue/Expenses/Profit)'},
   {id:'budget',     label:'Revenue Overview Chart'},
@@ -11996,7 +12015,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   // ── Counts (before drawOverlay useEffect and getLegendBox) ───────────────
   const counts=useMemo(()=>{
     const c={}; symbolTypes.forEach(t=>c[t.id]=0);
-    markers.forEach(m=>{if(c[m.type]!==undefined)c[m.type]++;});
+    markers.forEach(m=>{if(c[m.type]!==undefined)c[m.type]+=markerQty(m);});
     return c;
   },[markers]);
 
