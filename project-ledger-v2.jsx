@@ -11794,6 +11794,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     return {...d,...(takeoff?.prefixes||{})};
   });
   const [symSize,setSymSize]=useState(takeoff?.symSize||20);
+  const [snapEnabled,setSnapEnabled]=useState(true);
   const [globalPrefix,setGlobalPrefix]=useState(
     toolKind==='plumbing' ? (takeoff?.globalPrefix??'D') : undefined
   );
@@ -12274,6 +12275,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
 
   // ── Snap-to-alignment helper ───────────────────────────────────────────────
   const getSnapped=useCallback((nx,ny,canvas)=>{
+    if(!snapEnabled) return {x:nx,y:ny,snapX:false,snapY:false};
     const SNAP_PX=14;
     const thx=SNAP_PX/canvas.width, thy=SNAP_PX/canvas.height;
     let sx=nx, sy=ny, didSnapX=false, didSnapY=false;
@@ -12284,7 +12286,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       if(dy<bestDY){bestDY=dy;sy=m.y;didSnapY=true;}
     });
     return {x:sx,y:sy,snapX:didSnapX,snapY:didSnapY};
-  },[markers,currentPage]);
+  },[markers,currentPage,snapEnabled]);
 
   const handleCanvasMouseDown=useCallback((e)=>{
     const canvas=overlayRef.current; if(!canvas) return;
@@ -12967,6 +12969,12 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           <button onClick={undo} disabled={!canUndo} style={{padding:'6px 10px',border:`1px solid ${T.borderLight}`,borderRadius:6,cursor:canUndo?'pointer':'default',opacity:canUndo?1:0.35,background:T.bg,color:T.text,fontSize:15}}>↩</button>
           <button onClick={redo} disabled={!canRedo} style={{padding:'6px 10px',border:`1px solid ${T.borderLight}`,borderRadius:6,cursor:canRedo?'pointer':'default',opacity:canRedo?1:0.35,background:T.bg,color:T.text,fontSize:15}}>↪</button>
         </div>}
+        {/* Snap toggle — turns off the blue alignment guide lines */}
+        <label title="Snap symbols to align with existing ones (blue guide lines)"
+          style={{display:'flex',alignItems:'center',gap:5,fontSize:11,fontWeight:600,color:T.muted,cursor:'pointer',userSelect:'none',padding:'0 4px'}}>
+          <input type="checkbox" checked={snapEnabled} onChange={e=>setSnapEnabled(e.target.checked)} style={{cursor:'pointer'}}/>
+          Snap
+        </label>
         {/* Zoom — hidden on mobile (bottom bar) */}
         {!isMobile&&<div style={{display:'flex',alignItems:'center',gap:4}}>
           <button onClick={()=>setScale(s=>Math.max(0.5,+(s-0.25).toFixed(2)))} style={{background:T.bg,border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'4px 7px',cursor:'pointer',color:T.text}}><Minus size={12}/></button>
