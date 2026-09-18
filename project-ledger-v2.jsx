@@ -12,7 +12,7 @@ import {
   Zap, Plug, Wifi, Wind, Palette, LayoutGrid, BookOpen, ArrowUpDown,
   Mic, MicOff, Video, FileText, Sparkles, Image, Filter,
   Landmark, TrendingDown, List,
-  Pencil, Ruler, Type, Eraser, Move, Square, Circle, ArrowRight, ArrowLeft
+  Pencil, Ruler, Type, Eraser, Move, Square, Circle, ArrowRight, ArrowLeft, Maximize2, Minimize2
 } from "lucide-react";
 import * as XLSX from 'xlsx';
 
@@ -11844,6 +11844,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const [showPanel,setShowPanel]=useState(false);
   const [stickyLabelPos,setStickyLabelPos]=useState('right');
   const [labelEdit,setLabelEdit]=useState(null); // {id,value} while renaming a symbol via double-click
+  const [fullscreen,setFullscreen]=useState(true); // hide app nav for more drawing space
 
   useEffect(()=>{
     const h=()=>setIsMobile(window.innerWidth<700);
@@ -12871,11 +12872,17 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
 
   // ── Render ────────────────────────────────────────────────────────────────
   return(
-    <div style={{display:'flex',flexDirection:'column',height:'calc(100vh - 64px)',overflow:'hidden'}}>
+    <div style={fullscreen
+      ?{display:'flex',flexDirection:'column',position:'fixed',inset:0,zIndex:1000,height:'100vh',background:T.bg,overflow:'hidden'}
+      :{display:'flex',flexDirection:'column',height:'calc(100vh - 64px)',overflow:'hidden'}}>
       {/* Top bar */}
       <div style={{background:T.card,borderBottom:`1px solid ${T.borderLight}`,padding:'10px 16px',display:'flex',alignItems:'center',gap:8,flexShrink:0,flexWrap:'wrap'}}>
         <button onClick={onBack} style={{background:'none',border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'5px 10px',cursor:'pointer',color:T.muted,fontSize:12,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5}}>
           ← Back
+        </button>
+        <button onClick={()=>setFullscreen(v=>!v)} title={fullscreen?'Exit full screen (show menu)':'Full screen (hide menu for more drawing space)'}
+          style={{background:fullscreen?T.text:'none',border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'5px 9px',cursor:'pointer',color:fullscreen?T.bg:T.muted,display:'flex',alignItems:'center'}}>
+          {fullscreen?<Minimize2 size={13}/>:<Maximize2 size={13}/>}
         </button>
         <input value={name} onChange={e=>setName(e.target.value)} placeholder="Markup name…"
           style={{flex:1,minWidth:120,maxWidth:200,border:`1px solid ${T.borderLight}`,borderRadius:8,padding:'5px 10px',fontSize:13,fontWeight:600,color:T.text,background:T.bg,fontFamily:'inherit'}}/>
