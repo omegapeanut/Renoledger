@@ -12579,10 +12579,27 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           const lbSz=Math.max(3.5,symSzPt*0.38);
           const lbW=font.widthOfTextAtSize(lbTxt,lbSz)+2;
           const lbH=lbSz*1.2;
-          const {dx:lbdx,dy:lbdy}=dispOff(h+1,lbH*0.3,rot);
-          // White background (same rotation as text) so labels don't bleed into neighbours
-          page.drawRectangle({x:px+lbdx,y:py+lbdy-lbH*0.15,width:lbW,height:lbH,color:rgb(1,1,1),opacity:0.85,borderWidth:0,rotate:tDeg(rot)});
-          page.drawText(lbTxt,{x:px+lbdx+1,y:py+lbdy,size:lbSz,font,color:col,rotate:tDeg(rot)});
+          const lbPos=m.labelPos||'right';
+          const lbVertical=(toolKind==='network')&&(lbPos==='left'||lbPos==='right');
+          const gap=h+1;
+          if(lbVertical){
+            // Number rotated to read top-to-bottom (matches on-screen), centred on the symbol
+            const oRight=lbPos==='right'?gap:-(gap+lbSz);
+            const {dx:lbdx,dy:lbdy}=dispOff(oRight,-lbW/2,rot);
+            page.drawRectangle({x:px+lbdx,y:py+lbdy,width:lbW,height:lbH,color:rgb(1,1,1),opacity:0.85,borderWidth:0,rotate:tDeg(rot-90)});
+            page.drawText(lbTxt,{x:px+lbdx,y:py+lbdy,size:lbSz,font,color:col,rotate:tDeg(rot-90)});
+          } else {
+            // Horizontal label on the chosen side
+            let oRight,oDown;
+            if(lbPos==='left'){ oRight=-(gap+lbW); oDown=lbH*0.3; }
+            else if(lbPos==='top'){ oRight=-lbW/2; oDown=-(gap+lbH*0.2); }
+            else if(lbPos==='bottom'){ oRight=-lbW/2; oDown=gap+lbH; }
+            else { oRight=gap; oDown=lbH*0.3; } // right (default)
+            const {dx:lbdx,dy:lbdy}=dispOff(oRight,oDown,rot);
+            // White background (same rotation as text) so labels don't bleed into neighbours
+            page.drawRectangle({x:px+lbdx,y:py+lbdy-lbH*0.15,width:lbW,height:lbH,color:rgb(1,1,1),opacity:0.85,borderWidth:0,rotate:tDeg(rot)});
+            page.drawText(lbTxt,{x:px+lbdx+1,y:py+lbdy,size:lbSz,font,color:col,rotate:tDeg(rot)});
+          }
         });
       });
       // ── Switch leg curves ──────────────────────────────────────────────────
