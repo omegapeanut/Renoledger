@@ -553,6 +553,7 @@ function drawTakeoffLabel(ctx, label, cx, cy, sz, color, pos, vertical){
 // For the network/data tool, show just the 2-digit number (no letter prefix).
 // Otherwise each type has its own sequence (electrical mode).
 function getTakeoffLabel(marker, markers, prefixes, globalPrefix, toolKind){
+  if(marker.customLabel) return marker.customLabel; // manual override (double-click to set)
   if(toolKind==='network'){
     const sameType=markers.filter(m=>m.type===marker.type);
     const idx=sameType.findIndex(m=>m.id===marker.id);
@@ -11842,6 +11843,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const [isMobile,setIsMobile]=useState(()=>typeof window!=='undefined'&&window.innerWidth<700);
   const [showPanel,setShowPanel]=useState(false);
   const [stickyLabelPos,setStickyLabelPos]=useState('right');
+  const [labelEdit,setLabelEdit]=useState(null); // {id,value} while renaming a symbol via double-click
 
   useEffect(()=>{
     const h=()=>setIsMobile(window.innerWidth<700);
@@ -13291,6 +13293,15 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
               <canvas ref={overlayRef}
                 style={{position:'absolute',top:0,left:0,cursor:legendDragRef.current?'grabbing':(mode==='place'||mode==='pipe')?'crosshair':'default',touchAction:'none'}}
                 onClick={handleOverlayClick}
+                onDoubleClick={e=>{
+                  const canvas=overlayRef.current; if(!canvas) return;
+                  const rect=canvas.getBoundingClientRect();
+                  const nx=(e.clientX-rect.left)/rect.width, ny=(e.clientY-rect.top)/rect.height;
+                  const sz=Math.round(symSize*Math.max(0.6,scale/1.5));
+                  const thr=(sz/canvas.width)*1.6;
+                  const hit=markers.filter(m=>m.page===currentPage).find(m=>Math.abs(m.x-nx)<thr&&Math.abs(m.y-ny)<thr);
+                  if(hit) setLabelEdit({id:hit.id,value:getTakeoffLabel(hit,markers,prefixes,globalPrefix,toolKind)});
+                }}
                 onMouseDown={handleCanvasMouseDown}
                 onMouseMove={handleCanvasMouseMove}
                 onMouseUp={handleCanvasMouseUp}
@@ -13326,6 +13337,32 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
                   }
                 }}
               />
+              {/* Manual numbering editor — opened by double-clicking a symbol */}
+              {labelEdit&&(()=>{
+                const m=markers.find(x=>x.id===labelEdit.id);
+                if(!m) return null;
+                const ov=overlayRef.current;
+                const left=ov?m.x*ov.clientWidth:0, top=ov?m.y*ov.clientHeight:0;
+                const save=()=>{
+                  const v=labelEdit.value.trim();
+                  const auto=getTakeoffLabel({...m,customLabel:undefined},markers,prefixes,globalPrefix,toolKind);
+                  // If cleared or set back to the auto value, drop the override so it re-numbers automatically
+                  pushHistory(markers.map(x=>x.id===m.id?{...x,customLabel:(!v||v===auto)?undefined:v}:x));
+                  setLabelEdit(null);
+                };
+                return (
+                  <div style={{position:'absolute',left,top,transform:'translate(-50%,-130%)',zIndex:20,
+                    background:T.card,border:`1px solid ${T.borderLight}`,borderRadius:10,padding:8,boxShadow:T.shadow,
+                    display:'flex',gap:6,alignItems:'center'}}>
+                    <input autoFocus value={labelEdit.value}
+                      onChange={e=>setLabelEdit(d=>({...d,value:e.target.value}))}
+                      onKeyDown={e=>{if(e.key==='Enter')save();if(e.key==='Escape')setLabelEdit(null);}}
+                      placeholder="Number" style={{...iStyle,width:90,padding:'5px 8px'}}/>
+                    <Btn onClick={save}><CheckCircle size={12}/></Btn>
+                    <Btn variant="secondary" onClick={()=>setLabelEdit(null)}><X size={12}/></Btn>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
