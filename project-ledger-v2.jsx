@@ -12372,6 +12372,11 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     const sz=Math.round(symSize*Math.max(0.6,scale/1.5));
     const thr=(sz/canvas.width)*1.6;
     const hit=markers.filter(m=>m.page===currentPage).find(m=>Math.abs(m.x-nx)<thr&&Math.abs(m.y-ny)<thr);
+    // Ctrl/Cmd + click a symbol → edit its number (no symbol is placed)
+    if((e.ctrlKey||e.metaKey)&&hit){
+      setLabelEdit({id:hit.id,value:getTakeoffLabel(hit,markers,prefixes,globalPrefix,toolKind)});
+      return;
+    }
     if(mode==='pipe'){
       setPipeInProgress(prev=>{
         if(!prev||prev.page!==currentPage) return {type:activePipeType,points:[{x:nx,y:ny}],page:currentPage};
@@ -13300,15 +13305,6 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
               <canvas ref={overlayRef}
                 style={{position:'absolute',top:0,left:0,cursor:legendDragRef.current?'grabbing':(mode==='place'||mode==='pipe')?'crosshair':'default',touchAction:'none'}}
                 onClick={handleOverlayClick}
-                onDoubleClick={e=>{
-                  const canvas=overlayRef.current; if(!canvas) return;
-                  const rect=canvas.getBoundingClientRect();
-                  const nx=(e.clientX-rect.left)/rect.width, ny=(e.clientY-rect.top)/rect.height;
-                  const sz=Math.round(symSize*Math.max(0.6,scale/1.5));
-                  const thr=(sz/canvas.width)*1.6;
-                  const hit=markers.filter(m=>m.page===currentPage).find(m=>Math.abs(m.x-nx)<thr&&Math.abs(m.y-ny)<thr);
-                  if(hit) setLabelEdit({id:hit.id,value:getTakeoffLabel(hit,markers,prefixes,globalPrefix,toolKind)});
-                }}
                 onMouseDown={handleCanvasMouseDown}
                 onMouseMove={handleCanvasMouseMove}
                 onMouseUp={handleCanvasMouseUp}
