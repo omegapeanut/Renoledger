@@ -553,20 +553,21 @@ function drawTakeoffLabel(ctx, label, cx, cy, sz, color, pos, vertical){
 // For the network/data tool, show just the 2-digit number (no letter prefix).
 // Otherwise each type has its own sequence (electrical mode).
 function getTakeoffLabel(marker, markers, prefixes, globalPrefix, toolKind){
-  if(marker.customLabel) return marker.customLabel; // manual override (double-click to set)
-  if(toolKind==='network'){
-    const sameType=markers.filter(m=>m.type===marker.type);
-    const idx=sameType.findIndex(m=>m.id===marker.id);
-    return String(idx+1).padStart(2,'0');
-  }
+  if(marker.customLabel) return marker.customLabel; // manual override (Ctrl+click to set)
+  // marker.seq is the assigned sequence number (settable via the "Next #" box);
+  // older markers without seq fall back to their positional index.
   if(globalPrefix!==undefined){
-    const idx=markers.findIndex(m=>m.id===marker.id);
-    return globalPrefix+String(idx+1).padStart(2,'0');
+    const n=marker.seq!=null?marker.seq:markers.findIndex(m=>m.id===marker.id)+1;
+    return globalPrefix+String(n).padStart(2,'0');
   }
-  const sameType=markers.filter(m=>m.type===marker.type);
-  const idx=sameType.findIndex(m=>m.id===marker.id);
+  const seqOrIdx=()=>{
+    if(marker.seq!=null) return marker.seq;
+    const sameType=markers.filter(m=>m.type===marker.type);
+    return sameType.findIndex(m=>m.id===marker.id)+1;
+  };
+  if(toolKind==='network') return String(seqOrIdx()).padStart(2,'0');
   const prefix=prefixes[marker.type]||marker.type;
-  return prefix+String(idx+1).padStart(3,'0');
+  return prefix+String(seqOrIdx()).padStart(3,'0');
 }
 
 const DASH_WIDGETS = [
@@ -11845,6 +11846,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const [stickyLabelPos,setStickyLabelPos]=useState('right');
   const [labelEdit,setLabelEdit]=useState(null); // {id,value} while renaming a symbol via double-click
   const [fullscreen,setFullscreen]=useState(true); // hide app nav for more drawing space
+  const [numStart,setNumStart]=useState({}); // per-type override for the next sequence number
 
   useEffect(()=>{
     const h=()=>setIsMobile(window.innerWidth<700);
@@ -12277,6 +12279,16 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   },[counts,legendPos,pipes]);
 
   // ── Snap-to-alignment helper ───────────────────────────────────────────────
+  // Next sequence number for a tool: user override (numStart) else derived from the
+  // highest existing seq (or count) so auto-numbering continues where it left off.
+  const computeNextNum=useCallback((tool)=>{
+    const isGlobalSeq=globalPrefix!==undefined;
+    const seqKey=isGlobalSeq?'__all':tool;
+    const same=isGlobalSeq?markers:markers.filter(m=>m.type===tool);
+    const derived=Math.max(same.reduce((mx,m)=>Math.max(mx,m.seq||0),0),same.length)+1;
+    return {seqKey,n:numStart[seqKey]!=null?numStart[seqKey]:derived};
+  },[markers,globalPrefix,numStart]);
+
   const getSnapped=useCallback((nx,ny,canvas)=>{
     if(!snapEnabled) return {x:nx,y:ny,snapX:false,snapY:false};
     const SNAP_PX=14;
@@ -12391,7 +12403,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       return;
     } else if(mode==='place'&&activeTool){
       const {x:sx,y:sy}=getSnapped(nx,ny,canvas);
-      pushHistory([...markers,{id:uid(),page:currentPage,x:sx,y:sy,type:activeTool,labelPos:stickyLabelPos}]);
+      const {seqKey,n}=computeNextNum(activeTool);
+      pushHistory([...markers,{id:uid(),page:currentPage,x:sx,y:sy,type:activeTool,labelPos:stickyLabelPos,seq:n}]);
+      setNumStart(prev=>({...prev,[seqKey]:n+1}));
     } else if(mode==='link'){
       if(!hit){setLinkStartId(null);return;} // click empty → cancel
       if(!linkStartId){setLinkStartId(hit.id);return;} // first click → set start
@@ -13000,6 +13014,19 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           <button onClick={undo} disabled={!canUndo} style={{padding:'6px 10px',border:`1px solid ${T.borderLight}`,borderRadius:6,cursor:canUndo?'pointer':'default',opacity:canUndo?1:0.35,background:T.bg,color:T.text,fontSize:15}}>↩</button>
           <button onClick={redo} disabled={!canRedo} style={{padding:'6px 10px',border:`1px solid ${T.borderLight}`,borderRadius:6,cursor:canRedo?'pointer':'default',opacity:canRedo?1:0.35,background:T.bg,color:T.text,fontSize:15}}>↪</button>
         </div>}
+        {/* Next number — sets the sequence number the next placed symbol gets */}
+        {mode==='place'&&activeTool&&(()=>{
+          const {seqKey,n}=computeNextNum(activeTool);
+          return (
+            <label title="The number the next placed symbol will get — edit to continue counting from any value"
+              style={{display:'flex',alignItems:'center',gap:5,fontSize:11,fontWeight:600,color:T.muted,userSelect:'none'}}>
+              Next #
+              <input type="number" min={1} value={n}
+                onChange={e=>{const v=parseInt(e.target.value);setNumStart(prev=>({...prev,[seqKey]:isNaN(v)?1:Math.max(1,v)}));}}
+                style={{width:58,border:`1px solid ${T.borderLight}`,borderRadius:6,padding:'4px 6px',fontSize:12,background:T.bg,color:T.text,fontFamily:'inherit'}}/>
+            </label>
+          );
+        })()}
         {/* Snap toggle — turns off the blue alignment guide lines */}
         <label title="Snap symbols to align with existing ones (blue guide lines)"
           style={{display:'flex',alignItems:'center',gap:5,fontSize:11,fontWeight:600,color:T.muted,cursor:'pointer',userSelect:'none',padding:'0 4px'}}>
