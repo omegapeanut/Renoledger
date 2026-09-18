@@ -511,13 +511,26 @@ function drawTakeoffSymbol(ctx, typeId, cx, cy, sz, color, alpha=1){
 }
 
 // Draw the label (number) beside a symbol. pos: 'right'|'left'|'top'|'bottom'
-function drawTakeoffLabel(ctx, label, cx, cy, sz, color, pos){
+// vertical: when true and pos is left/right, the number is rotated 90° (reads top-to-bottom)
+function drawTakeoffLabel(ctx, label, cx, cy, sz, color, pos, vertical){
   pos=pos||'right';
   ctx.save();
   const fs=Math.max(9,Math.round(sz*0.62));
   ctx.font=`bold ${fs}px Arial`;
   const tw=ctx.measureText(label).width;
   const r=sz/2+3;
+  // Rotate the number vertically when placed on the left/right side
+  if(vertical&&(pos==='left'||pos==='right')){
+    ctx.translate(pos==='left'?cx-r-fs*0.55:cx+r+fs*0.55,cy);
+    ctx.rotate(Math.PI/2);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle='rgba(255,255,255,0.88)';
+    ctx.fillRect(-tw/2-2,-fs*0.62,tw+4,fs*1.24);
+    ctx.fillStyle=color;
+    ctx.fillText(label,0,1);
+    ctx.restore();
+    return;
+  }
   let tx,ty,rx;
   if(pos==='left'){
     tx=cx-r; ty=cy; ctx.textAlign='right'; ctx.textBaseline='middle'; rx=tx-tw-1;
@@ -537,8 +550,14 @@ function drawTakeoffLabel(ctx, label, cx, cy, sz, color, pos){
 
 // Compute the display label for a marker.
 // If globalPrefix is provided (plumbing mode), all markers share one running sequence D01…Dxx.
+// For the network/data tool, show just the 2-digit number (no letter prefix).
 // Otherwise each type has its own sequence (electrical mode).
-function getTakeoffLabel(marker, markers, prefixes, globalPrefix){
+function getTakeoffLabel(marker, markers, prefixes, globalPrefix, toolKind){
+  if(toolKind==='network'){
+    const sameType=markers.filter(m=>m.type===marker.type);
+    const idx=sameType.findIndex(m=>m.id===marker.id);
+    return String(idx+1).padStart(2,'0');
+  }
   if(globalPrefix!==undefined){
     const idx=markers.findIndex(m=>m.id===marker.id);
     return globalPrefix+String(idx+1).padStart(2,'0');
@@ -11573,7 +11592,7 @@ function ToolsHub({acctSettings, projects, isAdmin, onShowToast, onSoftDelete, m
         onSave={(t)=>{savePower(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
     );
     if(editingKind==='network') return(
-      <TakeoffEditor key={editing?.id||'new-nw'} takeoff={editing} symbolTypes={NETWORK_TYPES}
+      <TakeoffEditor key={editing?.id||'new-nw'} takeoff={editing} symbolTypes={NETWORK_TYPES} toolKind="network"
         onSave={(t)=>{saveNetwork(t);setEditing(t);}} onBack={()=>setEditing(null)} projects={projects} acctSettings={acctSettings}/>
     );
     if(editingKind==='aircon') return(
@@ -12013,7 +12032,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         ctx.beginPath(); ctx.arc(cx,cy,sz/2+6,0,Math.PI*2); ctx.stroke(); ctx.restore();
       }
       drawTakeoffSymbol(ctx,m.type,cx,cy,sz,color);
-      drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes,globalPrefix),cx,cy,sz,color,m.labelPos);
+      drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes,globalPrefix,toolKind),cx,cy,sz,color,m.labelPos,toolKind==='network');
       // Highlight link start
       if(mode==='link'&&m.id===linkStartId){
         ctx.save(); ctx.strokeStyle='#f97316'; ctx.lineWidth=2.5; ctx.setLineDash([3,2]);
@@ -12554,7 +12573,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'WM': dR(); dC(h*0.5); break;
             default:   dR(); break;
           }
-          const lbTxt=getTakeoffLabel(m,markers,prefixes,globalPrefix);
+          const lbTxt=getTakeoffLabel(m,markers,prefixes,globalPrefix,toolKind);
           const lbSz=Math.max(3.5,symSzPt*0.38);
           const lbW=font.widthOfTextAtSize(lbTxt,lbSz)+2;
           const lbH=lbSz*1.2;
