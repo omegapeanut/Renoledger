@@ -11840,6 +11840,9 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
   const renderingRef=useRef(false);
   const legendDragRef=useRef(null); // {offsetX,offsetY} normalized
   const didDragLegendRef=useRef(false);
+  const dragMarkerRef=useRef(null); // {id,moved} while dragging a marker in select mode
+  const didDragMarkerRef=useRef(false); // suppress the click after a marker drag
+  const markersRef=useRef([]); // latest markers, for reading final positions on mouse-up
   const pdfUploadRef=useRef(null); // pending Cloudinary upload promise
   const [isMobile,setIsMobile]=useState(()=>typeof window!=='undefined'&&window.innerWidth<700);
   const [showPanel,setShowPanel]=useState(false);
@@ -11863,6 +11866,8 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     setMarkers(newMarkers);
     setHistoryState({canUndo:h.index>0,canRedo:false});
   },[]);
+
+  useEffect(()=>{markersRef.current=markers;},[markers]);
 
   const undo=useCallback(()=>{
     const h=historyRef.current;
@@ -12311,8 +12316,17 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
     if(box&&mx>=box.x&&mx<=box.x+box.w&&my>=box.y&&my<=box.y+box.h){
       legendDragRef.current={offsetX:(mx-box.x)/canvas.width,offsetY:(my-box.y)/canvas.height};
       e.preventDefault();
+      return;
     }
-  },[getLegendBox]);
+    // Select mode: grab a marker to drag it
+    if(mode==='select'){
+      const nx=mx/rect.width, ny=my/rect.height;
+      const sz=Math.round(symSize*Math.max(0.6,scale/1.5));
+      const thr=(sz/canvas.width)*1.6;
+      const hit=markers.filter(m=>m.page===currentPage).find(m=>Math.abs(m.x-nx)<thr&&Math.abs(m.y-ny)<thr);
+      if(hit){ dragMarkerRef.current={id:hit.id,moved:false}; e.preventDefault(); }
+    }
+  },[getLegendBox,mode,markers,currentPage,symSize,scale]);
 
   const handleCanvasMouseMove=useCallback((e)=>{
     const canvas=overlayRef.current; if(!canvas) return;
@@ -12323,13 +12337,25 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
       setLegendPos({x:Math.max(0,Math.min(0.88,nx-offsetX)),y:Math.max(0,Math.min(0.88,ny-offsetY))});
       return;
     }
+    if(dragMarkerRef.current){
+      const{id}=dragMarkerRef.current;
+      if(!dragMarkerRef.current.moved){ dragMarkerRef.current.moved=true; setSelectedIds(new Set([id])); }
+      const snapped=getSnapped(nx,ny,canvas);
+      setMarkers(prev=>prev.map(m=>m.id===id?{...m,x:snapped.x,y:snapped.y}:m));
+      setCursorPos(snapped);
+      return;
+    }
     setCursorPos(getSnapped(nx,ny,canvas));
   },[getSnapped]);
 
   const handleCanvasMouseUp=useCallback(()=>{
     if(legendDragRef.current) didDragLegendRef.current=true;
     legendDragRef.current=null;
-  },[]);
+    if(dragMarkerRef.current){
+      if(dragMarkerRef.current.moved){ didDragMarkerRef.current=true; pushHistory(markersRef.current); }
+      dragMarkerRef.current=null;
+    }
+  },[pushHistory]);
 
   // ── Interactions ──────────────────────────────────────────────────────────
   const loadFile=async(file)=>{
@@ -12378,6 +12404,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
 
   const handleOverlayClick=(e)=>{
     if(didDragLegendRef.current){didDragLegendRef.current=false;return;}
+    if(didDragMarkerRef.current){didDragMarkerRef.current=false;return;}
     const canvas=overlayRef.current; if(!canvas) return;
     const rect=canvas.getBoundingClientRect();
     const nx=(e.clientX-rect.left)/rect.width, ny=(e.clientY-rect.top)/rect.height;
@@ -12921,9 +12948,10 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             </button>
           )}
           <button onClick={()=>{setMode('select');setSelectedIds(new Set());setLinkStartId(null);setPipeInProgress(null);setAreaInProgress(null);}}
+            title="Select / Move: click a point to select (no new point added), drag to move it, press Delete to remove it"
             style={{padding:'5px 11px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',display:'flex',alignItems:'center',gap:5,
               background:mode==='select'?T.text:'transparent',color:mode==='select'?T.bg:T.muted,transition:'all 0.15s'}}>
-            <MousePointer size={11}/>Select
+            <Move size={11}/>Select / Move
           </button>
           {hasPipeMode&&(
             <button onClick={()=>{setMode('pipe');setSelectedIds(new Set());setLinkStartId(null);}}
@@ -13330,7 +13358,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             <div style={{position:'relative',display:'inline-block',boxShadow:'0 4px 24px rgba(0,0,0,0.25)',lineHeight:0}}>
               <canvas ref={pdfCanvasRef} style={{display:'block'}}/>
               <canvas ref={overlayRef}
-                style={{position:'absolute',top:0,left:0,cursor:legendDragRef.current?'grabbing':(mode==='place'||mode==='pipe')?'crosshair':'default',touchAction:'none'}}
+                style={{position:'absolute',top:0,left:0,cursor:legendDragRef.current?'grabbing':mode==='select'?'move':(mode==='place'||mode==='pipe')?'crosshair':'default',touchAction:'none'}}
                 onClick={handleOverlayClick}
                 onMouseDown={handleCanvasMouseDown}
                 onMouseMove={handleCanvasMouseMove}
