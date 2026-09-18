@@ -12043,7 +12043,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
         ctx.beginPath(); ctx.arc(cx,cy,sz/2+6,0,Math.PI*2); ctx.stroke(); ctx.restore();
       }
       drawTakeoffSymbol(ctx,m.type,cx,cy,sz,color);
-      drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes,globalPrefix,toolKind),cx,cy,sz,color,m.labelPos,toolKind==='network');
+      drawTakeoffLabel(ctx,getTakeoffLabel(m,markers,prefixes,globalPrefix,toolKind),cx,cy,sz,color,m.labelPos,false);
       // Highlight link start
       if(mode==='link'&&m.id===linkStartId){
         ctx.save(); ctx.strokeStyle='#f97316'; ctx.lineWidth=2.5; ctx.setLineDash([3,2]);
@@ -12635,7 +12635,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
           const lbW=font.widthOfTextAtSize(lbTxt,lbSz)+2;
           const lbH=lbSz*1.2;
           const lbPos=m.labelPos||'right';
-          const lbVertical=(toolKind==='network')&&(lbPos==='left'||lbPos==='right');
+          const lbVertical=false; // labels always horizontal (all positions) so long text fits
           const gap=h+1;
           if(lbVertical){
             // Number rotated to read top-to-bottom (matches on-screen), centred on the symbol
