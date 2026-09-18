@@ -12591,6 +12591,12 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             case 'WP': dR(); dL(-h+1,h*0.1,h-1,h*0.1); dT('WP',h*0.7); break;
             case 'DB': dR(); dT('DB',h); break;
             // ── Network extras ────────────────────────────────────────────────
+            case 'DA': dR(); dT('D',h*1.2); break;
+            case 'TP': dR(); dT('T',h*1.2); break;
+            case 'TV':
+              page.drawRectangle({x:px-h,y:py-h*0.65,width:symSzPt,height:symSzPt*0.6,borderColor:col,borderWidth:1,color:undefined});
+              page.drawLine({start:{x:px,y:py+h*0.55},end:{x:px-h*0.55,y:py+h},color:col,thickness:1});
+              page.drawLine({start:{x:px,y:py+h*0.55},end:{x:px+h*0.55,y:py+h},color:col,thickness:1}); break;
             case 'FB':
               page.drawLine({start:{x:px,y:py+h},end:{x:px+h,y:py},color:col,thickness:1});
               page.drawLine({start:{x:px+h,y:py},end:{x:px,y:py-h},color:col,thickness:1});
@@ -12625,7 +12631,7 @@ function TakeoffEditor({takeoff, onSave, onBack, projects, acctSettings, symbolT
             default:   dR(); break;
           }
           const lbTxt=getTakeoffLabel(m,markers,prefixes,globalPrefix,toolKind);
-          const lbSz=Math.max(3.5,symSzPt*0.38);
+          const lbSz=Math.max(6,symSzPt*0.6);
           const lbW=font.widthOfTextAtSize(lbTxt,lbSz)+2;
           const lbH=lbSz*1.2;
           const lbPos=m.labelPos||'right';
